@@ -2068,7 +2068,7 @@ CI（ubuntu-latest は 24.04 で userns が制限されている）と、名前�
 
 ### 8.10 canary と隔離の点検の決め事（Issue 15 の着手前の設計レビューで決めたこと）
 
-8.4・8.5 だけでは決まらない 7 点を決める。中身は `host/src/roles/maker.ts`・`judge.ts`（canary）、`host/src/model/invoke.ts`（`jobs/`）、`host/src/checks/isolation.ts`（隔離の点検）、`host/src/model/sandbox.ts`（対照の起こし方）、設定の面と入口・承認の帯。作らないもの: 「別の目での検品: そろっています」の表示（S3）、「接続と合図」の接続の欄（S5）、点検の結果で作り手を止めること（(4) の最後）。
+8.4・8.5 だけでは決まらない 7 点を決める。中身は `host/src/roles/maker.ts`・`judge.ts`（canary）、`host/src/model/invoke.ts`（`jobs/`）、`host/src/checks/isolation.ts`（隔離の点検）、`host/src/model/sandbox.ts`（対照の起こし方）、設定の面と入口・承認の帯。作らないもの: 「別の目での検品: そろっています」の表示（S3）、「接続と合図」の接続の欄（S5）、点検の結果で作り手を止めること（(4) の最後。オーナー判断で表示だけ）。
 
 **(1) canary を見る場所**
 
@@ -2107,7 +2107,7 @@ CI（ubuntu-latest は 24.04 で userns が制限されている）と、名前�
 - 結果（`isolation.json`。token は書かない）: `session`（本番が `ok`）、`reached`（本番の返答に届いた印の語がある = 作業場を実際に読んだ）、`hidden`（本番の**全回の**返答（言い直しの前の回も。`onReply`）と、**対照を流す前の**作業場の全ファイルに token が無い。対照は同じ作業場で語を読めるので、後で見ると対照が書いたものを本番の漏れに数える）、`homeOk`（返答のホームの名前が、その呼び出しの srt の `allowRead` のうちホームの下にあるものの一番上の名前と `.claude.json` だけ。`createSandbox().homeNames()`）、`control`（対照の**どの回の**返答にも token がある。出力の形が通らなくても語が出れば検出の経路は生きているので、`ok` は問わない。実機で haiku が JSON を前置き付きの ``` で包み、2 回とも形が通らずに `unknown` になった）、`extraHome`（許していないのに見えた名前。画面には出さない）。
 - **判定** `verdict` は見えた証拠を先にする: `session` で token が見えた（`hidden` が偽）→ `visible`。`session`・`reached` でホームに許していない名前があった → `visible`。それ以外で `session`・`reached`・`control` のどれかが偽 → `unknown`（確かめられなかった）。全部そろって → `hidden`。`broken` のときと Claude の版が足りないときは呼ばずに `unknown`。
 - いつ: 起動時（`runner.resume()` の後に裏で 1 回。待たない）と `POST /api/checks/run`（`202 {}`）。同時に 1 本（走っている間の `POST` は同じ 1 本に乗る）。`runs.open('点検')`・`runs.watch`・`runs.close` で包み、「すべて停止」で切る（切れたら `isolation.json` を書かない）。止めている間の `POST` は `409 { reason: 'stopped' }`。始まりと終わりに SSE `connections.changed`。裏の失敗は log に出して `running` を下ろす。
-- 点検で `visible` が出ても**作り手は止めない**（表示だけ）。理由: 点検はモデルの返答に頼るので誤りうる。案件ごとの canary（(1)）が実害の手前で止める。止めるかは体験を変える判断なので、オーナーに仰ぐ。
+- 点検で `visible` が出ても**作り手は止めない**（表示だけ）。理由: 点検はモデルの返答に頼るので誤りうる。案件ごとの canary（(1)）が実害の手前で止める。**オーナー判断（2026-10-24）: 表示だけにする（作り手は止めない）**。
 
 **(5) `GET /api/connections`**
 
