@@ -599,7 +599,7 @@ describe('文体カード（6.3.2）', () => {
   // 依頼書の書く内容にも見本の URL がある（出典として取り寄せない）
   const matching = {
     ...briefDraft,
-    brief: { ...briefDraft.brief, voice: '合わせる', subject: `${briefDraft.brief.subject}。参考 ${VOICE_URL}` },
+    brief: { ...briefDraft.brief, voice: '合わせる', subject: `${briefDraft.brief.subject}。参考 ${VOICE_URL}#part` },
   }
   const plainChecks = [
     ...runnerChecks,

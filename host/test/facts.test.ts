@@ -295,6 +295,9 @@ describe('取り寄せ（6.3.1 (5)）', () => {
     expect(htmlText('<ul><li><p>中に段落のある項目</p></li></ul><p>本文です。</p>').md).toBe(
       '- 中に段落のある項目\n\n本文です。',
     )
+    expect(htmlText('<ol><li><p>一つ目</p><p>続き</p></li><li>二つ目</li></ol><p>後</p>').md).toBe(
+      '- 一つ目 続き\n\n- 二つ目\n\n後',
+    )
   })
 
   let http: Server

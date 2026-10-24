@@ -23,7 +23,9 @@ const URL_IN_TEXT = /https?:\/\/[^\s<>"'()[\]（）」』、。]+/g
 const MAX_SOURCES = 5
 const sameUrl = (u: string) => {
   try {
-    return new URL(u).href
+    const x = new URL(u)
+    x.hash = '' // 同じページの中の場所違いも同じ見本
+    return x.href
   } catch {
     return u
   }

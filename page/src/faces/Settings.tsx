@@ -1,7 +1,7 @@
 // 設定の面（画面 7）。API キーの節（docs/implementation.md 6.1.3 (6)。値は画面のどこにも出さない。設計書 D17）と
 // 動作環境の確認の節（8.10 (6)）
 import { type ApiKeyStatus, ConnectionsView, MaterialRef, Settings as SettingsSchema } from '@libretto/shared/api'
-import { useId, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import { z } from 'zod'
 import { send, useLoad } from '../load.ts'
 import { Confirm } from '../parts/Dialog.tsx'
@@ -173,21 +173,27 @@ const Samples = z.object({ samples: z.array(MaterialRef) })
 type Sample = z.infer<typeof MaterialRef>
 const MAX_SAMPLES = 5
 type VoiceNotice = 'saved' | 'invalid' | 'failed'
-async function putSamples(samples: { title: string; url: string }[]): Promise<'saved' | 'invalid' | 'failed'> {
+async function putSamples(samples: { title: string; url: string }[]): Promise<Sample[] | 'invalid' | 'failed'> {
   try {
     const res = await fetch('/api/settings/voice-samples', {
       method: 'PUT',
       headers: { 'content-type': 'application/json', accept: 'application/json' },
       body: JSON.stringify({ samples }),
     })
-    return res.ok ? 'saved' : res.status === 400 ? 'invalid' : 'failed'
+    if (res.status === 400) return 'invalid'
+    if (!res.ok) return 'failed'
+    const r = Samples.safeParse(await res.json())
+    return r.success ? r.data.samples : 'failed'
   } catch {
     return 'failed'
   }
 }
 
-function VoiceSection({ samples, reload }: { samples: Sample[]; reload: () => void }) {
+function VoiceSection({ samples: loaded, reload }: { samples: Sample[]; reload: () => void }) {
   const id = useId()
+  // 保存の応答で一覧を置き換える（取り直しを待たずに次の操作をしても、古い一覧から送らない）
+  const [samples, setSamples] = useState(loaded)
+  useEffect(() => setSamples(loaded), [loaded])
   const [title, setTitle] = useState('')
   const [url, setUrl] = useState('')
   const [busy, setBusy] = useState(false)
@@ -197,8 +203,9 @@ function VoiceSection({ samples, reload }: { samples: Sample[]; reload: () => vo
     setNotice(undefined)
     const r = await putSamples(next)
     setBusy(false)
-    setNotice(r)
-    if (r === 'saved') {
+    setNotice(Array.isArray(r) ? 'saved' : r)
+    if (Array.isArray(r)) {
+      setSamples(r)
       if (added) {
         setTitle('')
         setUrl('')
