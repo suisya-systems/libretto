@@ -67,7 +67,11 @@ if (def.google)
     JSON.stringify({
       refreshToken: 'shoot',
       email: 'me@example.com',
-      scopes: [],
+      // 'gmail' は Gmail だけの前の連携（Google ドキュメントには連携し直しが要る。6.5 (2)）
+      scopes:
+        def.google === 'gmail'
+          ? ['https://www.googleapis.com/auth/gmail.readonly']
+          : ['https://www.googleapis.com/auth/gmail.readonly', 'https://www.googleapis.com/auth/drive.file'],
       savedAt: '2026-10-24T09:00:00.000+09:00',
     }),
   )
@@ -75,7 +79,7 @@ const google = createGoogle({
   home,
   ...(def.google && { config: { clientId: 'shoot', clientSecret: 'shoot' } }),
   redirectUri: `${origin}/oauth/google/callback`,
-  endpoints: { token: `${origin}/no-google`, gmail: `${origin}/no-google` },
+  endpoints: { token: `${origin}/no-google`, gmail: `${origin}/no-google`, drive: `${origin}/no-google` },
 })
 const server = createServer({
   home,

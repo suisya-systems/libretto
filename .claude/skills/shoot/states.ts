@@ -38,7 +38,7 @@ export type State = {
   isolation?: { level: HostStatus['isolation']; cause?: IsolationCause; last?: IsolationRecord }
   fetch?: Fetch // 出典の取り寄せの偽物（網に出ない。6.3.1 (5)）
   voiceSamples?: { title: string; url: string }[] // 会話の前に「あなたの文体の見本」を登録しておく（6.3.2 (10)）
-  google?: true // Google と連携済みにする（偽の設定と google.json。Google へはつながない。6.4 (7)）
+  google?: true | 'gmail' // Google と連携済みにする（偽の設定と google.json。Google へはつながない。6.4 (7)）。'gmail' は Drive の許可の無い前の連携（6.5 (2)）
 }
 
 const at = (h: number) => `2026-10-24T${String(h).padStart(2, '0')}:05:00.000+09:00`
@@ -95,8 +95,8 @@ const done = {
     destinations: ['paste', 'page'],
   },
 }
-const entrance = (brief: unknown = briefDraft): Row[] => [
-  ['話し相手', say(done)],
+const entrance = (brief: unknown = briefDraft, intake: unknown = done): Row[] => [
+  ['話し相手', say(intake)],
   ['下書き役・依頼書', say(brief)],
   ['下書き役・確認項目', say({ checks: goodChecks })],
   ['事実係・分類', say(classified)],
@@ -407,6 +407,15 @@ export const STATES: Record<string, State> = {
     path: () => '/settings',
     sameFirst390: true,
   },
+  // 設定: Gmail だけで連携していて、Google ドキュメントには連携し直しが要る（6.5 (2)）
+  'settings-google-docs': {
+    script: entrance(),
+    google: 'gmail',
+    expect: (v) => v.state === '入口待ち',
+    mark: W['settings.google.docsMissing'],
+    path: () => '/settings',
+    sameFirst390: true,
+  },
   // 設定: API キーが未設定
   'settings-unset': {
     script: entrance(),
@@ -595,6 +604,21 @@ export const STATES: Record<string, State> = {
     expect: (v) => v.state === '送付確認待ち' && v.turn === '本人',
     mark: W['deliver.looksHeading'],
     selector: '.paste-preview',
+  },
+  // 送付の確認: 保存先に Google ドキュメントがある（6.5 (8)）。保存は Google につながるので撮らない
+  'deliver-gdoc': {
+    script: [
+      ...entrance(briefDraft, { ...done, intake: { ...done.intake, destinations: ['page', 'gdoc'] } }),
+      draft(1),
+      verdicts(1, false),
+      draft(2),
+      verdicts(2, true),
+    ],
+    google: true,
+    drive: toDeliver,
+    expect: (v) =>
+      v.state === '送付確認待ち' && v.turn === '本人' && v.deliveryPlan.targets.some((t) => t.kind === 'gdoc'),
+    mark: W['dest.gdoc'],
   },
   // 成果: 保存して完了
   done: {
