@@ -1,0 +1,128 @@
+// ホストの写しを読む（docs/implementation.md 5.1・5.7 (2)・5.8 (1)(3)）。
+// 取り直しは前の取得を打ち切ってから始め、後から始めた取得だけを画面に入れる
+import { SseData } from '@libretto/shared/api'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import type { z } from 'zod'
+
+export type Problem = 'offline' | 'not_paired' | 'not_found' | 'failed'
+export type Loaded<T> = { data?: T; problem?: Problem }
+
+export type SseEvent = keyof typeof SseData
+// open は SSE がつながったとき。open と resync は全部の面が取り直す
+type Signal = { event: SseEvent | 'open'; data: unknown }
+type Listener = (s: Signal) => void
+const listeners = new Set<Listener>()
+const offlineListeners = new Set<(offline: boolean) => void>()
+
+// EventSource は切れたら自分でつなぎ直すが、5xx などで閉じたら（CLOSED）もうつながない。
+// そのときは 1 秒から倍々に 30 秒まで空けて作り直す（ホストを起こし直したら戻る）
+export function connectEvents(url = '/api/events') {
+  const fire = (s: Signal) => {
+    for (const l of listeners) l(s)
+  }
+  const offline = (v: boolean) => {
+    for (const l of offlineListeners) l(v)
+  }
+  let es: EventSource
+  let retry: ReturnType<typeof setTimeout> | undefined
+  let delay = 1_000
+  const open = () => {
+    es = new EventSource(url)
+    es.addEventListener('open', () => {
+      delay = 1_000
+      offline(false)
+      fire({ event: 'open', data: {} })
+    })
+    es.addEventListener('error', () => {
+      offline(true)
+      if (es.readyState !== EventSource.CLOSED) return
+      retry = setTimeout(open, delay)
+      delay = Math.min(delay * 2, 30_000)
+    })
+    for (const event of Object.keys(SseData) as SseEvent[])
+      es.addEventListener(event, (e) => {
+        let data: unknown
+        try {
+          data = JSON.parse((e as MessageEvent<string>).data)
+        } catch {
+          data = {}
+        }
+        fire({ event, data })
+      })
+  }
+  open()
+  return () => {
+    clearTimeout(retry)
+    es.close()
+  }
+}
+
+export function useOffline() {
+  const [offline, setOffline] = useState(false)
+  useEffect(() => {
+    offlineListeners.add(setOffline)
+    return () => {
+      offlineListeners.delete(setOffline)
+    }
+  }, [])
+  return offline
+}
+
+async function get<T>(path: string, schema: z.ZodType<T>, signal: AbortSignal): Promise<Loaded<T>> {
+  let res: Response
+  try {
+    res = await fetch(path, { signal, headers: { accept: 'application/json' } })
+  } catch {
+    return { problem: 'offline' }
+  }
+  if (res.status === 401) return { problem: 'not_paired' }
+  if (res.status === 404) return { problem: 'not_found' }
+  if (!res.ok) return { problem: 'failed' }
+  const parsed = schema.safeParse(await res.json().catch(() => undefined))
+  return parsed.success ? { data: parsed.data } : { problem: 'failed' }
+}
+
+// refetchOn: open・resync のほかに、この面が取り直す合図
+export function useLoad<T>(path: string, schema: z.ZodType<T>, refetchOn: (s: Signal) => boolean = () => false) {
+  const [state, setState] = useState<Loaded<T>>({})
+  const current = useRef<AbortController | null>(null)
+  const on = useRef(refetchOn)
+  on.current = refetchOn
+
+  const reload = useCallback(() => {
+    current.current?.abort()
+    const ac = new AbortController()
+    current.current = ac
+    void get(path, schema, ac.signal).then((r) => {
+      if (ac.signal.aborted) return
+      // 読めなかったときも、前に読めた中身は残す（5.8 (3)）
+      setState((s) => (r.data !== undefined ? r : { ...s, ...r }))
+    })
+  }, [path, schema])
+
+  useEffect(() => {
+    setState({})
+    reload()
+    const l: Listener = (s) => {
+      if (s.event === 'open' || s.event === 'resync' || on.current(s)) reload()
+    }
+    listeners.add(l)
+    return () => {
+      listeners.delete(l)
+      current.current?.abort() // 面を離れた後に届いた応答は入れない
+    }
+  }, [reload])
+
+  return { ...state, reload }
+}
+
+// 案件をまたぐ操作（停止・解除）。応答が返るまで呼ぶ側はボタンを押せなくする
+export async function send(method: 'POST' | 'DELETE', path: string): Promise<boolean> {
+  try {
+    const res = await fetch(path, { method, headers: { accept: 'application/json' } })
+    // 503 は「止まったが記録できない」。届いているので押し直させず、保存できない帯で知らせる（5.7 (3)(8)）
+    return res.ok || res.status === 503
+  } catch {
+    return false
+  }
+}

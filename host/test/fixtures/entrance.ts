@@ -1,0 +1,119 @@
+// 入口のテストの台本の中身（docs/implementation.md 6.2.2）。規則を全部満たす確認項目・依頼書・照合の答え
+import type { Check } from '@libretto/shared/checks'
+
+export const goodChecks: Check[] = [
+  {
+    id: 'C01',
+    category: '分量',
+    title: '本文は 2,200〜2,800 字',
+    judge: { by: 'code', fn: 'charCount', args: { min: 2200, max: 2800 } },
+    pass: { kind: 'all' },
+    phase: '本文',
+    summary: '分量が依頼の範囲から外れています',
+    hidden: false,
+    selfReport: '依頼に書いてある',
+  },
+  {
+    id: 'C02',
+    category: '依頼適合',
+    title: '初見の読者がブレストで決まったことを 3 行で言える',
+    judge: {
+      by: 'claude',
+      question: '初見の読者がブレストで決まったことを 3 行で言えるか',
+      materials: ['draft'],
+      scope: 'document',
+    },
+    pass: { kind: 'all' },
+    phase: '本文',
+    summary: '読み終えても決まったことが伝わりません',
+    hidden: true,
+    selfReport: '書いていない',
+    minority: { usual: '経緯を順に書く', chosen: '結論を先に書く' },
+  },
+  {
+    id: 'C03',
+    category: '構成',
+    title: '見出しは 4〜5 個',
+    judge: { by: 'code', fn: 'headingCount', args: { min: 4, max: 5 } },
+    pass: { kind: 'all' },
+    phase: '本文',
+    summary: '見出しの数が依頼と合っていません',
+    hidden: false,
+    selfReport: '依頼に書いてある',
+  },
+  {
+    id: 'C04',
+    category: '禁止事項',
+    title: '社名の実名を含む段落を数える',
+    judge: { by: 'code', fn: 'forbiddenStrings', args: { strings: ['アクメ社'] } },
+    pass: { kind: 'count', max: 0 },
+    phase: '本文',
+    summary: '書いてはいけない名前が入っています',
+    hidden: false,
+    selfReport: '依頼に書いてある',
+  },
+  {
+    id: 'C05',
+    category: '自然さ',
+    title: '文がすべてふだんの日本語で書かれている',
+    judge: {
+      by: 'claude',
+      question: '文がすべてふだんの日本語で書かれているか',
+      materials: ['draft'],
+      scope: 'document',
+    },
+    pass: { kind: 'all' },
+    phase: '本文',
+    summary: '翻訳したような言い回しが残っています',
+    hidden: true,
+    selfReport: '書いていない',
+    minority: { usual: 'やわらかい言い回し', chosen: '言い切る文' },
+  },
+  {
+    id: 'C06',
+    category: '依頼適合',
+    title: '段落が読者の次の行動を示している',
+    judge: { by: 'jev', proposition: 'この段落は読者の次の行動を示している', state: ['paragraph'], scope: 'paragraph' },
+    pass: { kind: 'ratio', min: 0.3 },
+    phase: '本文',
+    summary: '読者が次に何をすればよいかが書かれていません',
+    hidden: true,
+    selfReport: '書いていない',
+    minority: { usual: 'まとめで終える', chosen: '行動で終える' },
+  },
+]
+
+export const briefDraft = {
+  brief: {
+    subject: 'ブレストで決まった 3 つの方針と、その理由',
+    wanted: [],
+    audience: '一般の読者。前提知識なし',
+    shape: '2,500 字前後、見出し 4〜5',
+    voice: '合わせない',
+    sources: '出典なし',
+    mustNot: ['社名の実名'],
+  },
+  assumptions: [{ id: 'A1', text: '文末はです・ます', why: 'note の読者に合わせる' }],
+}
+
+export const classified = {
+  items: [
+    { checkId: 'C01', verdict: '決まる' },
+    {
+      checkId: 'C02',
+      verdict: '決まらない',
+      question: '読み終えた人に何を持ち帰ってほしいですか？',
+      options: [
+        { id: 'a', label: 'ブレストで決まったこと' },
+        { id: 'b', label: '次に試すこと' },
+        { id: 'c', label: 'ブレストで出た案の一覧' },
+      ],
+      multiple: true,
+      recommended: ['a', 'b'],
+    },
+    { checkId: 'C03', verdict: '食い違う', briefSays: '依頼書は見出しの数を決めていません' },
+    { checkId: 'C04', verdict: '決まる' },
+    { checkId: 'C05', verdict: '決まる' },
+    { checkId: 'C06', verdict: '決まる' },
+  ],
+}

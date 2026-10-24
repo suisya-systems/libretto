@@ -1,0 +1,821 @@
+// runner と作り手（docs/implementation.md 6.2.3・4.4・4.2 T11・T12・T16・T19）。fake の台本で HTTP を叩く
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { CaseView, DraftDiff } from '@libretto/shared/api'
+import { Review } from '@libretto/shared/checks'
+import { VersionManifest } from '@libretto/shared/ledger'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { transition } from '../src/case/transition.ts'
+import { charCount, headingCount } from '../src/checks/text.ts'
+import { caseDir, initHome } from '../src/ledger/db.ts'
+import type { Ledger } from '../src/ledger/ledger.ts'
+import { createFake, type ScriptEntry, type ScriptReply } from '../src/model/fake.ts'
+import { type Backend, createInvoke } from '../src/model/invoke.ts'
+import { judgeFormat, OUTPUT_FILES } from '../src/roles/judge.ts'
+import { MAKER_LIMITS } from '../src/roles/maker.ts'
+import { createServer } from '../src/server/app.ts'
+import { briefDraft, classified, goodChecks } from './fixtures/entrance.ts'
+
+const ORIGIN = 'http://127.0.0.1:7780'
+const TOKEN = 'abcdef0123456789abcdef0123456789'
+let home: string
+let ledger: Ledger
+let server: ReturnType<typeof createServer>
+let fake: ReturnType<typeof createFake>
+let cookie: string
+let n = 0
+const uuid = () => `00000000-0000-4000-8000-${String(++n).padStart(12, '0')}`
+
+type Role = ScriptEntry['role']
+const say = (v: unknown): ScriptReply => ({ text: JSON.stringify(v) })
+const intake = {
+  text: '受け付けます。',
+  intake: {
+    title: 'ブレストのまとめ',
+    summary: '先週のブレストを note 記事にまとめる',
+    docType: '記事',
+    audience: '一般の読者',
+    destinations: ['page'],
+  },
+}
+function script(...rows: [Role, ScriptReply][]): ScriptEntry[] {
+  const counts = new Map<Role, number>()
+  return rows.map(([role, reply]) => {
+    const nth = (counts.get(role) ?? 0) + 1
+    counts.set(role, nth)
+    return { role, nth, reply }
+  })
+}
+// 機械判定はどの本文でも通る組（字数・見出しの下限だけ）。判定役の Claude は hangJudge で止めておき、検品中に留める
+const runnerChecks = goodChecks.map((c) =>
+  c.id === 'C01'
+    ? { ...c, judge: { by: 'code' as const, fn: 'charCount' as const, args: { min: 1 } } }
+    : c.id === 'C03'
+      ? { ...c, judge: { by: 'code' as const, fn: 'headingCount' as const, args: { min: 0 } } }
+      : c,
+)
+const hung: string[] = [] // 止めておいた判定役の呼び出し（案件 id）
+const hangJudge =
+  (b: Backend): Backend =>
+  (call) =>
+    call.role === '判定役・文章'
+      ? new Promise(
+          (_, reject) =>
+            hung.push(call.caseId) &&
+            call.signal.addEventListener('abort', () => reject(call.signal.reason), { once: true }),
+        )
+      : b(call)
+const upToEntrance: [Role, ScriptReply][] = [
+  ['話し相手', say(intake)],
+  ['下書き役・依頼書', say(briefDraft)],
+  ['下書き役・確認項目', say({ checks: runnerChecks })],
+  ['事実係・分類', say(classified)],
+]
+const nn = (k: number) => String(k).padStart(2, '0')
+const BODY = '# ブレストのまとめ\n\n決まったことは 3 つです。\n\n## 1 つ目\n\n本文。\n'
+// 作り手の fake は作業場に 3 つを書く（6.2.3 (9)）
+const draft = (k: number, md = BODY): ScriptReply => ({
+  text: '書きました',
+  write: {
+    [`draft-${nn(k)}.md`]: md,
+    [`draft-${nn(k)}.html`]: '<h1>ブレストのまとめ</h1>',
+    [`draft-${nn(k)}.done`]: 'done',
+  },
+})
+
+async function setup(entries: ScriptEntry[], wrap: (b: Backend) => Backend = hangJudge, keepHome = false) {
+  n = keepHome ? n : 0
+  hung.length = 0
+  if (!keepHome) home = mkdtempSync(join(tmpdir(), 'libretto-runner-'))
+  ledger = initHome(home)
+  const staticDir = join(home, 'dist')
+  mkdirSync(staticDir, { recursive: true })
+  writeFileSync(join(staticDir, 'index.html'), '<div></div>')
+  fake = createFake(entries)
+  const invoke = createInvoke({
+    ledger,
+    backends: { claude: wrap(fake.backend) },
+    caps: () => ({ caseCapYen: 1500, monthCapYen: null }),
+    onCostCap: () => {},
+    log: () => {},
+    retryWaitMs: 0,
+    settleMs: 200,
+  })
+  server = createServer({
+    home,
+    ledger,
+    origins: [ORIGIN],
+    staticDir,
+    invoke,
+    log: () => {},
+    runsWaitMs: 500,
+    token: () => TOKEN,
+  })
+  const { url } = server.issuePairing('テスト')
+  const res = await server.app.request(new URL(url).pathname)
+  cookie = (res.headers.get('set-cookie') ?? '').split(';')[0] as string
+}
+afterEach(async () => {
+  await server?.runs.abortAll()
+  ledger?.close()
+})
+
+const get = (path: string) => server.app.request(path, { headers: { cookie } })
+const postJson = (path: string, body: unknown) =>
+  server.app.request(path, {
+    method: 'POST',
+    headers: { cookie, origin: ORIGIN, 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+const caseView = async (id: string) => CaseView.parse(await (await get(`/api/cases/${id}`)).json())
+const act = async (id: string, body: Record<string, unknown>) =>
+  postJson(`/api/cases/${id}/actions`, { eventId: uuid(), expectedRevision: (await caseView(id)).revision, ...body })
+const waitState = (id: string, state: string) =>
+  vi.waitFor(() => expect(ledger.getCase(id)?.state).toBe(state), { timeout: 2000, interval: 5 })
+const idle = () => vi.waitFor(() => expect(server.runner.running()).toEqual([]), { timeout: 2000, interval: 5 })
+const makerCalls = () => fake.calls.filter((c) => c.role === '作り手')
+const work = (id: string, name = '') => join(caseDir(home, id), 'work', name)
+
+// 会話で頼み、入口を承認して、runner に渡す（T5 → T6 → T8）
+async function approved(mode: '確認しながら' | 'おまかせ' = '確認しながら'): Promise<string> {
+  await postJson('/api/conversation/messages', { requestId: uuid(), lastSeq: 0, text: '記事にして' })
+  await server.conversation.settled()
+  const id = ledger.lastMessage('lobby')?.caseId as string
+  await vi.waitFor(() => expect(ledger.getCase(id)?.turn).toBe('本人'), { timeout: 2000, interval: 5 })
+  const v = await caseView(id)
+  const res = await act(id, {
+    type: 'entrance.approve',
+    answers: { U01: ['b'] },
+    mode,
+    setFingerprint: v.entrance?.setFingerprint,
+  })
+  expect(res.status).toBe(200)
+  return id
+}
+// 判定役（Issue 11）の代わりに、判定のファイルと遷移を置く
+function judged(id: string, pass: boolean, failedSummaries: string[] = []) {
+  const c = ledger.getCase(id)
+  if (!c) throw new Error('no case')
+  const review: Review = {
+    version: c.version,
+    series: c.series,
+    round: c.round + 1,
+    at: new Date().toISOString(),
+    phase: '本文',
+    attempt: 1,
+    results: [{ id: 'C01', verdict: pass ? 'pass' : 'fail', by: 'code', reasonRef: 'review-01-a.reasons.md#C01' }],
+    pass,
+    failedSummaries,
+    marks: [],
+    sources: [],
+  }
+  writeFileSync(join(caseDir(home, id), `review-${nn(c.version)}-a.json`), JSON.stringify(review))
+  writeFileSync(join(caseDir(home, id), `review-${nn(c.version)}-a.reasons.md`), '理由: 分量が 1,200 字で足りません')
+  const r = transition(ledger, {
+    type: pass ? 'review.pass' : 'review.fail',
+    n: c.version,
+    eventId: `${id}:review:${c.version}`,
+    caseId: id,
+    expectedRevision: c.revision,
+    by: 'libretto',
+  })
+  expect(r.ok).toBe(true)
+}
+const allWorkText = (id: string) =>
+  readdirSync(work(id), { recursive: true, withFileTypes: true })
+    .filter((e) => e.isFile())
+    .map((e) => readFileSync(join(e.parentPath, e.name), 'utf-8'))
+    .join('\n')
+
+describe('runner と作り手', () => {
+  it('T8 → T11 → T12: 承認した組で作業場を作り、作り手の版を versions/01/ に写して検品中へ', async () => {
+    await setup(script(...upToEntrance, ['作り手', draft(1)]))
+    const id = await approved()
+    await waitState(id, '検品中')
+    // 作業場は brief.md と空の materials/ だけ。確認項目の文と canary の語が無い（8.3・6.2.3 (2)）
+    const brief = readFileSync(work(id, 'brief.md'), 'utf-8')
+    expect(brief).toContain('- 書く内容: ブレストで決まった 3 つの方針と、その理由')
+    expect(brief).toContain('## 決めたこと')
+    expect(readdirSync(work(id, 'materials'))).toEqual([])
+    expect(existsSync(work(id, 'feedback.md'))).toBe(false)
+    const text = allWorkText(id)
+    for (const x of goodChecks) {
+      expect(text).not.toContain(x.title)
+      expect(text).not.toContain(x.summary)
+    }
+    expect(text).not.toContain(TOKEN)
+    // 作り手の呼び出し
+    const [call] = makerCalls()
+    expect(call).toMatchObject({ access: 'write', workdir: work(id), caseId: id })
+    expect(call?.instruction).toContain('draft-01.md')
+    expect(call?.instruction).not.toContain('feedback.md')
+    // 版の正本と指紋（4.6 (1)）
+    const m = VersionManifest.parse(
+      JSON.parse(readFileSync(join(caseDir(home, id), 'versions/01/manifest.json'), 'utf-8')),
+    )
+    expect(m.files.map((f) => f.path)).toEqual(['draft-01.html', 'draft-01.md'])
+    expect(ledger.getCase(id)).toMatchObject({ version: 1, versionFingerprint: m.fingerprint, turn: 'libretto' })
+    expect(readFileSync(join(caseDir(home, id), 'versions/01/draft-01.md'), 'utf-8')).toBe(BODY)
+    const v = await caseView(id)
+    expect(v.versions).toEqual([
+      {
+        n: 1,
+        at: m.at,
+        chars: charCount(BODY),
+        headings: headingCount(BODY),
+        fingerprint: m.fingerprint,
+        state: '検品中',
+      },
+    ])
+    expect(fake.unused()).toEqual([])
+  })
+
+  it('T16 の後: feedback.md は不合格の 1 行要約だけ。理由文は渡さない', async () => {
+    await setup(script(...upToEntrance, ['作り手', draft(1)], ['作り手', draft(2)]))
+    const id = await approved()
+    await waitState(id, '検品中')
+    const summaries = ['分量が依頼の範囲から外れています', '見出しの数が依頼と合っていません']
+    judged(id, false, summaries)
+    server.runner.kick(id)
+    await vi.waitFor(() => expect(ledger.getCase(id)).toMatchObject({ state: '検品中', version: 2 }))
+    const fb = readFileSync(work(id, 'feedback.md'), 'utf-8')
+    const lines = fb
+      .split('\n')
+      .filter((l) => l.startsWith('- '))
+      .map((l) => l.slice(2))
+    expect(new Set(lines)).toEqual(new Set(summaries))
+    expect(fb).not.toContain('1,200 字')
+    expect(fb).not.toContain('C01')
+    expect(makerCalls()[1]?.instruction).toContain('feedback.md')
+    // 直すところ以外は前のバージョンを保つ（実ホストの確認で、直せない指摘に合わせて削り、字数が範囲を外れた）
+    expect(makerCalls()[1]?.instruction).toContain('直すところ以外は前のバージョンのまま保ち')
+    expect(makerCalls()[1]?.instruction).toContain('draft-02.md')
+    // 前の版の判定が残る
+    expect((await caseView(id)).versions.map((x) => [x.n, x.state])).toEqual([
+      [1, '不合格'],
+      [2, '検品中'],
+    ])
+  })
+
+  it('T19 の後: feedback.md は本人の「ここを直して」の全文', async () => {
+    await setup(script(...upToEntrance, ['作り手', draft(1)], ['作り手', draft(2)]))
+    const id = await approved()
+    await waitState(id, '検品中')
+    judged(id, true)
+    expect(ledger.getCase(id)?.state).toBe('承認待ち')
+    const instruction = '2 つ目の方針は、具体例を 1 つ足してください。'
+    expect((await act(id, { type: 'approval.redo', instruction })).status).toBe(200)
+    await vi.waitFor(() => expect(ledger.getCase(id)?.version).toBe(2))
+    expect(readFileSync(work(id, 'feedback.md'), 'utf-8')).toContain(instruction)
+  })
+
+  it('再起動: .done があって T12 が無ければ、作り手を呼ばずに T12（4.4）', async () => {
+    await setup(script(...upToEntrance, ['作り手', { fail: 'hang' }]))
+    const id = await approved()
+    await vi.waitFor(() => expect(makerCalls()).toHaveLength(1))
+    // ホストが落ちる前に作り手が書き終えていた
+    for (const [name, text] of Object.entries((draft(1) as { write: Record<string, string> }).write))
+      writeFileSync(work(id, name), text)
+    // 書いた後に落ちた（runs を止めずに台帳を閉じる）。起こし直す
+    ledger.close()
+    const before = n
+    await setup([], hangJudge, true)
+    n = before
+    server.runner.resume()
+    await waitState(id, '検品中')
+    expect(makerCalls()).toEqual([])
+    expect(ledger.getCase(id)?.version).toBe(1)
+  })
+
+  it('再起動: 書きかけ（.done 無し）と前の系列が書き終えたものは partial に改名して作り直す', async () => {
+    await setup(script(...upToEntrance, ['作り手', { fail: 'hang' }]))
+    const id = await approved()
+    await vi.waitFor(() => expect(makerCalls()).toHaveLength(1))
+    writeFileSync(work(id, 'draft-01.md'), '書きかけ')
+    ledger.close()
+    await setup(script(['作り手', draft(1)]), hangJudge, true)
+    server.runner.resume()
+    await waitState(id, '検品中')
+    expect(readFileSync(work(id, 'draft-01.partial.md'), 'utf-8')).toBe('書きかけ')
+    expect(makerCalls()).toHaveLength(1)
+
+    // 系列が違う maker.json と揃った 3 つ（T7b の前に書き終えた版）も拾わない（6.2.3 (5)）
+    const c = ledger.getCase(id)
+    if (!c) throw new Error('no case')
+    judged(id, false, ['分量が依頼の範囲から外れています'])
+    await server.runs.abort(id)
+    await idle()
+    ledger.close()
+    await setup(script(['作り手', draft(2, '# 新しい系列\n')]), hangJudge, true)
+    for (const [name, text] of Object.entries((draft(2, '# 古い系列\n') as { write: Record<string, string> }).write))
+      writeFileSync(work(id, name), text)
+    writeFileSync(
+      join(caseDir(home, id), 'maker.json'),
+      JSON.stringify({ n: 2, series: 99, at: '2026-10-24T00:00:00Z' }),
+    )
+    server.runner.resume()
+    await waitState(id, '検品中')
+    expect(makerCalls()).toHaveLength(1)
+    expect(readFileSync(work(id, 'draft-02.partial.md'), 'utf-8')).toBe('# 古い系列\n')
+    expect(readFileSync(join(caseDir(home, id), 'versions/02/draft-02.md'), 'utf-8')).toBe('# 新しい系列\n')
+  })
+
+  it('T27 動いている作り手を止めると、書きかけを partial に改名して遷移しない', async () => {
+    await setup(script(...upToEntrance, ['作り手', { fail: 'hang' }]), (b) => async (call) => {
+      if (call.role === '作り手' && call.workdir) writeFileSync(join(call.workdir, 'draft-01.md'), '途中')
+      return hangJudge(b)(call)
+    })
+    const id = await approved()
+    await vi.waitFor(() => expect(makerCalls()).toHaveLength(1))
+    expect((await act(id, { type: 'stop.case' })).status).toBe(200)
+    await idle()
+    expect(ledger.getCase(id)).toMatchObject({ state: '停止', stopReason: '本人が止めた' })
+    expect(existsSync(work(id, 'draft-01.md'))).toBe(false)
+    expect(readFileSync(work(id, 'draft-01.partial.md'), 'utf-8')).toBe('途中')
+  })
+
+  it('作り手の時間切れは fail.system(時間切れ)（10.2）', async () => {
+    const keep = MAKER_LIMITS.timeoutMs
+    MAKER_LIMITS.timeoutMs = 30
+    try {
+      await setup(script(...upToEntrance, ['作り手', { fail: 'hang' }]))
+      const id = await approved()
+      await waitState(id, '停止')
+      expect(ledger.getCase(id)?.stopReason).toBe('時間切れ')
+    } finally {
+      MAKER_LIMITS.timeoutMs = keep
+    }
+  })
+
+  it('ファイルが揃わない（言い直しでも）・本文が空なら fail.system(書けなかった)', async () => {
+    const onlyMd: ScriptReply = { text: '書きました', write: { 'draft-01.md': BODY } }
+    await setup(script(...upToEntrance, ['作り手', onlyMd], ['作り手', onlyMd]))
+    const id = await approved()
+    await waitState(id, '停止')
+    expect(ledger.getCase(id)?.stopReason).toBe('書けなかった')
+    // 言い直しには書かれていないファイルの名前が渡る
+    expect(JSON.stringify(makerCalls()[1]?.materials)).toContain('draft-01.html')
+
+    await setup(script(...upToEntrance, ['作り手', draft(1, '')]))
+    const empty = await approved()
+    await waitState(empty, '停止')
+    expect(ledger.getCase(empty)?.stopReason).toBe('書けなかった')
+    expect(existsSync(join(caseDir(home, empty), 'versions'))).toBe(false)
+  })
+
+  it('ログイン切れは止めずに待ち、「続ける」で作り手を起こし直す（6.2.3 (7)）', async () => {
+    await setup(script(...upToEntrance, ['作り手', { fail: 'unavailable', why: 'auth_expired' }], ['作り手', draft(1)]))
+    const id = await approved()
+    await vi.waitFor(() => expect(server.status.signIn).toBe(true))
+    await idle()
+    expect(ledger.getCase(id)).toMatchObject({ state: '下書き中', turn: 'libretto' })
+    expect((await (await get('/api/host')).json()).signIn).toBe(true)
+    // 待っている間は kick しても呼ばない
+    server.runner.kick(id)
+    expect(makerCalls()).toHaveLength(1)
+    expect(await (await postJson('/api/host/resume', {})).json()).toMatchObject({ signIn: false })
+    await waitState(id, '検品中')
+  })
+
+  it('1 案件に 1 本: 動いている間の kick は止めてから始め直す', async () => {
+    await setup(script(...upToEntrance, ['作り手', { fail: 'hang' }], ['作り手', draft(1)]))
+    const id = await approved()
+    await vi.waitFor(() => expect(makerCalls()).toHaveLength(1))
+    server.runner.kick(id)
+    await waitState(id, '検品中')
+    expect(makerCalls()).toHaveLength(2)
+  })
+
+  it('versions は T12 がコミットした版だけ（落ちて残った versions/NN は出さない）', async () => {
+    await setup(script(...upToEntrance, ['作り手', draft(1)]))
+    const id = await approved()
+    await waitState(id, '検品中')
+    mkdirSync(join(caseDir(home, id), 'versions/02'), { recursive: true })
+    expect((await caseView(id)).versions.map((v) => v.n)).toEqual([1])
+  })
+})
+
+describe('材料待ち（6.2.4）', () => {
+  const wanting = { ...briefDraft, brief: { ...briefDraft.brief, wanted: ['ブレストのメモか記録'] } }
+  const withWanted: [Role, ScriptReply][] = upToEntrance.map(([role, reply]) =>
+    role === '下書き役・依頼書' ? [role, say(wanting)] : [role, reply],
+  )
+  const MEMO = '方針 1: 週 1 回の見直し\n方針 2: 担当を決める\n方針 3: 記録を残す'
+  const paste = async (id: string, body: Record<string, unknown>) =>
+    postJson(`/api/cases/${id}/materials`, {
+      type: 'materials.provided',
+      eventId: uuid(),
+      expectedRevision: (await caseView(id)).revision,
+      text: MEMO,
+      ...body,
+    })
+
+  it('T8: 渡してほしいものがあれば本人の番で止まり、貼った文を materials/ に置いて T10 → T11 → 作り手', async () => {
+    await setup(script(...withWanted, ['作り手', draft(1)]))
+    const id = await approved()
+    await idle()
+    expect(ledger.getCase(id)).toMatchObject({ state: '材料待ち', turn: '本人', step: '資料を貼り付けてください' })
+    expect(makerCalls()).toEqual([])
+    const v = await caseView(id)
+    expect(v.entrance?.brief.wanted).toEqual(['ブレストのメモか記録'])
+    expect(v.materials).toEqual([])
+
+    // 形の誤り・古い revision はファイルを書かない
+    expect((await paste(id, { text: '   ' })).status).toBe(400)
+    expect((await paste(id, { expectedRevision: v.revision - 1 })).status).toBe(409)
+    expect(existsSync(work(id, 'materials'))).toBe(false)
+
+    const eventId = uuid()
+    const res = await paste(id, { eventId })
+    expect(res.status).toBe(200)
+    await waitState(id, '検品中')
+    expect(readFileSync(work(id, 'materials/pasted-01.md'), 'utf-8')).toBe(`${MEMO}\n`)
+    expect(readFileSync(work(id, 'brief.md'), 'utf-8')).toContain('- 本人から受け取る資料: ブレストのメモか記録')
+    expect(makerCalls()[0]?.instruction).toContain('本人から受け取った資料')
+    expect((await caseView(id)).materials).toEqual([
+      { id: 'M01', kind: '添付', title: '貼り付けた文', where: 'materials/pasted-01.md', status: '取り寄せ済み' },
+    ])
+    expect((await caseView(id)).events.map((e) => e.event)).toContain('materials.provided')
+
+    // 二度目の同じ eventId は 1 回目と同じ結果で、何も書かない。本人の番でなくなった後の新しい操作は 409
+    const again = await paste(id, { eventId, expectedRevision: v.revision, text: '別の文' })
+    expect(again.status).toBe(200)
+    expect(await again.json()).toMatchObject({ replayed: true })
+    expect((await paste(id, { text: '別の文' })).status).toBe(409)
+    expect(readdirSync(work(id, 'materials'))).toEqual(['pasted-01.md'])
+    expect(fake.unused()).toEqual([])
+  })
+
+  it('渡してほしいものが無ければ今まで通り本人を待たずに作り手へ。資料の口は 409', async () => {
+    await setup(script(...upToEntrance, ['作り手', draft(1)]))
+    const id = await approved()
+    await waitState(id, '検品中')
+    expect((await paste(id, {})).status).toBe(409)
+    expect(readdirSync(work(id, 'materials'))).toEqual([])
+  })
+})
+
+// 判定役（docs/implementation.md 6.2.5・4.2 T15〜T17・T20〜T21b）。機械判定は通り、Claude の答えで合否が決まる組
+const verdicts = (ok: boolean): ScriptReply =>
+  say({
+    results: [
+      {
+        id: 'C02',
+        units: [{ index: 0, yes: ok }],
+        reason: ok ? '決まったことが先に書いてあります。' : '決まったことが最後まで出てきません。',
+      },
+      { id: 'C05', units: [{ index: 0, yes: true }], reason: 'ふだんの言い回しで書かれています。' },
+      {
+        id: 'C06',
+        units: [
+          { index: 0, yes: true },
+          { index: 1, yes: true },
+        ],
+        reason: 'どの段落も次にすることが分かります。',
+      },
+    ],
+  })
+const judgeCalls = () => fake.calls.filter((c) => c.role === '判定役・文章')
+const reviewPath = (id: string, name: string) => join(caseDir(home, id), name)
+const real = (b: Backend) => b
+
+describe('判定役', () => {
+  it('T15: 全部通れば承認待ち。判定のファイルは .md → .reasons.md → .json の順、画面には review が出る', async () => {
+    await setup(script(...upToEntrance, ['作り手', draft(1)], ['判定役・文章', verdicts(true)]), real)
+    const id = await approved()
+    await waitState(id, '承認待ち')
+    expect(ledger.getCase(id)).toMatchObject({ approvalKind: '完成稿', round: 1, turn: '本人' })
+    const r = Review.parse(JSON.parse(readFileSync(reviewPath(id, 'review-01-a.json'), 'utf-8')))
+    expect(r).toMatchObject({ version: 1, series: 1, round: 1, phase: '本文', attempt: 1, pass: true })
+    const mt = (name: string) => statSync(reviewPath(id, name)).mtimeMs
+    expect(mt('review-01-a.md')).toBeLessThanOrEqual(mt('review-01-a.reasons.md'))
+    expect(mt('review-01-a.reasons.md')).toBeLessThanOrEqual(mt('review-01-a.json'))
+    expect(readFileSync(reviewPath(id, 'review-01-a.reasons.md'), 'utf-8')).toContain('## C02')
+    // 判定は本文の写し（versions/01）を読み、作業場は読まない。canary の語は判定役にも渡さない
+    const call = judgeCalls()[0]
+    expect(call?.workdir).toBeUndefined()
+    expect(JSON.stringify(call?.materials)).not.toContain(TOKEN)
+    const v = await caseView(id)
+    expect(v.review).toMatchObject({ n: 1, passed: 7, failed: [], skipped: 0 })
+    expect(v.review?.familyNote).toBeDefined()
+    expect(v.versions.map((x) => x.state)).toEqual(['合格'])
+  })
+
+  it('承認の指紋が古ければ 409、今の指紋なら送付確認待ちへ', async () => {
+    await setup(script(...upToEntrance, ['作り手', draft(1)], ['判定役・文章', verdicts(true)]), real)
+    const id = await approved()
+    await waitState(id, '承認待ち')
+    const stale = await act(id, { type: 'approval.ok', marks: {}, versionFingerprint: 'old' })
+    expect(stale.status).toBe(409)
+    expect((await stale.json()).reason).toBe('stale')
+    const fp = (await caseView(id)).versions[0]?.fingerprint
+    expect((await act(id, { type: 'approval.ok', marks: {}, versionFingerprint: fp })).status).toBe(200)
+    expect(ledger.getCase(id)).toMatchObject({ state: '送付確認待ち', turn: 'libretto' })
+  })
+
+  it('T16 → T17: 不合格は 1 行要約だけを作り手へ戻し、3 回目で承認待ち（残りの理由文付き）', async () => {
+    await setup(
+      script(
+        ...upToEntrance,
+        ['作り手', draft(1)],
+        ['判定役・文章', verdicts(false)],
+        ['作り手', draft(2)],
+        ['判定役・文章', verdicts(false)],
+        ['作り手', draft(3)],
+        ['判定役・文章', verdicts(false)],
+      ),
+      real,
+    )
+    const id = await approved()
+    await waitState(id, '承認待ち')
+    expect(ledger.getCase(id)).toMatchObject({ version: 3, round: 3, approvalKind: '完成稿' })
+    const fb = readFileSync(work(id, 'feedback.md'), 'utf-8')
+    expect(fb).toContain('読み終えても決まったことが伝わりません')
+    expect(fb).not.toContain('最後まで出てきません')
+    expect(fb).not.toContain('C02')
+    expect(allWorkText(id)).not.toContain('初見の読者')
+    const v = await caseView(id)
+    expect(v.review?.failed).toEqual([
+      {
+        checkId: 'C02',
+        title: '初見の読者がブレストで決まったことを 3 行で言える',
+        verdict: 'fail',
+        reason: '決まったことが最後まで出てきません。',
+      },
+    ])
+    expect(v.versions.map((x) => x.state)).toEqual(['不合格', '不合格', '不合格'])
+    expect(fake.unused()).toEqual([])
+  })
+
+  it('T17 おまかせ: 3 回目の不合格で停止（往復上限）', async () => {
+    await setup(
+      script(
+        ...upToEntrance,
+        ['作り手', draft(1)],
+        ['判定役・文章', verdicts(false)],
+        ['作り手', draft(2)],
+        ['判定役・文章', verdicts(false)],
+        ['作り手', draft(3)],
+        ['判定役・文章', verdicts(false)],
+      ),
+      real,
+    )
+    const id = await approved('おまかせ')
+    await waitState(id, '停止')
+    expect(ledger.getCase(id)?.stopReason).toBe('往復上限')
+  })
+
+  // 字数の下限だけを 2,000 字にした組（3 回目を待たずに上げる。6.2.7）
+  const strictEntrance: [Role, ScriptReply][] = upToEntrance.map(([role, reply]) =>
+    role === '下書き役・確認項目'
+      ? [
+          role,
+          say({
+            checks: runnerChecks.map((c) =>
+              c.id === 'C01' ? { ...c, judge: { ...c.judge, args: { min: 2000 } } } : c,
+            ),
+          }),
+        ]
+      : [role, reply],
+  )
+  const long = (chars: number) => `# ブレストのまとめ\n\n${'あ'.repeat(chars)}\n\n## 1 つ目\n\n本文。\n`
+
+  it('T17 早め: 字数が 2 回続けて機械判定で落ち、合格に近づいていなければ 2 回目で承認待ち（直らない）', async () => {
+    await setup(script(...strictEntrance, ['作り手', draft(1, long(1890))], ['作り手', draft(2, long(1669))]), real)
+    const id = await approved()
+    await waitState(id, '承認待ち')
+    expect(ledger.getCase(id)).toMatchObject({ version: 2, round: 2, approvalKind: '完成稿' })
+    const r = Review.parse(JSON.parse(readFileSync(reviewPath(id, 'review-02-a.json'), 'utf-8')))
+    expect(r.escalate).toEqual({ why: '直らない', checkIds: ['C01'] })
+    expect(r.results.find((x) => x.id === 'C01')?.measured).toMatchObject({ chars: 1683, gap: 317 }) // 見出しと「本文。」の 14 字を含む
+    expect((await caseView(id)).review?.escalate).toEqual({ why: '直らない', checkIds: ['C01'] })
+    expect(makerCalls()).toHaveLength(2)
+    expect(judgeCalls()).toEqual([])
+  })
+
+  it('T16: 字数が合格に近づいていれば 3 回目に進む（往復上限で承認待ち）', async () => {
+    await setup(
+      script(
+        ...strictEntrance,
+        ['作り手', draft(1, long(1200))],
+        ['作り手', draft(2, long(1500))],
+        ['作り手', draft(3, long(1500))],
+      ),
+      real,
+    )
+    const id = await approved()
+    await waitState(id, '承認待ち')
+    expect(ledger.getCase(id)).toMatchObject({ version: 3, round: 3 })
+    const r = Review.parse(JSON.parse(readFileSync(reviewPath(id, 'review-03-a.json'), 'utf-8')))
+    expect(r.escalate).toBeUndefined() // 3 回目は往復上限で、早めではない
+    expect(makerCalls()).toHaveLength(3)
+  })
+
+  it('T17 早め おまかせ: 判定できない項目だけが残れば、作り手に返さず 1 回目で停止（判定できない）', async () => {
+    const unsure = say({
+      results: [
+        { id: 'C02', units: [{ index: 0, yes: null }], reason: '本人のメモが無いので決められません。' },
+        { id: 'C05', units: [{ index: 0, yes: true }], reason: 'ふだんの言い回しです。' },
+        {
+          id: 'C06',
+          units: [
+            { index: 0, yes: true },
+            { index: 1, yes: true },
+          ],
+          reason: '次にすることが分かります。',
+        },
+      ],
+    })
+    await setup(script(...upToEntrance, ['作り手', draft(1)], ['判定役・文章', unsure]), real)
+    const id = await approved('おまかせ')
+    await waitState(id, '停止')
+    expect(ledger.getCase(id)).toMatchObject({ stopReason: '判定できない', round: 1 })
+    const r = Review.parse(JSON.parse(readFileSync(reviewPath(id, 'review-01-a.json'), 'utf-8')))
+    expect(r.failedSummaries).toEqual([])
+    expect(r.escalate).toEqual({ why: '判定できない', checkIds: ['C02'] })
+    expect(makerCalls()).toHaveLength(1)
+    expect(existsSync(work(id, 'feedback.md'))).toBe(false)
+  })
+
+  it('再起動: 判定のファイルを書いた後に落ちていれば、Claude を呼ばずにそのファイルで遷移する', async () => {
+    await setup(script(...upToEntrance, ['作り手', draft(1)]))
+    const id = await approved()
+    await vi.waitFor(() => expect(hung).toEqual([id]))
+    await server.runs.abort(id)
+    await idle()
+    const c = ledger.getCase(id)
+    if (!c) throw new Error('no case')
+    const review: Review = {
+      version: 1,
+      series: c.series,
+      round: c.round + 1,
+      at: new Date().toISOString(),
+      phase: '本文',
+      attempt: 1,
+      results: [{ id: 'C01', verdict: 'pass', by: 'code' }],
+      pass: true,
+      failedSummaries: [],
+      marks: [],
+      sources: [],
+    }
+    writeFileSync(reviewPath(id, 'review-01-a.json'), JSON.stringify(review))
+    ledger.close()
+    await setup([], real, true)
+    server.runner.resume()
+    await waitState(id, '承認待ち')
+    expect(judgeCalls()).toEqual([])
+  })
+
+  it('再起動: #48 より前の形（機械判定の fail に gap が無い）の判定は使い回さず判定し直す', async () => {
+    await setup(script(...upToEntrance, ['作り手', draft(1)]))
+    const id = await approved()
+    await vi.waitFor(() => expect(hung).toEqual([id]))
+    await server.runs.abort(id)
+    await idle()
+    const c = ledger.getCase(id)
+    if (!c) throw new Error('no case')
+    const old: Review = {
+      version: 1,
+      series: c.series,
+      round: c.round + 1,
+      at: new Date().toISOString(),
+      phase: '本文',
+      attempt: 1,
+      results: [{ id: 'C01', verdict: 'fail', by: 'code', measured: { chars: 10 } }],
+      pass: false,
+      failedSummaries: ['分量が依頼の範囲から外れています'],
+      marks: [],
+      sources: [],
+    }
+    writeFileSync(reviewPath(id, 'review-01-a.json'), JSON.stringify(old))
+    ledger.close()
+    await setup(script(['判定役・文章', verdicts(true)]), real, true)
+    server.runner.resume()
+    await waitState(id, '承認待ち')
+    expect(judgeCalls()).toHaveLength(1)
+  })
+
+  it('判定のセッションが壊れた・読む版が無いときは fail.system(判定できなかった)', async () => {
+    await setup(
+      script(
+        ...upToEntrance,
+        ['作り手', draft(1)],
+        ['判定役・文章', { text: 'だめ' }],
+        ['判定役・文章', { text: '{}' }],
+      ),
+      real,
+    )
+    const id = await approved()
+    await waitState(id, '停止')
+    expect(ledger.getCase(id)?.stopReason).toBe('判定できなかった')
+
+    await setup(script(...upToEntrance, ['作り手', draft(1)]))
+    const lost = await approved()
+    await vi.waitFor(() => expect(hung).toEqual([lost]))
+    await server.runs.abort(lost)
+    await idle()
+    rmSync(join(caseDir(home, lost), 'versions/01/draft-01.md'))
+    server.runner.kick(lost)
+    await waitState(lost, '停止')
+    expect(ledger.getCase(lost)?.stopReason).toBe('判定できなかった')
+  })
+
+  it('判定役につながらなければ fail.system(つながらない)', async () => {
+    await setup(script(...upToEntrance, ['作り手', draft(1)], ['判定役・文章', { fail: 'unavailable' }]), real)
+    const id = await approved()
+    await waitState(id, '停止')
+    expect(ledger.getCase(id)?.stopReason).toBe('つながらない')
+  })
+
+  // 仕立て（Issue 12）が書く成果物を置いて、形式の判定を呼ぶ
+  async function readyToFormat() {
+    await setup(script(...upToEntrance, ['作り手', draft(1)], ['判定役・文章', verdicts(true)]), real)
+    const id = await approved()
+    await waitState(id, '承認待ち')
+    const fp = (await caseView(id)).versions[0]?.fingerprint
+    await act(id, { type: 'approval.ok', marks: {}, versionFingerprint: fp })
+    return id
+  }
+  function tailor(id: string, page: string) {
+    const dir = join(caseDir(home, id), 'versions/01')
+    mkdirSync(join(dir, 'outputs'), { recursive: true })
+    writeFileSync(join(dir, 'outputs', OUTPUT_FILES.page), page)
+    const files = [{ path: OUTPUT_FILES.page, sha256: 'x', bytes: page.length }]
+    writeFileSync(
+      join(dir, 'outputs.json'),
+      JSON.stringify({ n: 1, at: new Date().toISOString(), files, fingerprint: 'out-1' }),
+    )
+  }
+  const deps = () => ({
+    home,
+    ledger,
+    invoke: () => Promise.reject(new Error('not used')),
+    emit: (_: string, r: ReturnType<typeof transition>) => r.ok && !r.replayed,
+    onAuthExpired: () => {},
+    log: () => {},
+  })
+  const PAGE = '<h1>ブレストのまとめ</h1><p>決まったことは 3 つです。</p><h2>1 つ目</h2><p>本文。</p>'
+
+  it('T20: 形式が通れば送付確認待ち（本人の番）、送付成果物の指紋を書く', async () => {
+    const id = await readyToFormat()
+    tailor(id, PAGE)
+    const c = ledger.getCase(id)
+    if (!c) throw new Error('no case')
+    expect(await judgeFormat(deps(), c, new AbortController().signal)).toBe(true)
+    expect(ledger.getCase(id)).toMatchObject({
+      state: '送付確認待ち',
+      turn: '本人',
+      outputFingerprint: 'out-1',
+      round: 2,
+    })
+    expect(Review.parse(JSON.parse(readFileSync(reviewPath(id, 'review-01-f1.json'), 'utf-8')))).toMatchObject({
+      phase: '形式',
+      attempt: 1,
+      pass: true,
+    })
+    const v = await caseView(id)
+    expect(v.formatReview).toMatchObject({ n: 1, passed: 1 })
+    expect(v.review?.passed).toBe(7)
+  })
+
+  it('T21: 形式の不合格は下書きへ戻し、完成稿の承認を無効にする。成果物が無ければ判定できなかった', async () => {
+    const id = await readyToFormat()
+    tailor(id, '<h1>ブレストのまとめ</h1>')
+    const c = ledger.getCase(id)
+    if (!c) throw new Error('no case')
+    await server.runs.abort(id)
+    expect(await judgeFormat(deps(), c, new AbortController().signal)).toBe(true)
+    expect(ledger.getCase(id)?.state).toBe('下書き中')
+    expect(ledger.listApprovals(id).find((a) => a.gate === '完成稿')?.supersededBy).toBeDefined()
+    await server.runs.abortAll()
+
+    const lost = await readyToFormat()
+    const c2 = ledger.getCase(lost)
+    if (!c2) throw new Error('no case')
+    expect(await judgeFormat(deps(), c2, new AbortController().signal)).toBe(true)
+    expect(ledger.getCase(lost)?.stopReason).toBe('判定できなかった')
+  })
+
+  it('本文の API: md・組み立てた html（作り手の HTML は出さない）・差分', async () => {
+    const evil = '# 題\n\n<script>alert(1)</script> と **強調**\n\n二段落目。\n'
+    await setup(
+      script(...upToEntrance, ['作り手', draft(1, evil)], ['判定役・文章', verdicts(false)], ['作り手', draft(2)]),
+      (b) => (call) => (call.role === '判定役・文章' && judgeCalls().length ? hangJudge(b)(call) : b(call)),
+    )
+    const id = await approved()
+    await vi.waitFor(() => expect(ledger.getCase(id)?.version).toBe(2))
+    const md = await get(`/api/cases/${id}/drafts/1?format=md`)
+    expect(await md.text()).toBe(evil)
+    const html = await get(`/api/cases/${id}/drafts/1?format=html`)
+    expect(html.headers.get('content-security-policy')).toContain("default-src 'none'")
+    const body = await html.text()
+    expect(body).not.toContain('<script>')
+    expect(body).toContain('<strong>強調</strong>')
+    expect((await get(`/api/cases/${id}/drafts/3?format=md`)).status).toBe(404)
+    expect((await get(`/api/cases/${id}/drafts/1?format=paste`)).status).toBe(400)
+    const d = DraftDiff.parse(await (await get(`/api/cases/${id}/diff?from=1&to=2`)).json())
+    expect(d.changes.length).toBeGreaterThan(0)
+    expect((await get(`/api/cases/${id}/diff?from=0&to=2`)).status).toBe(400)
+  })
+})

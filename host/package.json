@@ -1,0 +1,16 @@
+{
+  "name": "@libretto/host",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@hono/node-server": "2.1.5",
+    "@libretto/shared": "*",
+    "better-sqlite3": "13.0.3",
+    "hono": "4.13.13",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "9.6.0",
+    "@types/node": "22.20.5"
+  }
+}

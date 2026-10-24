@@ -1,0 +1,75 @@
+// 起動（docs/implementation.md 12 章）。`libretto` でホスト、`libretto stop` で緊急停止（4.4・5.7 (3)）
+import { fileURLToPath } from 'node:url'
+import { serve } from '@hono/node-server'
+import { transition } from './case/transition.ts'
+import { callsDir, initHome, resolveHome } from './ledger/db.ts'
+import { createClaudeCli } from './model/claude-cli.ts'
+import { createInvoke } from './model/invoke.ts'
+import { settleOrphans } from './model/orphans.ts'
+import { createServer } from './server/app.ts'
+import { writeStopFile } from './server/stop.ts'
+
+const home = resolveHome()
+
+if (process.argv[2] === 'stop') {
+  writeStopFile(home)
+  console.log('STOP written. The host stops everything within 2 seconds.')
+  process.exit(0)
+}
+
+const port = Number(process.env.LIBRETTO_PORT ?? 7780)
+const bind = process.env.LIBRETTO_BIND ?? '127.0.0.1'
+const origins = (process.env.LIBRETTO_ORIGIN ?? `http://127.0.0.1:${port}`).split(',').map((s) => s.trim())
+
+const ledger = initHome(home)
+// 途中で落ちた呼び出しの精算を、STOP の確認・HTTP・runner より前に済ませる。失敗したら起動しない（9.4 (7)）
+const settled = settleOrphans(ledger, callsDir(home))
+if (settled.result + settled.hold)
+  console.error(`libretto: settled ${settled.result} calls from results, ${settled.hold} at the reserved amount`)
+// ponytail: 為替と上限は 5.3 の既定（P3: 全体は未入力）。settings.json から読むのは設定の Issue
+const usdJpy = () => 150
+const invoke = createInvoke({
+  ledger,
+  backends: { claude: createClaudeCli({ usdJpy, callsDir: callsDir(home) }) },
+  caps: () => ({ caseCapYen: 1500, monthCapYen: null }),
+  // 費用上限で案件を止める（6.1.1 (1)）。revision は確かめない。止めたら画面に知らせる（6.2.2 (1)）
+  onCostCap: (n) => {
+    const r = transition(ledger, { type: 'cost.cap', by: '費用', ...n })
+    if (r.ok && !r.replayed) server.caseChanged(n.caseId)
+  },
+  callsDir: callsDir(home),
+  ...(process.env.LIBRETTO_DEBUG_DIR && { debugDir: process.env.LIBRETTO_DEBUG_DIR }),
+})
+const server = createServer({
+  home,
+  ledger,
+  invoke,
+  origins,
+  staticDir: fileURLToPath(new URL('../../page/dist', import.meta.url)),
+})
+server.stop.boot()
+// libretto の番の案件の仕事を起こし直す（4.4 の再起動。6.2.3 (1)）。精算と STOP の確認の後
+server.runner.resume()
+
+let ticks = 0
+const timer = setInterval(() => {
+  ticks += 1
+  server.stop.tick(ticks % 15 === 0).catch((e) => console.error(e))
+}, 2_000)
+
+const http = serve({ fetch: server.app.fetch, port, hostname: bind }, () => {
+  const { url } = server.issuePairing('最初の端末', true)
+  console.log(`libretto: http://${bind}:${port}`)
+  console.log(`Open this URL once on the device to pair (valid 10 minutes): ${url}`)
+})
+
+// 通常の終了は遷移ではない（4.2 の末尾）。動いている仕事を止めて閉じる
+const shutdown = async () => {
+  clearInterval(timer)
+  await server.runs.abortAll()
+  http.close()
+  ledger.close()
+  process.exit(0)
+}
+process.on('SIGINT', shutdown)
+process.on('SIGTERM', shutdown)

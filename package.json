@@ -1,0 +1,28 @@
+{
+  "name": "libretto",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "shared",
+    "host",
+    "page"
+  ],
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "start": "node --experimental-strip-types --no-warnings host/src/index.ts",
+    "typecheck": "tsc -p tsconfig.json",
+    "lint": "biome check",
+    "test": "vitest run",
+    "verify": "npm run typecheck && npm run lint && npm run test",
+    "dev": "vite page",
+    "dev:host": "node --env-file=page/dev.env --experimental-strip-types --no-warnings host/src/index.ts",
+    "build": "vite build page"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.6.2",
+    "typescript": "7.0.2",
+    "vitest": "5.0.5"
+  }
+}

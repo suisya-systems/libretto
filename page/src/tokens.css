@@ -1,0 +1,129 @@
+/* 画面案の凡例（Main.dc.html の <style> から転記）。明るい側の値はそのまま。色は app.css からだけ引く */
+:root {
+  color-scheme: light dark;
+
+  /* 状態の 4 色＋中立（文字 / 地） */
+  --color-turn: #8a4f00;
+  --color-turn-bg: #fbefd9;
+  --color-moving: #2f4a8a;
+  --color-moving-bg: #e3e9f7;
+  --color-done: #2e5a3a;
+  --color-done-bg: #e2efe5;
+  --color-stopped: #a32a1a;
+  --color-stopped-bg: #fbe4e0;
+  --color-off: #5c5952;
+  --color-off-bg: #eceae4;
+
+  /* 面 */
+  --color-page: #f6f5f2;
+  --color-surface: #ffffff;
+  --color-sunken: #f6f5f2; /* 面の中で一段沈めた地（見出し行・既定値） */
+  --color-ink: #1c1b19;
+  --color-muted: #5c5952;
+  --color-line: #e4e1da;
+  --color-line-strong: #c9c5bc; /* 入力欄・二次ボタンの枠 */
+  --color-hover: #f0eee8;
+
+  /* 操作 */
+  --color-action: #2f4a8a;
+  --color-action-hover: #243b72;
+  --color-action-ink: #ffffff;
+  --color-link: #2f4a8a;
+  --color-link-hover: #1f3466;
+  --color-danger: #a32a1a;
+  --color-danger-hover: #8a2214;
+  --color-ring: #b9c6e8;
+
+  /* あなたの番のカード（画面案: 枠 #E9B96B・地 #FFFBF3） */
+  --color-turn-line: #e9b96b;
+  --color-turn-soft: #fffbf3;
+
+  /* ナビ */
+  --color-nav: #1c1b19;
+  --color-nav-ink: #d9d6ce;
+  --color-nav-bright: #ffffff;
+  --color-nav-hover: #2a2926;
+  --color-nav-on: #f6f5f2;
+  --color-nav-on-ink: #1c1b19;
+  --color-nav-line: #5c5952;
+
+  --shadow-pop: 0 20px 48px rgba(28, 27, 25, 0.18);
+
+  /* 字 */
+  --font-body:
+    "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Yu Gothic", "Noto Sans JP", system-ui, sans-serif;
+  --font-head: "Hiragino Mincho ProN", "Yu Mincho", "YuMincho", "Noto Serif JP", serif;
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-md: 14px;
+  --text-base: 15px;
+  --text-lg: 16px;
+  --text-xl: 18px;
+  --text-h2: 20px;
+  --text-h1: 30px;
+  --text-h1-sm: 24px;
+  --text-brand: 26px;
+
+  /* 間・角 */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 28px;
+  --space-8: 36px;
+  --radius-sm: 8px;
+  --radius: 10px;
+  --radius-lg: 14px;
+  --radius-pill: 999px;
+  --nav-w: 232px;
+  --main-w: 1080px;
+  --tap: 44px;
+}
+
+/* 仮: 画面案に暗い版が無いので、同じ 4 つの意味を保って暗い地に合わせた値を置いている（文字 / 地は 5:1 以上） */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-turn: #f3c27a;
+    --color-turn-bg: #3d2a08;
+    --color-moving: #b5c6f2;
+    --color-moving-bg: #1f2b4f;
+    --color-done: #a8d9b5;
+    --color-done-bg: #1c3524;
+    --color-stopped: #f5a69a;
+    --color-stopped-bg: #4a1812;
+    --color-off: #cfcbc2;
+    --color-off-bg: #35332f;
+
+    --color-page: #161513;
+    --color-surface: #201f1c;
+    --color-sunken: #2a2926;
+    --color-ink: #ece9e2;
+    --color-muted: #a8a49b;
+    --color-line: #3a3833;
+    --color-line-strong: #5e5b54;
+    --color-hover: #2a2926;
+
+    --color-action: #4f6cb8;
+    --color-action-hover: #5b78c4;
+    --color-action-ink: #ffffff;
+    --color-link: #9db2ea;
+    --color-link-hover: #b5c6f2;
+    --color-danger: #b8311e;
+    --color-danger-hover: #c8432f;
+    --color-ring: #7f9be0;
+
+    --color-turn-line: #7a5214;
+    --color-turn-soft: #241d12;
+
+    --color-nav: #111110;
+    --color-nav-ink: #d9d6ce;
+    --color-nav-hover: #2a2926;
+    --color-nav-on: #ece9e2;
+    --color-nav-on-ink: #161513;
+    --color-nav-line: #5c5952;
+
+    --shadow-pop: 0 20px 48px rgba(0, 0, 0, 0.55);
+  }
+}
