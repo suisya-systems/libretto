@@ -3,9 +3,10 @@ import { fileURLToPath } from 'node:url'
 import { serve } from '@hono/node-server'
 import { transition } from './case/transition.ts'
 import { callsDir, initHome, resolveHome } from './ledger/db.ts'
-import { createClaudeCli } from './model/claude-cli.ts'
+import { createClaudeCli, resolveClaude } from './model/claude-cli.ts'
 import { createInvoke } from './model/invoke.ts'
 import { settleOrphans } from './model/orphans.ts'
+import { checkSandbox, createSandbox, MIN_CLAUDE } from './model/sandbox.ts'
 import { createServer } from './server/app.ts'
 import { writeStopFile } from './server/stop.ts'
 
@@ -26,11 +27,32 @@ const ledger = initHome(home)
 const settled = settleOrphans(ledger, callsDir(home))
 if (settled.result + settled.hold)
   console.error(`libretto: settled ${settled.result} calls from results, ${settled.hold} at the reserved amount`)
+// 作り手の隔離と claude の版を、runner が仕事を起こす前に確かめる（8.9 (5)）
+const claude = resolveClaude()
+const sandboxCheck = await checkSandbox({ home, claude })
+console.error(
+  `libretto: isolation ${sandboxCheck.isolation}${sandboxCheck.reason ? ` (${sandboxCheck.reason})` : ''}, claude ${sandboxCheck.claudeVersion ?? 'unknown'}`,
+)
+if (sandboxCheck.reason?.startsWith('missing:') || sandboxCheck.reason === 'userns')
+  console.error(
+    'libretto: the sandbox tools are missing. Install: apt install bubblewrap socat, and sysctl kernel.apparmor_restrict_unprivileged_userns=0',
+  )
+if (!sandboxCheck.claudeOk)
+  console.error(`libretto: Claude Code ${MIN_CLAUDE} or later is required. Claude is not called.`)
+const sandbox = createSandbox({ home, claude, check: () => sandboxCheck })
 // ponytail: 為替と上限は 5.3 の既定（P3: 全体は未入力）。settings.json から読むのは設定の Issue
 const usdJpy = () => 150
 const invoke = createInvoke({
   ledger,
-  backends: { claude: createClaudeCli({ usdJpy, callsDir: callsDir(home) }) },
+  backends: {
+    claude: createClaudeCli({
+      usdJpy,
+      callsDir: callsDir(home),
+      sandbox,
+      blocked: () =>
+        sandboxCheck.claudeOk ? undefined : `claude ${sandboxCheck.claudeVersion ?? 'unknown'} < ${MIN_CLAUDE}`,
+    }),
+  },
   caps: () => ({ caseCapYen: 1500, monthCapYen: null }),
   // 費用上限で案件を止める（6.1.1 (1)）。revision は確かめない。止めたら画面に知らせる（6.2.2 (1)）
   onCostCap: (n) => {
@@ -46,6 +68,7 @@ const server = createServer({
   invoke,
   origins,
   staticDir: fileURLToPath(new URL('../../page/dist', import.meta.url)),
+  isolation: sandboxCheck.isolation,
 })
 server.stop.boot()
 // libretto の番の案件の仕事を起こし直す（4.4 の再起動。6.2.3 (1)）。精算と STOP の確認の後

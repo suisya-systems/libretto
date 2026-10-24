@@ -7,11 +7,14 @@ import { tmpdir } from 'node:os'
 import { delimiter, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type { Readable, Writable } from 'node:stream'
 import { type Backend, type Call, callFile, type Reply } from './invoke.ts'
+import type { Sandbox } from './sandbox.ts'
 
 type Opts = {
   usdJpy: () => number // 呼び出しの頭で 1 回だけ読む（6.1.2 (5)）
   callsDir: string // 結果のファイルの置き場（9.4 (7)）
-  command?: string[] // 起こす命令の先頭。省けば claude を探す。S2 はここに srt --settings … を前置する（6.1.2 (7)）
+  command?: string[] // 起こす命令の先頭。省けば claude を探す
+  sandbox?: Sandbox // 作り手（access: write）を srt で包む（8.9 (2)）
+  blocked?: () => string | undefined // 理由があれば Claude を起こさない（版の下限。8.9 (5)）
   env?: NodeJS.ProcessEnv // 許可一覧で絞る元。既定は process.env
   killGraceMs?: number // SIGTERM から SIGKILL まで（8.5）
   log?: (line: string) => void
@@ -193,6 +196,17 @@ function treeKill(pid: number, log: (l: string) => void): Promise<void> {
   })
 }
 
+// ホストが落ちたら子のグループを消す見張り（8.9 (6)）。握ったパイプが閉じる = ホストが死んだ
+// dash の kill は -- を受けないので、負の数でグループを指す
+const guard = (pgid: number) => {
+  const g = spawn('/bin/sh', ['-c', 'trap "" INT TERM HUP; read _; kill -9 -"$1"', 'guard', String(pgid)], {
+    stdio: ['pipe', 'ignore', 'ignore'],
+  })
+  g.stdin.on('error', () => {})
+  g.on('error', () => {})
+  return g
+}
+
 type Run = {
   cwd: string
   env: Record<string, string>
@@ -226,6 +240,7 @@ async function runChild(
     }
   })()
   const closed = once(child, 'close').catch(() => undefined)
+  const watch = posix && child.pid ? guard(child.pid) : undefined
   const err: Buffer[] = []
   child.stderr.on('data', (b: Buffer) => err.push(b))
   child.stdin.on('error', () => {}) // 読まずに終わった子への EPIPE
@@ -263,6 +278,7 @@ async function runChild(
     if (code !== 0) log(`claude-cli: exit ${code}: ${Buffer.concat(err).toString('utf8').slice(0, 500)}`)
     return { out: body(readFileSync(o.outFile, 'utf8')), code }
   } finally {
+    watch?.kill('SIGKILL')
     clearTimeout(timer)
     o.signal.removeEventListener('abort', stop)
   }
@@ -273,9 +289,14 @@ export function createClaudeCli(opts: Opts): Backend {
   return async (call) => {
     const rate = opts.usdJpy()
     if (!(Number.isFinite(rate) && rate > 0)) throw new Error(`claude-cli: bad usdJpy ${rate}`)
+    // 起こさなかった呼び出しは費用 0（予約の全額で数えない）
+    const why = opts.blocked?.()
+    if (why) {
+      log(`claude-cli: not started: ${why}`)
+      return { fail: 'unavailable', costYen: 0 }
+    }
     const input = stdinText(call)
-    const argv = [
-      ...(opts.command ?? resolveClaude(opts.env)),
+    const args = [
       '-p',
       '--output-format',
       'json',
@@ -297,9 +318,19 @@ export function createClaudeCli(opts: Opts): Backend {
     // none は空の一時ディレクトリで起こす（cwd から上の CLAUDE.md を読ませない）
     const cwd = call.access === 'none' ? await mkdtemp(join(tmpdir(), 'libretto-')) : call.workdir
     if (!cwd) throw new Error(`claude-cli: access ${call.access} needs workdir`)
+    let boxed: Awaited<ReturnType<Sandbox['prepare']>> | undefined
+    if (call.access === 'write' && opts.sandbox) {
+      try {
+        boxed = await opts.sandbox.prepare(cwd, args, opts.env ?? process.env)
+      } catch (e) {
+        log(`claude-cli: not started: ${(e as Error).message}`)
+        return { fail: 'unavailable', costYen: 0 }
+      }
+    }
     try {
       const before = call.access === 'write' ? await snapshot(cwd) : undefined
-      const env = allowedEnv(opts.env ?? process.env)
+      const argv = boxed?.argv ?? [...(opts.command ?? resolveClaude(opts.env)), ...args]
+      const env = boxed?.env ?? allowedEnv(opts.env ?? process.env)
       // 為替は起こす前に書く。精算（invoke）が済むまでファイルは消さない（9.4 (7)）
       const outFile = callFile(opts.callsDir, call.callId)
       writeFileSync(outFile, header(rate), { mode: 0o600 })
@@ -313,6 +344,7 @@ export function createClaudeCli(opts: Opts): Backend {
       const after = await snapshot(cwd)
       return { ...reply, files: [...after].filter(([k, v]) => before.get(k) !== v).map(([k]) => k) }
     } finally {
+      await boxed?.cleanup()
       if (call.access === 'none') await rm(cwd, { recursive: true, force: true })
     }
   }

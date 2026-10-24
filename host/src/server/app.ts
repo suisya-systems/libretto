@@ -26,6 +26,7 @@ import { diff, renderHtml } from '../checks/text.ts'
 import type { Ledger } from '../ledger/ledger.ts'
 import type { Job, Outcome } from '../model/invoke.ts'
 import { deleteKey, setKey } from '../model/keys.ts'
+import type { Isolation } from '../model/sandbox.ts'
 import { createConversation } from '../roles/conversation.ts'
 import { createEntrance, currentSet, entranceView, writeApproval, writeAtomic } from '../roles/entrance.ts'
 import { reviewsOf } from '../roles/judge.ts'
@@ -55,13 +56,14 @@ export type ServerOptions = {
   log?: (line: string) => void
   runsWaitMs?: number
   token?: () => string // canary の語（テストで固定する）
+  isolation?: Isolation // 起動時の自己点検の結果（8.9 (5)）
 }
 
 export function createServer(o: ServerOptions) {
   const now = o.now ?? (() => new Date())
   const log = o.log ?? ((line: string) => console.error(line))
   const { home, ledger } = o
-  const status: HostStatus = { stopped: false, storageOk: true, signIn: false }
+  const status: HostStatus = { stopped: false, storageOk: true, signIn: false, isolation: o.isolation ?? 'strong' }
   const hub = createHub()
   const changed = () => hub.emit('host.changed', { ...status })
   const storage = (written: boolean) => {

@@ -321,7 +321,13 @@ export const Notice = z.object({
 export type Notice = z.infer<typeof Notice>
 
 // 止めたのは本人、保存できないのはホスト。別の欄（5.7 (8)）。signIn は Claude のログインし直し待ち（6.2.3 (7)）
-export const HostStatus = z.object({ stopped: z.boolean(), storageOk: z.boolean(), signIn: z.boolean() })
+// isolation は作り手の隔離（8.9 (5)）。表示は Issue 15
+export const HostStatus = z.object({
+  stopped: z.boolean(),
+  storageOk: z.boolean(),
+  signIn: z.boolean(),
+  isolation: z.enum(['strong', 'weak', 'broken']),
+})
 export type HostStatus = z.infer<typeof HostStatus>
 
 export const CandidateCard = z.object({

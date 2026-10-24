@@ -16,6 +16,7 @@
     "lint": "biome check",
     "test": "vitest run",
     "verify": "npm run typecheck && npm run lint && npm run test",
+    "verify:sandbox": "node --experimental-strip-types --no-warnings host/scripts/sandbox-live.ts",
     "dev": "vite page",
     "dev:host": "node --env-file=page/dev.env --experimental-strip-types --no-warnings host/src/index.ts",
     "build": "vite build page"
