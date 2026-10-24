@@ -419,7 +419,7 @@ export const W = {
   'cand.askLabel': '頼まれていそうなこと',
   'cand.make': '作るもの: {doc}　保存先: {dest}',
   'cand.attach': '添付「{names}」の中身は読んでいません。進めたあと、資料として貼り付けてください',
-  'cand.aiNote': 'AI への指示に見える行があります（無視します）',
+  'cand.aiNote': 'プロンプトインジェクションの疑いがある文が入っています。libretto はその文には従いません',
   'cand.open': 'メールを開く',
   'cand.proceed': '進める',
   'cand.dismiss': '見送る',
