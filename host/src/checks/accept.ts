@@ -2,7 +2,7 @@
 // invoke の accept に渡し、zod と同じ 1 回の言い直しを使う（6.1.1 (4)）
 import type { Brief } from '@libretto/shared/api'
 import type { Check } from '@libretto/shared/checks'
-import { judgeableViolations } from './judgeable.ts'
+import { judgeableViolations, numbersIn } from './judgeable.ts'
 
 export const MIN_CHECKS = 5
 export const MAX_CHECKS = 40
@@ -18,11 +18,6 @@ const norm = (s: string) =>
 // 中身を運ぶ語: 漢字・カタカナ・英数字が 3 文字以上続く部分と、かぎ括弧・引用符の中
 const RUN = /[\p{Script=Han}\p{Script=Katakana}ーa-z0-9]{3,}/gu
 const QUOTED = /[「『"“]([^」』"”]{3,})[」』"”]/g
-const NUMBER = /\d+(?:\.\d+)?/g
-
-function numbersIn(s: string) {
-  return [...norm(s).matchAll(NUMBER)].map((m) => Number(m[0]))
-}
 
 // judge の中の語と 100 以上の数（6.2.2 (4)）
 export function judgeTerms(j: Check['judge']): { words: string[]; numbers: number[] } {
