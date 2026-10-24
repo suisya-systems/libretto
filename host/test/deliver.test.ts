@@ -32,6 +32,13 @@ describe('ページ（6.2.8 (1)）', () => {
     expect(page).toContain('<title>題 &lt;x&gt;</title>')
   })
 
+  it('入れ子の箇条書きの後の字も、外の項目に残す', () => {
+    expect(pageBlocks('<ul><li>親<ul><li>子一</li><li>子二</li></ul>続き</li><li>次</li></ul>')).toEqual([
+      { kind: 'li', list: 'ul', html: '親子一子二続き' },
+      { kind: 'li', list: 'ul', html: '次' },
+    ])
+  })
+
   it('本文から組み立てた HTML は pageRoundTrip を通り、枠（題・日付）はブロックに数えない', async () => {
     const page = doc(renderHtml(MD))
     expect(page).toContain('バージョン 2')

@@ -68,7 +68,9 @@ export function pageBlocks(html: string): Block[] {
     }
     if (BLOCK.has(name)) {
       if (close) {
-        if (block && (block.kind === name || (block.kind === 'h3' && /^h[3-6]$/.test(name)))) flush()
+        // 入れ子の箇条書きの </li> では閉じない（開いたときと同じ深さの </li> だけが閉じる）
+        const same = block?.kind === 'li' ? name === 'li' && lists.length === block.depth : block?.kind === name
+        if (block && (same || (block.kind === 'h3' && /^h[3-6]$/.test(name)))) flush()
         continue
       }
       // 段落・見出しは次のブロックで閉じる。li の中の p と、li の中の入れ子の箇条書きの li は li の字に入れる
