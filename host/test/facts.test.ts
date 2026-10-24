@@ -145,6 +145,20 @@ describe('分類と照合（6.3.1 (3)(4)）', () => {
     })
   })
 
+  it('2 段落にまたがる主張は、隣り合う段落を繋いで当てる', () => {
+    const md = `塔は 2012 年に完成し、634 m の高さがある（[百科](${URL_B})）。`
+    const cs = claimsFrom(md, [{ text: '塔は 2012 年に完成し、634 m の高さがある', kind: '数値' }])
+    const src: Fetched = {
+      ok: true,
+      url: URL_B,
+      title: 'b',
+      paragraphs: ['塔は 2012 年に完成した。', '高さは 634 m ある。'],
+      fingerprint: 'f',
+    }
+    const one = buildFacts(1, md, cs, [], new Map([[URL_B, src]]))
+    expect(one.excerpts.get('K01')).toBe('塔は 2012 年に完成した。\n高さは 634 m ある。')
+  })
+
   it('抜粋は 1,200 字まで、主張の当たりの多い所', () => {
     const para = `${'あ'.repeat(3000)}利用者は 120 万人${'い'.repeat(3000)}`
     const ex = excerptOf('利用者は 120 万人', para)
@@ -415,6 +429,23 @@ describe('判定への組み込み（6.3.1 (7)(8)）', () => {
     ])
     expect(out.judged.body.marks).toEqual([])
     expect(out.judged.facts).toBeUndefined()
+    // 棚卸しを流さなかった版でも、本文の出典はまだチェックしていない形で並ぶ
+    const linked = await judge(
+      {
+        caseId: 'c1',
+        phase: '本文',
+        checks,
+        input: { md: `短い（[調査](${URL_A})）` },
+        brief,
+        family: '別系統',
+        signal,
+        facts,
+      },
+      invoke,
+    )
+    expect(linked.ok && linked.judged.body.sources).toEqual([
+      { ref: URL_A, title: '調査', verdict: '未判定', claimIds: [] },
+    ])
     const marked = await judge(
       { caseId: 'c1', phase: '本文', checks, input: { md: `短い${MARK}` }, brief, family: '別系統', signal, facts },
       invoke,

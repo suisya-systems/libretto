@@ -21,7 +21,7 @@ import { CANARY_SUMMARY } from '../checks/host-items.ts'
 import { FNS, type FnInput, runCode } from '../checks/judgeable.ts'
 import { paragraphUnits, sections } from '../checks/text.ts'
 import { supportsClaims } from '../facts/claims.ts'
-import { collectFacts, type Facts, type Fetch, marksOf, renderFacts } from '../facts/inventory.ts'
+import { collectFacts, type Facts, type Fetch, linkRows, marksOf, renderFacts } from '../facts/inventory.ts'
 import { caseDir } from '../ledger/db.ts'
 import type { Ledger } from '../ledger/ledger.ts'
 import type { Job, Outcome } from '../model/invoke.ts'
@@ -402,7 +402,7 @@ export async function judge(
         // unable は作り手には直せないので返さない（本人にだけ見せる。6.2.7 (3)）
         failedSummaries: ordered.filter((r) => r.verdict === 'fail').map((r) => summaryOf.get(r.id) as string),
         marks: marksOf(j.input.md),
-        sources: facts ? sourceRows(facts.file) : [],
+        sources: facts ? sourceRows(facts.file) : linkRows(j.input.md),
         ...(j.family === '同系統' && { familyNote: FAMILY_NOTE }),
         // Jev が 1 単位も答えなければ「使っていません」、答えたが失敗した要求があれば「一部は」（7.6 (5)）
         ...(checks.some((c) => c.judge.by === 'jev') &&

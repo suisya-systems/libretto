@@ -221,9 +221,11 @@ export function containment(claim: string, para: string): number {
   for (const x of c) if (p.has(x)) hit++
   return hit / c.size
 }
+// 隣り合う 2 段落を繋いだものも相手の候補にする（ウェブのページは 1 つの話を短い段落に分けて書くことが多い）
 function best(claim: string, paras: readonly string[]): { para: string; score: number } | undefined {
   let top: { para: string; score: number } | undefined
-  for (const para of paras) {
+  const pairs = paras.slice(1).map((p, i) => `${paras[i]}\n${p}`)
+  for (const para of [...paras, ...pairs]) {
     const score = containment(claim, para)
     if (!top || score > top.score) top = { para, score }
   }
@@ -395,6 +397,14 @@ export async function collectFacts(
   )
   const sources = await fetchCached(d.home, d.caseId, urls, d.signal, d.fetch)
   return { ok: true, facts: buildFacts(version, md, inv.claims, readMaterials(d.home, d.caseId), sources) }
+}
+
+// 本文の出典のリンク（棚卸しを流さなかった版の承認の面。チェックはまだ。6.3.1 (8)）
+export function linkRows(md: string): { ref: string; title: string; verdict: '未判定'; claimIds: string[] }[] {
+  const seen = new Map<string, string>()
+  for (const m of md.matchAll(/(?<!!)\[([^\]\n]*)\]\((https?:\/\/[^)\s]+)\)/g))
+    if (!seen.has(m[2] as string)) seen.set(m[2] as string, plain(m[1] as string) || (m[2] as string))
+  return [...seen].map(([ref, title]) => ({ ref, title, verdict: '未判定', claimIds: [] }))
 }
 
 // 読む人向けの描き出し（9.3。正本は JSON）
