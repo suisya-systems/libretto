@@ -25,7 +25,10 @@ beforeEach(() => {
   sent.length = 0
   keys = unset
   jev = { kind: 'jev', set: true, last4: 'WXYZ', savedAt: '2026-10-24T17:00:00+09:00' }
-  conn = { isolation: { level: 'strong', running: false } }
+  conn = {
+    isolation: { level: 'strong', running: false },
+    google: { configured: false, state: 'none', label: 'libretto' },
+  }
   respond = () => new Response('{}')
   samples = []
   voiceStatus = 200
@@ -48,8 +51,12 @@ beforeEach(() => {
     }
     if (path === '/api/checks/run' && init.method) {
       sent.push({ method: init.method, path })
-      conn = { isolation: { ...conn.isolation, running: true } }
+      conn = { ...conn, isolation: { ...conn.isolation, running: true } }
       return new Response('{}', { status: 202 })
+    }
+    if (path.startsWith('/api/connections/google') && init.method) {
+      sent.push({ method: init.method, path })
+      return respond(init.method)
     }
     if (/^\/api\/settings\/keys\/(openai|jev)$/.test(path) && init.method) {
       sent.push({ method: init.method, path, ...(init.body && { body: JSON.parse(String(init.body)) }) })
@@ -161,6 +168,7 @@ describe('動作環境の確認（8.10 (6)）', () => {
 
   it('弱い: 原因の文を出し、コマンドは code で出す。前回の結果と日時', async () => {
     conn = {
+      ...conn,
       isolation: {
         level: 'weak',
         cause: 'tools',
@@ -170,7 +178,9 @@ describe('動作環境の確認（8.10 (6)）', () => {
     }
     const r = await render()
     expect(r.text()).toContain(W['settings.isolation.weak'])
-    expect(r.el.querySelector('.note-warn code')?.textContent).toBe('apt install bubblewrap socat ripgrep')
+    expect(r.el.querySelector('#h-env')?.parentElement?.querySelector('.note-warn code')?.textContent).toBe(
+      'apt install bubblewrap socat ripgrep',
+    )
     expect(r.text()).toContain(W['settings.probe.unknown'])
     expect(r.text()).toMatch(/2026\/10\/24 \d{2}:03 に確認/)
     r.done()
@@ -178,6 +188,7 @@ describe('動作環境の確認（8.10 (6)）', () => {
 
   it('見えた結果は警告で出す。動かないときは原因を警告で出す', async () => {
     conn = {
+      ...conn,
       isolation: {
         level: 'broken',
         cause: 'network',
@@ -268,5 +279,72 @@ describe('あなたの文体の見本（6.3.2 (10)）', () => {
     expect(full.text()).toContain(W['settings.voice.max'])
     expect(full.button(W['settings.voice.add'])).toBeUndefined()
     full.done()
+  })
+})
+
+describe('連携の節（Google。6.4 (7)）', () => {
+  const google = (g: Partial<ConnectionsView['google']>) => {
+    conn = { ...conn, google: { configured: true, state: 'none', label: 'libretto', ...g } }
+  }
+  const row = (el: HTMLElement) => el.querySelector('#h-link')?.parentElement as HTMLElement
+
+  it('設定が無い: 設定がないことと入れ方を出し、連携するは出さない', async () => {
+    const r = await render()
+    const g = row(r.el)
+    expect(g.textContent).toContain(W['settings.google.unconfigured'])
+    expect(g.querySelector('.note-warn code')?.textContent).toBe('.env.local')
+    expect(r.button(W['settings.google.connect'])).toBeUndefined()
+    r.done()
+  })
+
+  it('未連携: できることの文・目印・PC で行う注記。連携するで始めて、返った URL へ移る', async () => {
+    google({})
+    const assign = vi.fn()
+    vi.stubGlobal('location', { ...window.location, assign, search: '', pathname: '/settings' })
+    respond = () => new Response(JSON.stringify({ url: 'https://accounts.example/auth?x=1' }))
+    const r = await render()
+    const g = row(r.el)
+    for (const s of [W['settings.google.use'], W['settings.google.none'], W['settings.google.pcNote']])
+      expect(g.textContent).toContain(s)
+    expect(g.textContent).toContain(w('settings.google.signal', { label: 'libretto' }))
+    await r.click(r.button(W['settings.google.connect']))
+    expect(sent).toEqual([{ method: 'POST', path: '/api/connections/google/start' }])
+    expect(assign).toHaveBeenCalledWith('https://accounts.example/auth?x=1')
+    r.done()
+  })
+
+  it('連携済み: アドレス・ラベルが無い注記・混雑の注記。解除は確かめてから DELETE', async () => {
+    google({ state: 'connected', email: 'me@example.com', labelFound: false, problem: 'rate_limited' })
+    respond = () => new Response(null, { status: 204 })
+    const r = await render()
+    const g = row(r.el)
+    expect(g.textContent).toContain(w('settings.google.as', { email: 'me@example.com' }))
+    expect(g.textContent).toContain(w('settings.google.labelMissing', { label: 'libretto' }))
+    expect(g.textContent).toContain(W['settings.google.problem.rate_limited'])
+    expect(r.button(W['settings.google.connect'])).toBeUndefined()
+    await r.click(r.button(W['settings.google.disconnect']))
+    const dialog = document.querySelector('.dialog') as HTMLElement
+    expect(dialog.textContent).toContain(W['settings.google.disconnectBody'])
+    await r.click(r.button(W['settings.google.disconnect']) && [...dialog.querySelectorAll('button')].at(-1))
+    expect(sent).toEqual([{ method: 'DELETE', path: '/api/connections/google' }])
+    r.done()
+  })
+
+  it('切れた: 連携し直す注記を出し、もう一度連携すると解除の両方を出す', async () => {
+    google({ state: 'expired', email: 'me@example.com' })
+    const r = await render()
+    expect(row(r.el).textContent).toContain(W['settings.google.expiredNote'])
+    expect(r.button(W['settings.google.connect'])).toBeDefined()
+    expect(r.button(W['settings.google.disconnect'])).toBeDefined()
+    r.done()
+  })
+
+  it('戻りの 1 行は 1 回だけ出し、URL から消す', async () => {
+    google({ state: 'connected', email: 'me@example.com' })
+    window.history.replaceState(null, '', '/settings?google=connected')
+    const r = await render()
+    expect(row(r.el).textContent).toContain(W['settings.google.result.connected'])
+    expect(window.location.search).toBe('')
+    r.done()
   })
 })

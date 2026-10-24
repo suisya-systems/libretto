@@ -21,8 +21,8 @@ describe('ui-wording.md のホストが作る文', () => {
     expect(Object.keys(SAY)).toHaveLength(8)
     expect(table('**会話欄に足す 1 行')).toEqual(SAY)
   })
-  it('TALK の 6 個', () => {
-    expect(Object.keys(TALK)).toHaveLength(6)
+  it('TALK の 7 個', () => {
+    expect(Object.keys(TALK)).toHaveLength(7)
     expect(table('**話し相手の代わりに会話欄に書く 1 行')).toEqual(TALK)
   })
 })

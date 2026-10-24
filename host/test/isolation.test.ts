@@ -188,7 +188,7 @@ describe('POST /api/checks/run と GET /api/connections', () => {
     ConnectionsView.parse(await (await server.app.request('/api/connections', { headers: { cookie } })).json())
 
   it('202 で裏で 1 本。走っている間の POST は同じ 1 本に乗り、終われば isolation.json と last', async () => {
-    expect(await view()).toEqual({ isolation: { level: 'weak', cause: 'windows', running: false } })
+    expect((await view()).isolation).toEqual({ level: 'weak', cause: 'windows', running: false })
     expect((await post('/api/checks/run')).status).toBe(202)
     expect((await post('/api/checks/run')).status).toBe(202)
     expect(started).toBe(1)

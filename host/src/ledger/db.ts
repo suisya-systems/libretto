@@ -8,9 +8,10 @@ import initial from './migrations/0001-initial.ts'
 import fingerprints from './migrations/0002-fingerprints.ts'
 import costRecoveries from './migrations/0003-cost-recoveries.ts'
 import conversation from './migrations/0004-conversation.ts'
+import candidateAttachments from './migrations/0005-candidate-attachments.ts'
 
 // 添字 + 1 が user_version。足すときは末尾に 1 本足す
-export const MIGRATIONS: readonly string[] = [initial, fingerprints, costRecoveries, conversation]
+export const MIGRATIONS: readonly string[] = [initial, fingerprints, costRecoveries, conversation, candidateAttachments]
 
 export function openDb(file: string, migrations: readonly string[] = MIGRATIONS): Database.Database {
   const db = new Database(file)

@@ -86,7 +86,7 @@ const EVENT_COLUMNS = {
   series: 'series',
   round: 'round',
 } as const
-export const NON_CASE_COSTS: readonly string[] = ['推測', '点検', '会話']
+export const NON_CASE_COSTS: readonly string[] = ['推測', '点検', '会話', '拾い上げ'] // 拾い上げは候補カードの要約（6.4 (4)）
 
 // null の列は欄を省く（9.2 の「行と型の境界」）
 const clean = (o: Row) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== null && v !== undefined))
@@ -126,6 +126,36 @@ const toCase = (r: Row) =>
       outputFingerprint: r.output_fingerprint,
     }),
   )
+
+const json = (v: unknown) => (v === null || v === undefined ? null : JSON.parse(v as string))
+const toCard = (r: Row) =>
+  CardContent.parse(
+    clean({
+      subject: r.subject,
+      from: r.from_name,
+      receivedAt: r.received_at,
+      link: r.link,
+      reason: r.reason,
+      summary: r.summary,
+      proposal: JSON.parse(r.proposal as string),
+      attachmentsNeeded: json(r.attachments_needed),
+      attachments: json(r.attachments),
+      account: r.account,
+    }),
+  )
+const cardCols = (k: CardContent) =>
+  [
+    k.subject,
+    k.from,
+    k.receivedAt,
+    k.link,
+    k.reason ?? null,
+    k.summary,
+    JSON.stringify(k.proposal),
+    k.attachmentsNeeded ? JSON.stringify(k.attachmentsNeeded) : null,
+    k.attachments ? JSON.stringify(k.attachments) : null,
+    k.account ?? null,
+  ] as const
 
 const toCandidate = (r: Row) =>
   CandidateRecord.parse(
@@ -433,21 +463,38 @@ export class Ledger {
       this.#appendCandidateEvent({ type: 'presented', candidateId }, at)
       this.#db
         .prepare(
-          `INSERT INTO candidate_cards (candidate_id, subject, from_name, received_at, link, reason, summary, proposal, attachments_needed)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO candidate_cards (candidate_id, subject, from_name, received_at, link, reason, summary, proposal, attachments_needed, attachments, account)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
-        .run(
-          candidateId,
-          k.subject,
-          k.from,
-          k.receivedAt,
-          k.link,
-          k.reason ?? null,
-          k.summary,
-          JSON.stringify(k.proposal),
-          k.attachmentsNeeded ? JSON.stringify(k.attachmentsNeeded) : null,
-        )
+        .run(candidateId, ...cardCols(k))
     })
+  }
+
+  // 「内容を修正」（6.4 (5)）。カードの中身を書き換え、proposal_changed を足す。行が無ければ false
+  updateCandidateCard(candidateId: string, card: CardContent): boolean {
+    return this.transaction(() => {
+      const k = CardContent.parse(card)
+      const r = this.#db
+        .prepare(
+          `UPDATE candidate_cards SET subject = ?, from_name = ?, received_at = ?, link = ?, reason = ?, summary = ?,
+             proposal = ?, attachments_needed = ?, attachments = ?, account = ? WHERE candidate_id = ?`,
+        )
+        .run(...cardCols(k), candidateId)
+      if (!r.changes) return false
+      this.#appendCandidateEvent({ type: 'proposal_changed', candidateId }, jst(this.#now()))
+      return true
+    })
+  }
+
+  // ホームの候補の欄（5.2）。出したまま（presented）のものを新しい順に
+  listPresentedCandidates(): { candidate: CandidateRecord; card: CardContent }[] {
+    const rows = this.#db
+      .prepare(
+        `SELECT c.*, k.* FROM candidates c JOIN candidate_cards k ON k.candidate_id = c.candidate_id
+         WHERE c.status = 'presented' ORDER BY k.received_at DESC, c.candidate_id`,
+      )
+      .all() as Row[]
+    return rows.map((r) => ({ candidate: toCandidate(r), card: toCard(r) }))
   }
 
   getCandidate(candidateId: string): CandidateRecord | undefined {
@@ -459,21 +506,7 @@ export class Ledger {
     const r = this.#db.prepare('SELECT * FROM candidate_cards WHERE candidate_id = ?').get(candidateId) as
       | Row
       | undefined
-    return (
-      r &&
-      CardContent.parse(
-        clean({
-          subject: r.subject,
-          from: r.from_name,
-          receivedAt: r.received_at,
-          link: r.link,
-          reason: r.reason,
-          summary: r.summary,
-          proposal: JSON.parse(r.proposal as string),
-          attachmentsNeeded: r.attachments_needed === null ? null : JSON.parse(r.attachments_needed as string),
-        }),
-      )
-    )
+    return r && toCard(r)
   }
 
   // 出来事を 1 行足し、status が変わる出来事なら candidates の行も同じトランザクションで書き換える
@@ -669,6 +702,11 @@ export class Ledger {
       thread,
       thread,
     )
+  }
+
+  // 候補の中の会話は、見送ったら消す（他人のメールの要約を含む。9.1 の「後で消すもの」・6.4 (5)）
+  deleteMessages(thread: string) {
+    this.#db.prepare('DELETE FROM conversation_messages WHERE thread = ?').run(thread)
   }
 
   lastMessage(thread: string): ConversationMessage | undefined {

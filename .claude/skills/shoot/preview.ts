@@ -2,13 +2,14 @@
 // node --experimental-strip-types --no-warnings preview.ts <state> <port>
 // /state は状態名（着かなければ出さずに終わる）、/frame?w=&h=&id= は撮る枠（iframe）、/shot はペアリングして状態の画面へ
 // TMPDIR が無くても動く（os.tmpdir() は無ければ /tmp）
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { serve } from '@hono/node-server'
 import { CaseView } from '@libretto/shared/api'
 import { writeIsolation } from '../../../host/src/checks/isolation.ts'
+import { createGoogle } from '../../../host/src/intake/google.ts'
 import { initHome } from '../../../host/src/ledger/db.ts'
 import { createFake, type ScriptEntry } from '../../../host/src/model/fake.ts'
 import { createInvoke } from '../../../host/src/model/invoke.ts'
@@ -59,10 +60,28 @@ const invoke = createInvoke({
   log: () => {},
 })
 const origin = `http://127.0.0.1:${port}`
+// 連携済みの見た目だけを作る（Google へはつながない。取り込みは失敗して何もしない）
+if (def.google)
+  writeFileSync(
+    join(home, 'google.json'),
+    JSON.stringify({
+      refreshToken: 'shoot',
+      email: 'me@example.com',
+      scopes: [],
+      savedAt: '2026-10-24T09:00:00.000+09:00',
+    }),
+  )
+const google = createGoogle({
+  home,
+  ...(def.google && { config: { clientId: 'shoot', clientSecret: 'shoot' } }),
+  redirectUri: `${origin}/oauth/google/callback`,
+  endpoints: { token: `${origin}/no-google`, gmail: `${origin}/no-google` },
+})
 const server = createServer({
   home,
   ledger,
   invoke,
+  google,
   origins: [origin],
   staticDir: fileURLToPath(new URL('../../../page/dist', import.meta.url)),
   log: (l) => console.error(l),
@@ -111,6 +130,7 @@ if (!caseId) {
 const view = async () => CaseView.parse(await (await api(`/api/cases/${caseId}`)).json())
 const ctx: Ctx = {
   caseId: caseId as string,
+  ledger,
   view,
   act: async (a) => {
     const v = await view()

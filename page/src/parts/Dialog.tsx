@@ -1,6 +1,6 @@
 // Base UI を包む層（docs/implementation.md 5.5・5.8）。部品を差し替えるときはこの層だけを直す
 import { AlertDialog } from '@base-ui/react/alert-dialog'
-import { useState } from 'react'
+import { type ReactNode, useState } from 'react'
 
 type ConfirmProps = {
   trigger: string
@@ -12,6 +12,8 @@ type ConfirmProps = {
   busy?: boolean
   danger?: boolean
   triggerClass?: string
+  children?: ReactNode // 確かめの中で選ぶもの（見送りの理由など）
+  canConfirm?: boolean // false の間は実行を押せない（既定は押せる）
   onConfirm: () => void
 }
 
@@ -32,11 +34,13 @@ export function Confirm(p: ConfirmProps) {
         <AlertDialog.Popup className="dialog">
           <AlertDialog.Title className="dialog-title">{p.title}</AlertDialog.Title>
           <AlertDialog.Description className="dialog-body">{p.body}</AlertDialog.Description>
+          {p.children}
           <div className="dialog-actions">
             <AlertDialog.Close className="btn btn-secondary">{p.cancel}</AlertDialog.Close>
             <button
               type="button"
               className={p.danger ? 'btn btn-danger' : 'btn btn-primary'}
+              disabled={p.canConfirm === false}
               onClick={() => {
                 setOpen(false)
                 p.onConfirm()

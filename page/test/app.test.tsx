@@ -17,6 +17,7 @@ const empty: HomeView = {
   autoStarted: [],
   active: [],
   defaults: { 会話: '確認しながら', gmail: '確認しながら', slack: '確認しながら', meet: 'おまかせ' },
+  intake: { connected: false, running: false },
   host,
 }
 

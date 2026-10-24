@@ -5,6 +5,8 @@ import { serve } from '@hono/node-server'
 import { transition } from './case/transition.ts'
 import { causeOf, checkIsolation, probeDir } from './checks/isolation.ts'
 import { purgeClosed } from './facts/purge.ts'
+import { createGoogle, googleConfig } from './intake/google.ts'
+import { POLL_MS } from './intake/poller.ts'
 import { callsDir, caseDir, initHome, monthCapFromEnv, resolveHome } from './ledger/db.ts'
 import { createClaudeCli, resolveClaude } from './model/claude-cli.ts'
 import { createInvoke, type Job } from './model/invoke.ts'
@@ -85,11 +87,19 @@ const invokeWith = (box: Sandbox) =>
 const invoke = invokeWith(sandbox)
 const cause = causeOf(sandboxCheck.reason)
 const invokeControl: (job: Job) => ReturnType<typeof invoke> = invokeWith(control)
+// Google の戻り先はループバックに固定（デスクトップ型の OAuth クライアント。6.4 (2)）
+const gconfig = googleConfig()
+const google = createGoogle({
+  home,
+  ...(gconfig && { config: gconfig }),
+  redirectUri: `http://127.0.0.1:${port}/oauth/google/callback`,
+})
 const server = createServer({
   home,
   ledger,
   invoke,
   origins,
+  google,
   staticDir: fileURLToPath(new URL('../../page/dist', import.meta.url)),
   isolation: sandboxCheck.isolation,
   ...(cause && { cause }),
@@ -127,17 +137,32 @@ const timer = setInterval(() => {
   server.stop.tick(ticks % 15 === 0).catch((e) => console.error(e))
 }, 2_000)
 
+// 拾い上げは 15 分ごと（4.5）。止めている間は poller が起きない
+const intakeTimer = setInterval(() => void server.poller.run(), POLL_MS)
+void server.poller.run()
+
+// 待ち受けが 127.0.0.1 を含まない（Tailscale の IP・::1 など）ときは、Google の戻り先のために 127.0.0.1 にも（6.4 (2)）。
+// 先の待ち受けが済んでから開き、localhost のように同じところを指していれば（EADDRINUSE）開かずに続ける
+let loopback: ReturnType<typeof serve> | undefined
 const http = serve({ fetch: server.app.fetch, port, hostname: bind }, () => {
   const { url } = server.issuePairing('最初の端末', true)
   console.log(`libretto: http://${bind}:${port}`)
   console.log(`Open this URL once on the device to pair (valid 10 minutes): ${url}`)
+  if (['127.0.0.1', '0.0.0.0', '::'].includes(bind)) return
+  loopback = serve({ fetch: server.app.fetch, port, hostname: '127.0.0.1' })
+  loopback.on('error', (e: NodeJS.ErrnoException) => {
+    if (e.code !== 'EADDRINUSE') console.error(`libretto: 127.0.0.1:${port}: ${e.message}`)
+    loopback = undefined
+  })
 })
 
 // 通常の終了は遷移ではない（4.2 の末尾）。動いている仕事を止めて閉じる
 const shutdown = async () => {
   clearInterval(timer)
+  clearInterval(intakeTimer)
   await server.runs.abortAll()
   http.close()
+  loopback?.close()
   ledger.close()
   process.exit(0)
 }
