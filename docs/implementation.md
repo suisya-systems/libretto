@@ -1459,7 +1459,7 @@ S1 で作らないもの: Jev（Issue 17。S1 は jev の項目も Claude に回
 - 出力 `JudgeReply = { results: { id, units: { index, yes: true | false | null }[], reason }[] }`。`yes: null` は「この単位は決められない」。`withoutNulls` は使わない（null が意味を持つ）。受け入れ規則: 聞いた id がちょうど 1 回ずつ、各項目の units の index が 0〜単位の数−1 をちょうど覆う、`reason` が 1〜400 字。指示の例と出力の形は zod から作り、例が受け入れ規則に通ることをテストで確かめる。
 - 単位が 0 個の項目は Claude に聞かない（(2) の規則でコードが決める）。
 - 集計: `yes: null` の単位は、「はい」と見ても「いいえ」と見ても同じ結論ならその結論、違えば `unable`（例: count の max 0 で既に「はい」が 1 つあれば fail）。
-- `familyNote` は組が同系統のとき「確認項目は作り手と同じ系統が書きました」、`jevNote` は jev の項目が 1 件以上あるとき「判定専用モデルは使っていません」（S1 は常に Claude に回すため。7.3）。画面は `wording.ts` の文で出す。
+- `familyNote` は組が同系統のとき「確認項目は作り手と同じ系統が書きました」、`jevNote` は jev の項目が 1 件以上あるとき「判定専用モデルは使っていません」（S1 は常に Claude に回すため。Jev を使う形は 7.6 (5) で改めた。7.3）。画面は `wording.ts` の文で出す。
 
 理由（1 回のセッション）: 項目ごとに呼ぶと、同じ本文を項目の数だけ読ませることになり、費用と時間が項目の数に比例する。7.3 の 3 は「1 セッションで複数項目を聞いてよいが、返答は項目 id ごとの JSON」。理由（null を集計で扱う）: Claude に決められない単位を「いいえ」に倒すと、count の項目で決められないことが合格に化け、all の項目で不合格に化ける。
 
@@ -1737,7 +1737,7 @@ S1 で作らないもの: 共有リンク `/p/:shareToken` と `share.revoke` �
 | `classifyUndecided(brief, checks)` | 確認項目ごとに「依頼書だけから答えが決まるか」を別セッションに予測させ、確認項目の期待と照合 → `Undecided[]`（決まらない）と `Mismatch[]`（食い違う）。形は 6.2.2 (6) | Claude 別セッション（役割 `事実係・分類`。Codex 無しのときは Jev の Noul で補う。設計書 5.8.1。Jev は Issue 17） |
 | `inventoryClaims(draftText)` | 全文から事実の主張（数値・日付・固有名詞・比較・断定・セルの値）を抜き出し、位置を付ける → `Claim[]`（`{ id, text, range: [start,end], kind }`） | Haiku が候補、コードが位置 |
 | `fetchSource(ref)` | URL / Drive / 添付から該当段落を切り出す → `Excerpt | Unavailable` | — |
-| `supportsClaim(claim, excerpt)` | 命題「『出典の抜粋』は『主張』を支持している」 → `{ noul, confidence }` | Jev（無ければ Claude） |
+| `supportsClaim(claim, excerpt)` | 命題「『出典の抜粋』は『主張』を支持している」 → `{ supports: boolean \| null, noul?, by }`（Noul に自信度は付かない。7.6 (8)） | Jev（帯の中・無ければ Claude） |
 | `compareNumbers(materials, draft)` | 材料の数値が最終版で同じ値か → `{ matched, mismatched: { value, where }[] }` | — |
 | `extractVoice(docs)` | 文体カードの数値（設計書 5.5 の表） → `VoiceCard`。3 行の描写だけ Sonnet | 一部 Sonnet |
 | `pickVoiceSamples(docs)` | 読み比べ用の段落 3〜5 → `checks/voice-samples.md` | — |
@@ -1818,7 +1818,7 @@ judge(input, phase):
 
 「判定不能」の帯を 0.35〜0.65 にした理由: Noul の応答には自信度が付かない（自信度は Choice と Score の応答にだけ付く。設計書 5.7.1 の表で確かめた形）。確率が 0.5 の近くにある答えは「分からない」に近いので、0.5 で切らず帯で受け、別の読み手に回す。帯の幅は S3 の実モデル検証で見直す（Issue 17）。
 
-- Jev が無い・上限・一時エラーのときは、その項目を Claude に回し `Review.jevNote` に残す（設計書 5.7.4）。
+- Jev が無い・上限・一時エラーのときは、その項目を Claude に回し `Review.jevNote` に残す（設計書 5.7.4）。Claude に回す単位・state の置き方・注記の文は 7.6 (5)。
 - 形式の確認項目（送付確認待ちで流すもの）は同じ `judge()` を `phase: '形式'` で呼ぶ。往復の数は本文と形式を合わせて数える（4.2 T16・T21）。
 
 ### 7.4 Jev へ出す形
@@ -1848,12 +1848,13 @@ type Review = {
   voiceMatch?: { endings, sentenceLength, firstPerson, readAlike: boolean }
   familyNote?: string                    // 「確認項目は作り手と同じ系統が書きました」
   jevNote?: string                       // 「判定専用モデルは使っていません」等
+  jevBand?: [number, number]             // Jev を使った判定の帯（7.6 (5)）
 }
 type CheckResult = {
   id: string, verdict: 'pass' | 'fail' | 'unable' | 'skipped'   // skipped = 機械判定が落ちたので流さなかった（下の決め事）
   by: 'code' | 'jev' | 'claude'
   measured?: Record<string, number>      // code の測定値（字数・件数・率）
-  units?: { index: number, yes: boolean | null, noul?: number }[]   // jev の単位ごと。null = 判定不能（Claude に回した）
+  units?: { index: number, yes: boolean | null, noul?: number, claude?: true }[]   // 単位ごと。noul = Jev の答え、claude = Claude に回した単位（7.6 (5)）。null = 決められなかった
   reasonRef?: string                     // review-NN.reasons.md の見出し
 }
 ```
@@ -1863,6 +1864,139 @@ type CheckResult = {
 - **機械判定で打ち切ったときの表し方**（7.3 の手順 1）: `results` は**その phase に絞った全項目に 1 つずつ**（部分集合にしない）。流さなかったモデル判定の項目は `verdict: 'skipped'` で入れ、`units` も `reasonRef` も持たない。`pass` は results が全部 `pass` のときだけ真なので、`skipped` が 1 つでもあれば偽。`failedSummaries` は `fail` の項目の `summary` で、**`skipped` の項目の summary は入れない**（確かめていないことを作り手に「直して」と言わない。次の版で流される）。**`unable` の項目の summary も入れない**（GitHub #48 で改めた。作り手には直せない。6.2.7 (3)）。本人には承認・進行の面で「未判定 N 件」（`ReviewSummary.skipped`）として見せる。
   - `unable` は「流したが決まらなかった」（Jev の帯から Claude に回しても答えが出ない・出典が開けない等）で、費用を使った結果。`skipped` は「流していない」で費用ゼロ。1 つにまとめると、本人に見せる「判定できませんでした」と「まだ見ていません」が区別できず、費用の説明とも合わない。
   - 却下した案: (a) results を流した項目だけにする — 項目が無いのが「流していない」のか「判定の取りこぼし」なのかがファイルから分からず、7.3 の「全項目に結果」の検査ができない。(b) `unable` に含める — 上の理由。
+
+### 7.6 Jev の決め事（Issue 17 の着手前の設計レビューで決めたこと）
+
+7.3・7.4・6.3・10.2 と設計書 5.7・5.8.1 だけでは決まらない 12 点を決める。中身は `host/src/model/jev.ts`（中身）と `host/src/model/noul.ts`（質問をまとめて送る入口）、使う側は `host/src/roles/judge.ts`（判定）・`host/src/facts/inspect.ts`（項目の点検）・`host/src/facts/claims.ts`（`supportsClaim`）・`host/src/facts/instructions.ts`（`detectInstructions`）。
+
+作らないもの: 推測の分類（`classifyCandidate`。Issue 24）、出典の取り寄せと棚卸し（Issue 18。`supportsClaim` の呼び手）、拾い上げの候補カードの「AI への指示」の印（`detectInstructions` の呼び手。Issue 20・22・24）、「接続と合図」の面（上限到達の表示先。その面を作る Issue）。本物の Jev への接続は確かめていない（偽 Jev だけ。(12)）。
+
+**(1) 中身 `jev.ts` と `invoke` への載せ方**
+
+決めたこと:
+- `createJev({ key, usdJpy, baseUrl?, log? })` が `Backend` を返す（openai と同じ形）。`POST {base}/v1/systemone`、`Authorization: Bearer <鍵>`、本文 `{ model: 'jev-latest', state, questions }`。役割の表の `model: 'jev'` を `jev.ts` の表で `jev-latest` に直す。
+- **`Call` への載せ方**: 文字の材料（`materials`）を `state` に（`name → text`）、`instruction` を**質問の表の JSON**（`{ "<qid>": "<instructions>" }`）として読み、`questions[qid] = { type: 'noul', instructions }` にする。`access: 'none'` 以外とファイルの材料は例外（→ `unavailable`）。理由: `invoke`（費用の予約・精算・時間切れ・停止）を変えずに通せる。文章は state にだけ置かれ、instructions に混ざらない（7.4・設計書 10.1）。
+- 応答は `answers[qid].noul` が 0〜1 の数で、送った qid が全部そろうときだけ成功。成功の `text` は `{"answers":{"<qid>":<noul>}}`（呼ぶ側が zod で受ける）。**そろわない・数でない・範囲外は中身が `unavailable` を返し、言い直さない**。理由: Jev は文章を書かないので、「前の出力と直すところ」を渡しても直らず、その材料は state に混ざるだけ。claude-cli の「外側の器が壊れた」（6.1.2 (5) の 2）と同じ扱い。
+- 応答の表（上から当てる）:
+
+| 条件 | `Reply` | 費用 |
+|---|---|---|
+| 鍵が無い | `{ fail: 'unavailable' }` | 0（送っていない） |
+| 要求の見積もり（下）が `maxYen` を超える | `{ fail: 'unavailable' }` | 0（送っていない） |
+| 網の失敗（止めた・時間切れ以外） | 例外 → `unavailable` | `null`（予約の全額） |
+| `429` / `529` | `{ fail: 'unavailable', why: 'rate_limited' }`（(2) の再試行） | 0 |
+| その他の 4xx / 5xx（`401` を含む） | `{ fail: 'unavailable' }` | 0 |
+| `200` で答えがそろわない | `{ fail: 'unavailable' }` | 見積もり |
+| `200` で全部そろう | `{ text }` | 見積もり |
+
+- **費用は送る前の見積もりで精算する**: (直列化した要求の本文の UTF-8 バイト数 ＋ 256 ＋ 質問 1 つにつき 32) トークン × $0.042 / 100 万トークン（設計書 5.7.1）× `usdJpy`。1 トークンは 1 バイト以上なので上に倒れる。**見積もりが `maxYen`（1 回 1 円）を超える要求は送らない**（0 円で `unavailable`。呼ぶ側は Claude に回す）。理由: 応答に使用量の欄があるかを本物で確かめていない（偽 Jev しか無い。(12)）。欄を当て推量で読むより、上に倒れる見積もりで数えるほうが少なく数えない。`invoke` は中身が返した額をそのまま精算するので、予約を超える額を返さないことは中身が守る（6.1.3 (2) と同じ）。命題（`proposition`）に長さの上限は無いので、state の字数だけでなく直列化した全体で見積もる（設計レビューの指摘: 長い命題 1 つで 1.5 円になった）。本物で使用量の欄を確かめたら替える。
+- 鍵の扱いは openai と同じ（6.1.3 (4)）: 呼び出しのたびに `readKey`、値は見出しにだけ、log は状態コードだけ、例外は `new Error('jev: <種類>')` に包み直す。`why: 'auth_expired'` は付けない（6.1.3 (3) と同じ理由）。結果のファイル（9.4 (7)）は書かない（openai と同じ理由）。
+
+**(2) 時間切れと再試行の回数**
+
+決めたこと:
+- 時間切れは呼ぶ側の `limits.timeoutMs = 10_000`（7.4）。
+- **`429` / `529` の再試行は `invoke` が持ち、回数と待ち時間を系統ごとにする**: `createInvoke` の `retry`（既定: claude / openai は 1 回・60 秒、jev は 2 回・1 秒）。再試行は今までどおり別の `callId` で予約・精算する。再試行も `rate_limited` なら `unavailable` で返り、呼ぶ側はその質問を Claude に回す（落とさない）。
+- 理由: 7.4・設計書 5.7.4 は「2 回まで」、6.1.2 (3)・10.1 は「再試行の決まりは依存ごとに 1 か所で、`invoke` が持つ」。中身の中でやり直すと 1 つの `callId` に実際の呼び出しが 2 回入る。60 秒待つと、判定役の 10 分の中で Claude に回すより遅くなる。
+
+**(3) 質問をまとめて送る入口 `askNoul`**
+
+決めたこと（`host/src/model/noul.ts`。Jev を使う役割は全部ここを通す）:
+- 入力: `{ caseId, role: '判定役・命題' | '事実係・命題', groups: { state: Record<string, string>, questions: Record<qid, instructions> }[], signal }`。同じ state を共有する質問を 1 群にするのは呼ぶ側。**qid は全部の群を通して一意**（判定は `<checkId>:<unitIndex>`、項目の点検は `<checkId>:<問いの名前>`、`detectInstructions` は `L<元の行番号>`）。重なれば例外（呼ぶ側の誤り）。理由: 答えを 1 つの表で返すので、重なると前の群の答えを上書きする（設計レビューの指摘）。
+- 1 群を**質問 20 個ずつ**に分けて 1 要求にする。**state が 2,000 字を超える群は送らない**（その質問は答え無し）。理由: 7.4 の上限。長い材料は Jev の精度が落ちる（設計書 5.7.1）ので、切り詰めて送らず、答え無し（呼ぶ側が Claude に回す）にする。
+- 要求は**同時に 4 本まで**並列に送る。理由: 7.3 の「並列に」。1 案件の段落ぶん（数十本）を一度に出すと、混雑（`429`）を自分で起こす。
+- 鍵が無いときは送らない（`keyStatus` で見る。値は取り出さない）。
+- 出力: `{ ok: true, answers: Map<qid, number>, status: 'used' | 'no_key' | 'limit' | 'failed', partial: boolean }`（`used` = 1 つ以上答えた、`partial` = 失敗した要求が 1 つ以上ある）か、`{ ok: false, out }`。
+- **止める**: どれかの要求が `stopped` / `budget` を返したら、`askNoul` 用の `AbortController`（呼ぶ側の `signal` とつなぐ）を切って残りを送らず、動いている要求の決着を待ってから `{ ok: false, out }` を返す。呼ぶ側は Claude に回さず、今の仕事を止める（判定なら 6.2.5 (4) の `budget` / `stopped` と同じく遷移しない）。理由: 費用の上限で案件を止めた後に、並んでいる要求が送られ続け、再試行まで走る（設計レビューの指摘）。
+- それ以外の失敗（`unavailable` / `timeout` / `invalid_output`）は、その要求の質問を答え無しにして続ける。
+
+**(4) 1 日の上限**
+
+決めたこと:
+- **1 日（JST）の Jev の呼び出しの数**を、`costs` の `hold` 行のうち `family = 'jev'` の数で数える。再試行も 1 回と数える。上限は `invoke` の予約と**同じトランザクション**で確かめる: `reserveCost` に `daily?: { family, max }` を足し、その日の数が `max` 以上なら `hold` を書かずに `{ ok: false, scope: '1日' }` を返す。`invoke` はこれを `cost.cap` にせず、`{ ok: false, kind: 'unavailable', why: 'limit' }`（0 円）で返す。`askNoul` は `why: 'limit'` を受けたら、それ以降の要求を送らず `status: 'limit'`（答えた分は使う）にする。上限は `createInvoke` の `dailyLimits: { jev: 2000 }`。
+- 理由: 群ごとに頭で 1 回だけ見ると、並んだ群と再試行が上限を越えて走り、越える量に上限が無い（設計レビューの指摘）。予約と同じトランザクションなら、`BEGIN IMMEDIATE` で数えて書くので、同時の要求でも上限を越えない。
+- 上限に達したら、呼ぶ側は鍵が無いときと同じに Claude に回す（判定の `jevNote` も同じ文。(5)）。
+- **Issue の本文の「`classified` 行」は使わない**。理由: `classified` 行は推測の分類 1 候補につき 1 行（9.4 (1)。設計書 4.2.2 の 1 日 300 件の数え方で、推測の分類の Issue 24 が書く）で、Jev の呼び出しの数とは対応しない（判定や項目の点検の Jev は候補を持たない）。Jev の呼び出しには全部 `hold` 行が 1 行ずつ立つので、それを数えれば全部の使い道に 1 か所で効く。
+- 上限の値 2,000: 1 要求の予約は 1 円なので、上限まで使っても 1 日 2,000 円以下（実額は見積もりで 1 要求 0.2 円未満の見込み）。1 案件の判定は段落の数 × 往復 3 回で多くて 100〜200 要求で、1 日 10 案件ほどを見込む。上限は壊れた繰り返しの歯止めで、費用の上限は案件上限と全体上限が持つ。設定の面から変える形は「接続と合図」の Issue。
+- 「接続と合図」への上限到達の表示はその面を作る Issue。それまでは承認の面の注記（(5)）で分かる。
+
+**(5) 判定の Jev と判定不能の帯（7.3 の 2。6.2.5 (3) を直した）**
+
+決めたこと:
+- 機械判定が全部通った後、`jev` の項目を **単位ごとの群**にして `askNoul`（役割 `判定役・命題`、`maxYen` 1、`timeoutMs` 10 秒）で聞く。群は「単位」と「項目の `state` の組」が同じ項目をまとめる（同じ段落を同じ材料で聞く項目は 1 要求に並ぶ）。
+- **state に置くもの**: 項目の `state` の各値を名前に直して置く。`document` → `本文`（本文全体）、`section` → `節`（見出しと段落）、`paragraph` → `段落`、`brief.audience` → `読む人`、`brief.mustNot` → `してはいけないこと`（依頼書の該当欄）。単位そのもの（`scope` の単位）は必ず置く。**`scope` より細かい単位を `state` に挙げた項目**（例: scope が document で state に `paragraph`）と、`scope` と違う中間の単位を挙げた項目（例: scope が paragraph で state に `section`）は、どの単位を置くかが 1 つに決まらないので Jev に出さず、全部を Claude に回す。`document` は全文、`brief.*` は依頼書の欄なので、どの単位とも組める。state が 2,000 字を超える群は (3) のとおり送らない（Claude に回す）。理由: 下書き役が書けて受け入れ規則に通る組（例: scope paragraph・state `[paragraph, document]`）で、Jev に要る材料が欠けると、材料の足りない問いに確率が返る（設計レビューの指摘）。
+- **instructions**: `「<単位の名前>」について: <proposition>`。単位のほかに state があれば `（「本文」「読む人」と照らして）` のように、**実際に置いた名前**を並べる。文章は埋め込まない（7.4）。
+- 答えの読み方: `noul ≥ 0.65` → はい、`noul ≤ 0.35` → いいえ、間 → 判定不能（7.3）。帯の 2 つの値は `noul.ts` の定数で、判定ごとに `Review.jevBand: [0.35, 0.65]` を残す（帯を見直した後も、前の判定がどの帯で回したかが分かる。(11)）。
+- **Claude に回す単位**: (i) 帯の中、(ii) Jev が答えなかった（要求の失敗・state が長い・Jev に出せない組・鍵が無い・上限）。ただし Jev の答えだけで項目の結論が決まる（`verdictOf` が回す単位を「はい」と見ても「いいえ」と見ても同じ結論）ときは回さない。理由: 結論の変わらない単位を聞いても費用だけ掛かる。結論の出し方は 6.2.5 (3) の null の扱いと同じ述語。
+- Claude のセッションは今までどおり 1 回（`判定役・文章`）。`確かめること` の `units` を **数から index の並び**に変える（`{ id, ask, scope, units: number[] }`）。claude の項目は全部の index、jev の項目は回す単位だけ。受け入れ規則は「並べた index をちょうど 1 回ずつ」。回すものが無ければ Claude を呼ばない。
+- 結果: `CheckResult.units[i] = { index, yes, noul?, claude? }`。`noul` は Jev が答えた単位だけ。`claude: true` は Claude に回した単位（`yes` は Claude の答え。決められなければ null）。jev の項目の `by` は、Jev が 1 つ以上の単位に答えたら `'jev'`、全部 Claude なら `'claude'`。理由文は Claude に聞いた項目だけ。
+- `jevNote`（jev の項目が 1 件以上あるときだけ）: Jev が 1 単位も答えなかった（鍵が無い・上限・全部失敗・全部 Jev に出せない）→「判定専用モデルは使っていません」（今の文）。答えた単位はあるが失敗した要求がある →「一部は判定専用モデルにつながらず、別の読み手が判定しました」（足した）。帯で回したことは注記にしない（(6) の 1 行で見せる）。文の値は `shared/src/checks.ts` に置き、画面は値で引き分けて `wording.ts` の文を出す。
+- **停止・上限**: `askNoul` が `{ ok: false }` を返したら、judge は Claude を呼ばずに `{ ok: false, out }` を返す（runner は今までどおり遷移しない）。Jev の時間切れ・つながらないは判定の失敗にしない（Claude に回す。10.2）。
+- 却下した案: (a) 帯の単位も 0.5 で決める — 設計書 5.7.2 の「0.5 の近くは合否に使えない」に反する。(b) jev の項目ごとに Claude を別のセッションで呼ぶ — 同じ本文を何度も読ませる（6.2.5 (3) と同じ理由）。
+
+**(6) 承認の面の Jev の 1 行**
+
+決めたこと:
+- `ReviewSummary` に `jev?: { units: number, unsure: number }` を足す（`units` = Jev が答えた単位の数、`unsure` = そのうち帯の中で別の読み手に回した数）。Jev が 1 単位も答えていなければ欄ごと無い。
+- 承認の面の「チェックの結果」の注記に 1 行: 「判定専用の AI が {units} か所を確かめました」、`unsure > 0` なら「うち {unsure} か所は確信が低く、別の読み手が確かめました」を続ける。
+- 理由: 3 章の S3 の「承認の面に Jev の自信度が出る」と設計書 5.7.2 の「確率は判定の記録に残し、承認の面で…のように見せる」。確率そのもの（0.71 など）は出さない（本人には判断に使えない数で、要るのは帯の中か外か）。
+
+**(7) 項目の点検（設計書 5.8.1。同系統のときだけ）**
+
+決めたこと（`host/src/facts/inspect.ts`。入口の段取りから呼ぶ）:
+- **確認項目を同系統（Claude）が書いたとき**、項目ごとに 1 群（state = `依頼`（下書き役に渡した依頼の JSON）と `項目`（`title` と `expects(c)`。`summary` は入れない）、問い 3 つ）で `askNoul`（役割 `事実係・命題`）に聞く。qid は `<checkId>:derivable` / `:positive` / `:shapeOnly`。
+  - `derivable`: 「項目」の合格条件は、「依頼」から導ける
+  - `positive`: 「項目」の合格条件は、肯定形の命題で書かれている
+  - `shapeOnly`: 「項目」は、文書の種類・分量・保存先の形についてだけ述べている
+- 使い方（5.8.1 の線のまま。0.5 は合否ではなく入口の見立てに使う「どちらかといえば」の線）:
+  - `positive < 0.5` の項目があれば、**下書き役に 1 回だけ書き直させる**（同じ受け皿・少数派の指示の `invoke` を、材料「前のチェック項目」と「書き直してほしい項目」付きでもう 1 回）。書き直しが `ok` ならそれを使い、もう 1 度だけ点検する（書き直しは 2 度しない）。書き直しの `stopped` / `budget` は入口の失敗（今までどおり遷移しない）、ほかの失敗は書き直す前の項目を使う。
+  - `derivable < 0.5` の項目の id を、`classifyJob` の省いてよい引数 `hints` で渡し、材料「依頼から決まらない見込みの項目」に載せる（Claude の別セッションが問いと選択肢を作る。指示に「この一覧は別の読み手の見立てで、決めるのはあなた」と書く）。
+  - `shapeOnly ≥ 0.65` の項目の id を `ChecksFile.shapeOnly` に残し、入口の面で「書く側にも伝わる項目」の側に出す（`CheckForPerson.hidden = false` で返す。ファイルの項目の `hidden` は書き換えない）。0.65 は判定の「はい」と同じ線（見せる側に動かす誤りは目立つので、強い答えだけ）。
+  - 点検した組は `ChecksFile.inspected: true` を持つ。
+- Jev が使えない（鍵が無い・上限・全部失敗）ときは点検しない（入口の面は今までどおり。同系統の注記は既にある）。`askNoul` が `{ ok: false }`（止めた・上限）なら入口の失敗と同じに扱う。別系統で書いたときは点検しない（5.8.1 の「Codex がある」列は事実係の独立した分類だけ）。
+- 組の指紋（`setFingerprint`）に `shapeOnly` を入れる（本人が見た区分と承認が対応するため）。`shapeOnly` の無い組は今までの指紋と同じ値になる。
+- 却下した案: (a) `derivable < 0.5` を Jev だけで Undecided にする — Undecided には問いと選択肢が要り、Jev は文章を書かない。(b) `shapeOnly` で項目の `hidden` を書き換える — 下書き役が書いた印と本人が見た区分が別のものになり、後から食い違いを追えない。
+
+**(8) `supportsClaim`**
+
+決めたこと（`host/src/facts/claims.ts`。呼び手は Issue 18）:
+- `supportsClaim({ claim, excerpt }, deps)` → `{ ok: true, supports: boolean | null, noul?: number, by: 'jev' | 'claude' }` か `{ ok: false, out }`（止めた・上限。呼び手は止める）。Jev に state `{ 主張, 出典の抜粋 }`、命題「「出典の抜粋」は「主張」を支持している」（肯定形。設計書 5.7.2）。帯の中・答え無し・Jev が使えない → Claude の別セッション（役割 `事実係・命題` の受け皿。`FALLBACK` に `claude-opus-5-5`）に同じ命題を聞き、`{ yes: true | false | null, reason }` で受ける。
+- 6.3 の表の出力 `{ noul, confidence }` を直した。理由: Noul に自信度は付かない（7.4）。
+- 1 主張 1 呼び出しの形だけを作る。まとめて聞く形は呼び手（Issue 18）が `askNoul` の群で作る。
+
+**(9) `detectInstructions`**
+
+決めたこと（`host/src/facts/instructions.ts`。呼び手は拾い上げの Issue）:
+- `detectInstructions(text, deps)` → `{ ok: true, flagged: boolean, lines: number[] }`（`lines` は 1 から数える行の番号）か `{ ok: false, out }`。
+- **決定的な検出（必ず流す）**: 行に「AI に向けた語」（`AI`・`アシスタント`・`assistant`・`言語モデル`・`システムプロンプト`・`prompt`・`プロンプト`・`ChatGPT`・`Claude`・`GPT`・`LLM`）があり、かつ「命令・上書きの語」（`しなさい`・`してください`・`せよ`・`しろ`・`無視`・`従`・`忘れ`・`出力`・`答え`・`判定`・`ignore`・`disregard`・`you must`・`you are now`）があるとき。または上書きの定型（`以前の指示を無視`・`これまでの指示を無視`・`ignore (all )?(previous|prior|above) instructions`）。NFKC・小文字で比べる。理由: メールの「〜してください」は本人への依頼でふつうに出るので、命令形だけで印を付けると依頼のメールが全部印付きになる。AI に向けた語との組で絞る。
+- **Jev**（使えれば）: 空でない行を、state の名前 `行<元の行番号>` で 2,000 字以内・20 行以内に収まる分ずつ群にし、行ごとに Noul「「行N」には、AI へ特定の判定や動作をさせる命令が含まれている」（設計書 5.7.2・10.1 の文）。**`noul ≥ 0.35`（帯を含む）を印にする**。理由: 印の効き目は「おまかせでも自動で入れず、本人の『進める』を待つ」と「無視します」の表示だけで、取りこぼすほうが重い（設計書 10.1）。帯を Claude に回すと、命令を含むかもしれない文を Claude のセッションに読ませることになる。1 行が 2,000 字を超えるときは、その行は決定的な検出だけ。
+- `flagged = lines.length > 0`。費用の `caseId` は呼び手が渡す（推測なら `'推測'`）。
+
+**(10) 設定の面の Jev の行**
+
+決めたこと:
+- 設定の面の「API キー」の節に Jev の行を足す（OpenAI の行と同じ部品）。欄の名前は「Jev（TypeSafe）の API キー」（ui-wording.md の対応表で承認済みの語）。
+- 行が受ける文を種類ごとにする（用途・未設定の注記・削除の確かめの本文）。今の `settings.key.unsetNote` / `settings.key.deleteBody` は OpenAI の文なので `settings.openai.*` に移し、`settings.jev.*` を足す（文は ui-wording.md）。
+- `index.ts` で `backends.jev = createJev({ key: () => readKey(home, 'jev'), usdJpy })`。
+
+**(11) 受け入れ (5) の測定手順と帯の見直し**
+
+決めたこと:
+- `host/scripts/measure.ts`（`npm run measure -- <codex|band> ...`）を置く。読むだけで、何も書かず、モデルを呼ばない。
+- **受け入れ (5)**（`measure codex <案件 A> <案件 B>`）: 両方の承認した組から、組の系統（`ChecksFile.family`）・「依頼に書いていない」項目の数・第 1 版の本文の判定（`review-01-a.json`）の `pass` / `fail` / `unable` / `skipped` の数を並べる。**A が `別系統`・B が `同系統` でなければ比べない**（鍵を入れていても、別系統の呼び出しが失敗すれば同系統で書かれる。6.1.3 (5)）。**どちらかの第 1 版に `skipped` があれば「比べられない」と出す**（機械判定が 1 つ落ちるとモデル判定は流れない（7.3）ので、落ちた数が同じでも、比べたい項目を確かめていない）。
+  - 手順: 同じ依頼を 2 回出す（1 回目は OpenAI の API キーあり、2 回目は削除して）→ 両方を入口で承認して第 1 版の判定まで進める → `measure codex`。「比べられない」なら依頼を変えて出し直す（分量の機械判定が落ちにくい依頼を選ぶ）。比べられる組を 3 組以上集め、「依頼に書いていない」項目の数と第 1 版で落ちた数に差が無ければ、OpenAI の鍵を必須にしない（設計書 5.8.2）。決めるのはオーナー。
+- **帯の見直し**（`measure band`）: `<LIBRETTO_HOME>/cases/*/review-*.json` の jev の単位を集め、`noul` の 0.05 刻みの分布と、**Claude に回した単位（`claude: true`）のうち Claude が決めたもの（`yes` が null でない）**について「Jev の 0.5 の側」と Claude の答えが一致した割合を出す。帯は判定ごとの `jevBand` で読む（今の定数で読み直さない）。帯の縁（0.25〜0.35 と 0.65〜0.75）の単位は、案件・版・項目・単位の index を並べ、本人が本文を開いて合っているかを付けられる一覧にする。
+  - 手順: 本物の Jev で 5 案件以上を判定した後に `measure band`。帯の中での一致率が高く（目安 9 割以上）縁の一覧も合っていれば帯を狭める案、縁の一覧で誤りが目立てば広げる案を作る。**変えるかはオーナーが決める**（窓口経由）。帯の値は `noul.ts` の定数 2 つ。
+- 本物の Jev で確かめること（窓口経由でオーナーに）: 応答の形（`answers.<qid>.noul`）、使用量の欄の有無（(1) の見積もりを替えるか）、日本語の命題での `noul` の分布。
+
+**(12) テスト（偽 Jev）**
+
+- 中身: プロセス内の偽 TypeSafe（openai と同じ形。11.1 の「外部の fake」）で、送る形（model・state・questions・見出し）、答えの読み取り、`429` / `529` の再試行 2 回（`invoke` 越し）、`401` の 0 円、答えの欠け、見積もりの費用と上限超えの不送信、鍵が log に出ないこと。
+- `askNoul`: 20 個で分ける・2,000 字超は送らない・同時 4 本・qid の重なりの例外・鍵無し・1 日の上限（予約と同じトランザクション。同時の要求で越えない）・1 つの要求の失敗で他は続く・`stopped` / `budget` で残りを送らず決着を待つ。
+- 判定: Jev だけで決まる（Claude を呼ばない）、帯の単位だけ回す、結論が決まれば回さない、Jev に出せない組と state の長さで回す、要求の失敗で回して `jevNote` が「一部は」、鍵無しで全部回して今の `jevNote`、`units[].noul` / `claude`・`by: 'jev'`・`jevBand`・`ReviewSummary.jev`。
+- 入口: 同系統＋Jev で点検 → `positive` の書き直し 1 回、`derivable` の材料が分類に渡る、`shapeOnly` で入口の面の `hidden: false`。別系統・鍵無しでは点検しない。
+- `supportsClaim`（Jev で決まる / 帯で Claude）、`detectInstructions`（決定的の当たりと外れ（ふつうの依頼のメールは当たらない）、Jev の印、Jev 無し）。
+- 画面: 設定の面の Jev の行、承認の面の 1 行、文言の「出さない語」。
 
 ---
 
@@ -2541,7 +2675,7 @@ type Unavailable = { ok: false, dep: 'claude'|'openai'|'jev'|'gmail'|'slack'|'dr
 |---|---|---|---|
 | **Claude CLI**（`claude -p`） | 話し相手・下書き役・作り手・判定役・事実係 | `timeout`（役割ごとの上限: 話し相手 2 分、下書き役 10 分、作り手 30 分、判定役 10 分）→ セッションを終了し、`fail.system(時間切れ)` で **停止**（T27b）。`budget`（CLI が上限で止めた）→ `cost.cap` と同じ。`auth_expired` → 全案件を止めず、新しい呼び出しを**起こさない**（runner が待つ）。`rate_limited` → 60 秒後に 1 回だけ再試行（`invoke` が別の呼び出しとして予約・精算する）、だめなら停止。CLI の JSON からの読み取り・通知口・再試行の持ち主は 6.1.2 (3)(5) | 会話欄に 1 行。「接続と合図」の「別の目での検品」欄に Claude の状態 |
 | **OpenAI**（確認項目の下書き） | 入口 | `no_key` / `auth_expired` / `network` / `rate_limited`（1 回再試行後。6.1.3 (7)）・`timeout`・`invalid_output` → **同系統に落ちる**（6.1.3 (5)）（設計書 5.8。`family: '同系統'` を `checks.json` に記録、入口と承認の面に表示） | 「確認項目は、作り手と同じ系統の AI が書きました」 |
-| **Jev**（TypeSafe） | 判定・項目の点検・分類・「AI への指示」 | `timeout`（10 秒）/ `rate_limited`（`429`/`529` を 2 回再試行）/ `network` → **その項目だけ Claude に回す**。`no_key` → 全項目を Claude に回し `jevNote`。1 日の上限 → 同じ | 「判定専用モデルは使っていません」（`jevNote`）。「接続と合図」に上限到達 |
+| **Jev**（TypeSafe） | 判定・項目の点検・分類・「AI への指示」 | `timeout`（10 秒）/ `rate_limited`（`429`/`529` を 2 回再試行。`invoke` が持つ。7.6 (2)）/ `network` → **その項目だけ Claude に回す**。`no_key` → 全項目を Claude に回し `jevNote`。1 日の上限（予約と同じトランザクションで数える。7.6 (4)）→ 同じ | 「判定専用モデルは使っていません」（`jevNote`）。「接続と合図」に上限到達 |
 | **Gmail** | 合図の検索・推測の読み取り・ラベル付け | `auth_expired` → 拾い上げの Gmail 部分を止め、「接続と合図」に「つなぎ直してください」。`rate_limited` → この周期は飛ばす。ラベル付け（`libretto/見た`）の失敗は候補を**出した上で**次回に付け直す | 接続欄に状態。候補カードは出る |
 | **Slack** | `reactions.list`・履歴・検索 | 同上。トークンの失効は `invalid_auth` を `auth_expired` に写す | 同上 |
 | **Drive** | Meet メモの検索・出典の読み取り・Google 形式の作成・読み戻し | 作成の `network`/`timeout` → **その届け先は `不明`**（T25。再送しない。次の周期で `appProperties.librettoAttempt` で探す）。読み戻し照合の不一致 → `delivery.mismatch`（T24b。作られたファイルは残り、本人に削除を案内）。出典が開けない → `facts.json` に `開けない`（不合格の材料） | 送付の面に「届いたか確かめています」 |

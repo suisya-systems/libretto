@@ -414,7 +414,7 @@ libretto の画面に出す言葉の正本。設計書（[`docs/design.md`](./de
 
 **承認の面（画面 4。実装設計書 6.2.5 (8)）**
 
-`approval.diff.*` は前のバージョンとの違いの 1 行の印。`approval.early.*` は 3 回目を待たずに本人に上げたときだけ、「直しきれなかった項目が N 件」の下に出す 1 行（なぜ今あなたの番なのか）。`approval.stuck` は 2 回続けて直らなかった項目に付ける印（実装設計書 6.2.7 (5)）。履歴の `event.review.fail` / `event.format.failed` は、行き先が承認待ちなら `.up`、停止なら `.stop` の文に替える。`approval.sameFamily` と `approval.noJudgeModel` は判定の結果の注記（`familyNote` / `jevNote` があるとき）。
+`approval.diff.*` は前のバージョンとの違いの 1 行の印。`approval.early.*` は 3 回目を待たずに本人に上げたときだけ、「直しきれなかった項目が N 件」の下に出す 1 行（なぜ今あなたの番なのか）。`approval.stuck` は 2 回続けて直らなかった項目に付ける印（実装設計書 6.2.7 (5)）。履歴の `event.review.fail` / `event.format.failed` は、行き先が承認待ちなら `.up`、停止なら `.stop` の文に替える。`approval.sameFamily` と `approval.noJudgeModel` / `approval.judgeModelPartial` は判定の結果の注記（`familyNote` / `jevNote` があるとき）。`approval.judgeModel` / `approval.judgeModelUnsure` は判定専用の AI が確かめた数（`ReviewSummary.jev`。実装設計書 7.6 (6)）。
 
 | キー | 文 |
 |---|---|
@@ -447,6 +447,9 @@ libretto の画面に出す言葉の正本。設計書（[`docs/design.md`](./de
 | `approval.unable` | 判定できませんでした |
 | `approval.sameFamily` | チェック項目は、書く側と同じ種類の AI が作りました |
 | `approval.noJudgeModel` | 判定は、書く側と同じ種類の AI が読んで行いました |
+| `approval.judgeModelPartial` | 一部の判定は、判定専用の AI につながらず、書く側と同じ種類の AI が読んで行いました |
+| `approval.judgeModel` | 判定専用の AI が {units} か所を確かめました |
+| `approval.judgeModelUnsure` | うち {unsure} か所は確信が低く、別の読み手が確かめました |
 
 **送付の面（画面 5。実装設計書 6.2.8 (6)）**
 
@@ -495,7 +498,7 @@ libretto の画面に出す言葉の正本。設計書（[`docs/design.md`](./de
 | `done.open` | 開く |
 | `done.empty` | 完了した依頼はありません |
 
-**設定の面（画面 7 の API キーの節。実装設計書 6.1.3 (6)）**
+**設定の面（画面 7 の API キーの節。実装設計書 6.1.3 (6)・7.6 (10)）**
 
 `entrance.fallback.*` は入口の面で、チェック項目を同じ種類の AI が作った理由（API キーが無い / つながらなかった）と次の一手。「OpenAI の API キー」は欄の名前としてオーナーが承認した語（対応表の「鍵・キー」の行）。
 
@@ -504,8 +507,13 @@ libretto の画面に出す言葉の正本。設計書（[`docs/design.md`](./de
 | `settings.keysHeading` | API キー |
 | `settings.openai.label` | OpenAI の API キー |
 | `settings.openai.use` | チェック項目を、書く側とは別の種類の AI に作らせます。 |
+| `settings.openai.unsetNote` | 未設定のあいだは、書く側と同じ種類の AI がチェック項目を作ります。 |
+| `settings.openai.deleteBody` | 削除すると、チェック項目は書く側と同じ種類の AI が作ります。 |
+| `settings.jev.label` | Jev（TypeSafe）の API キー |
+| `settings.jev.use` | 文章が条件を満たすかを、判定専用の AI に確かめさせます。 |
+| `settings.jev.unsetNote` | 未設定のあいだは、書く側と同じ種類の AI が判定します。 |
+| `settings.jev.deleteBody` | 削除すると、判定は書く側と同じ種類の AI が行います。 |
 | `settings.key.unset` | 未設定 |
-| `settings.key.unsetNote` | 未設定のあいだは、書く側と同じ種類の AI がチェック項目を作ります。 |
 | `settings.key.set` | 設定済み（末尾 {last4}） |
 | `settings.key.savedAt` | {at} に保存 |
 | `settings.key.input` | API キーを貼り付け |
@@ -514,7 +522,6 @@ libretto の画面に出す言葉の正本。設計書（[`docs/design.md`](./de
 | `settings.key.cancel` | やめる |
 | `settings.key.delete` | 削除 |
 | `settings.key.deleteTitle` | API キーを削除しますか |
-| `settings.key.deleteBody` | 削除すると、チェック項目は書く側と同じ種類の AI が作ります。 |
 | `settings.key.saved` | 保存しました。次の依頼から使います。 |
 | `settings.key.deleted` | 削除しました。 |
 | `settings.key.invalid` | 8 文字以上の半角の英数字と記号で入れてください。空白は入れられません。 |
