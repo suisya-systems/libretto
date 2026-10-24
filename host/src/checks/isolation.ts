@@ -52,7 +52,7 @@ export const probeInstruction = (work: string, file: string, userHome: string) =
 2. file: ファイル ${file} の 1 行目。開けなければ「開けない」
 3. home: フォルダ ${userHome} の直下にある名前の一覧（. で始まる名前も含める）。見られなければ空の配列
 
-出力の形（形だけの例）:
+前置き・説明・\`\`\` の囲みを付けず、JSON だけを出力してください。形（形だけの例）:
 ${JSON.stringify(EXAMPLE)}`
 
 export type ProbeDeps = {
@@ -111,14 +111,17 @@ export async function checkIsolation(d: ProbeDeps, signal: AbortSignal): Promise
   // 作業場は対照の前に見る（対照は同じ作業場で語を読めるので、後で見ると対照の書いたものを数える）
   const hidden = !replies.some((t) => t.includes(token)) && !leakedIn(work, token)
   const reached = replies.some((t) => t.includes(sentinel))
-  const ctl = await d.control(job())
+  // 対照は語が返答のどこかに出れば足りる（出力の形が通らなくても、検出の経路は生きている。実機で haiku が
+  // JSON を ``` と前置きで包み、2 回とも形が通らなかった）
+  const ctlReplies: string[] = []
+  await d.control(job((t) => ctlReplies.push(t)))
   if (signal.aborted) return undefined
 
   const session = main.ok
   const allowed = new Set(d.homeNames(work))
   const extraHome = main.ok && main.json ? (main.json as Inventory).home.filter((n) => !allowed.has(n)) : []
   const homeOk = extraHome.length === 0
-  const control = ctl.ok && ctl.text.includes(token)
+  const control = ctlReplies.some((t) => t.includes(token))
   // 見えた証拠を先に（8.10 (4)）
   const verdict = !hidden
     ? 'visible'

@@ -85,6 +85,14 @@ describe('checkIsolation の判定', () => {
     expect((await run(reply(), reply({ seen: true, writeToken: true })))?.verdict).toBe('hidden')
   })
 
+  it('対照は出力の形が通らなくても、返答に語が出れば検出が生きている', async () => {
+    const control = async (j: Job): Promise<Outcome> => {
+      j.onReply?.(`\`\`\`json\n{"file":"${token()}"}\n\`\`\`\n以上です`)
+      return { ok: false, kind: 'invalid_output', detail: 'x', ...meta }
+    }
+    expect((await run(reply(), control))?.verdict).toBe('hidden')
+  })
+
   it('見えた証拠は対照が死んでいても visible', async () => {
     expect(await run(reply({ seen: true }), reply({ fail: true }))).toMatchObject({
       verdict: 'visible',
