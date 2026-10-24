@@ -501,8 +501,10 @@ describe('閉じるときの削除（6.3.1 (10)）', () => {
         'checks/voice-samples.md',
         'checks/checks.json',
         'facts.json',
-      ])
-        mkdirSync(join(dir, p, '..'), { recursive: true }), writeFileSync(join(dir, p), 'x')
+      ]) {
+        mkdirSync(join(dir, p, '..'), { recursive: true })
+        writeFileSync(join(dir, p), 'x')
+      }
       return dir
     }
     const open = mk('open')

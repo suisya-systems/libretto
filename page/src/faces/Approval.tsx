@@ -11,12 +11,12 @@ import { W, w } from '../wording.ts'
 import { CaseHeader, History, Versions } from './Progress.tsx'
 
 type Changes = z.infer<typeof DraftDiff>['changes']
-// 出典ごとの結果の色（凡例は tokens.css）
+// 出典ごとの結果の色（凡例は tokens.css）。赤は「出典が主張を支えない」だけ。開けなかったのは分からないだけなので、あなたが開くための黄
 const SOURCE_BADGE = {
   支持: 'b-done',
   一部支持: 'b-you',
   支持しない: 'b-alert',
-  開けない: 'b-alert',
+  開けない: 'b-you',
   未判定: 'b-off',
 } as const
 
@@ -276,8 +276,9 @@ export function ApprovalFace({
                 <ul className="sources">
                   {sources.map((s) => (
                     <li key={s.ref} className="source">
-                      <a href={s.ref} target="_blank" rel="noopener noreferrer" className="source-title">
+                      <a href={s.ref} target="_blank" rel="noopener noreferrer" className="strong source-title">
                         {s.title}
+                        <span className="muted small">（{W['approval.sourceOpens']}）</span>
                       </a>
                       <span className="row-gap">
                         <span className={`badge badge-sm ${SOURCE_BADGE[s.verdict]}`}>

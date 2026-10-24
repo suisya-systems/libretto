@@ -194,8 +194,8 @@ describe('承認の面', () => {
     })
     const items = [...r.el.querySelectorAll('.source')]
     expect(items.map((x) => x.textContent)).toEqual([
-      `調査 A${W['approval.source.支持']}${w('approval.sourceClaims', { n: 2 })}`,
-      `調査 B${W['approval.source.開けない']}${w('approval.sourceClaims', { n: 1 })}`,
+      `調査 A（${W['approval.sourceOpens']}）${W['approval.source.支持']}${w('approval.sourceClaims', { n: 2 })}`,
+      `調査 B（${W['approval.sourceOpens']}）${W['approval.source.開けない']}${w('approval.sourceClaims', { n: 1 })}`,
     ])
     const a = items[0]?.querySelector('a')
     expect([a?.getAttribute('href'), a?.getAttribute('target'), a?.getAttribute('rel')]).toEqual([

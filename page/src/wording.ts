@@ -296,6 +296,7 @@ export const W = {
   'approval.source.開けない': '開けませんでした',
   'approval.source.未判定': 'まだチェックしていません',
   'approval.sourceClaims': '主張 {n} 件',
+  'approval.sourceOpens': '別のタブで開く',
   'deliver.eyebrow': 'あなたの番',
   'deliver.what': '何を',
   'deliver.where': 'どこへ',

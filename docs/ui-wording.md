@@ -463,6 +463,7 @@ libretto の画面に出す言葉の正本。設計書（[`docs/design.md`](./de
 | `approval.source.開けない` | 開けませんでした |
 | `approval.source.未判定` | まだチェックしていません |
 | `approval.sourceClaims` | 主張 {n} 件 |
+| `approval.sourceOpens` | 別のタブで開く |
 
 **送付の面（画面 5。実装設計書 6.2.8 (6)）**
 
