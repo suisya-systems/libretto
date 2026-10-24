@@ -6,7 +6,8 @@ import { keyStatus } from './keys.ts'
 // 判定不能の帯（7.3）。noul ≥ high → はい、≤ low → いいえ、間 → 別の読み手に回す。見直しは 7.6 (11)
 export const BAND = { low: 0.35, high: 0.65 } as const
 export const JEV_LIMITS = { maxYen: 1, timeoutMs: 10_000 }
-export const JEV_DAILY_LIMIT = 2000
+// オーナー判断（2026-10-24）: Jev はとても安いので 2 万回程度でよい（7.6 (4)）
+export const JEV_DAILY_LIMIT = 20_000
 const MAX_STATE = 2000 // 1 要求の state の字数（7.4）
 const MAX_QUESTIONS = 20
 const PARALLEL = 4
