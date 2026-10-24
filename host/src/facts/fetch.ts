@@ -9,7 +9,7 @@ import { decode } from '../checks/text.ts'
 export type Fetched = { ok: true; url: string; title: string; paragraphs: string[]; fingerprint: string }
 export type FetchFailure = {
   ok: false
-  why: 'network' | 'timeout' | 'refused' | 'too_large' | 'unsupported' | 'blocked'
+  why: 'network' | 'timeout' | 'refused' | 'unsupported' | 'blocked'
 }
 
 export const FETCH_LIMITS = { timeoutMs: 10_000, maxBytes: 2 * 1024 * 1024, redirects: 3 }
@@ -184,16 +184,7 @@ function onResponse(res: IncomingMessage, resolve: (o: Once) => void) {
   const charset = /charset=["']?([\w-]+)/i.exec(type)?.[1] ?? 'utf-8'
   const chunks: Buffer[] = []
   let size = 0
-  res.on('data', (c: Buffer) => {
-    size += c.length
-    if (size > FETCH_LIMITS.maxBytes) {
-      res.destroy()
-      return resolve({ kind: 'fail', why: 'too_large' })
-    }
-    chunks.push(c)
-  })
-  res.on('error', () => resolve({ kind: 'fail', why: 'network' }))
-  res.on('end', () => {
+  const done = () => {
     let decoder: TextDecoder
     try {
       decoder = new TextDecoder(charset)
@@ -201,5 +192,16 @@ function onResponse(res: IncomingMessage, resolve: (o: Once) => void) {
       decoder = new TextDecoder('utf-8')
     }
     resolve({ kind: 'body', body: decoder.decode(Buffer.concat(chunks)), html })
+  }
+  // 上限を超えたら先頭の 2 MB だけを読んで切る（公式の更新履歴は大きく、新しいものが頭にある。6.3.3 (5)）
+  res.on('data', (c: Buffer) => {
+    const room = FETCH_LIMITS.maxBytes - size
+    size += c.length
+    if (size <= FETCH_LIMITS.maxBytes) return void chunks.push(c)
+    chunks.push(c.subarray(0, room))
+    res.destroy()
+    done()
   })
+  res.on('error', () => resolve({ kind: 'fail', why: 'network' }))
+  res.on('end', done)
 }
