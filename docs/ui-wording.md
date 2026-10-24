@@ -229,7 +229,6 @@ libretto の画面に出す言葉の正本。設計書（[`docs/design.md`](./de
 | `case.notFound` | この依頼は見つかりません |
 | `case.cost` | 費用 |
 | `case.pending` | この依頼の詳しい画面は準備中です |
-| `face.deliver` | 保存先の確認 |
 
 **依頼の確認（入口の面。実装設計書 6.2.2 (10)）**
 
@@ -384,6 +383,10 @@ libretto の画面に出す言葉の正本。設計書（[`docs/design.md`](./de
 | `event.review.fail.stop` | チェックで直しきれない項目があり、中止しました |
 | `event.format.failed.up` | 保存先の形で直しきれない項目があり、あなたの確認に回しました |
 | `event.format.failed.stop` | 保存先の形で直しきれない項目があり、中止しました |
+| `event.delivery.send` | 保存を頼みました |
+| `event.delivery.decline` | 保存しないで戻りました |
+| `event.delivery.done` | 保存先に保存しました |
+| `event.delivery.failed` | 保存できなかったので中止しました |
 | `reason.本人が止めた` | あなたが中止しました |
 | `reason.緊急停止` | すべて停止で中止しました |
 | `reason.費用上限` | 費用の上限に達しました |
@@ -432,3 +435,50 @@ libretto の画面に出す言葉の正本。設計書（[`docs/design.md`](./de
 | `approval.unable` | 判定できませんでした |
 | `approval.sameFamily` | チェック項目は、書く側と同じ種類の AI が作りました |
 | `approval.noJudgeModel` | 判定は、書く側と同じ種類の AI が読んで行いました |
+
+**送付の面（画面 5。実装設計書 6.2.8 (6)）**
+
+保存先の確認。ゲート③の型「何を・どこへ・誰に見えるか」で並べ、「はい」で答えられる形にする（設計書 6 章）。`deliver.visibility.*` は `DeliveryPlan.visibility` の値ごと。保存先の名前は `dest.*`。
+
+| キー | 文 |
+|---|---|
+| `deliver.eyebrow` | あなたの番 |
+| `deliver.what` | 何を |
+| `deliver.where` | どこへ |
+| `deliver.who` | 誰に見えるか |
+| `deliver.visibility.あなただけ` | あなただけ |
+| `deliver.visibility.ほかの人にも見える` | ほかの人にも見える |
+| `deliver.checked` | 保存先の形のチェックは通りました |
+| `deliver.send` | この内容で保存する |
+| `deliver.decline` | 保存しないで戻る |
+| `deliver.looksHeading` | 保存先ごとの見え方 |
+| `deliver.pageNote` | 保存すると、バージョン付きの Web ページで開けます。ほかの人に見せるときは、HTML をダウンロードして渡せます。 |
+| `deliver.pasteNote` | 保存すると、この文をコピーして note などに貼り付けられます。 |
+| `deliver.pasteFailed` | 貼り付け用の文を読み込めませんでした |
+
+**成果の面（完了。実装設計書 6.2.8 (7)）**
+
+保存先ごとの受け取り口。`result.lead` の `{at}` は完了した日時。`result.copyFailed` はクリップボードが使えないときだけ出す。
+
+| キー | 文 |
+|---|---|
+| `result.eyebrow` | 完了 |
+| `result.heading` | 保存しました |
+| `result.lead` | バージョン {n}・{at} |
+| `result.openPage` | ページを開く |
+| `result.receiveHeading` | 受け取る |
+| `result.saved` | 保存済み |
+| `result.download` | HTML をダウンロード |
+| `result.downloadNote` | HTML をダウンロードして渡せます |
+| `result.copy` | 本文をコピー |
+| `result.copied` | コピーしました |
+| `result.copyFailed` | コピーできませんでした。下の欄から選んでコピーしてください |
+| `result.pagesHeading` | バージョンごとのページ |
+| `result.pageOf` | バージョン {n} のページ |
+
+**完了した依頼（`/done`。実装設計書 6.2.8 (9)）**
+
+| キー | 文 |
+|---|---|
+| `done.open` | 開く |
+| `done.empty` | 完了した依頼はありません |

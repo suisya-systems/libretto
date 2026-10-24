@@ -2,17 +2,17 @@
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { CaseView, DraftDiff } from '@libretto/shared/api'
+import { CaseCard, CaseView, DraftDiff, HomeView } from '@libretto/shared/api'
 import { Review } from '@libretto/shared/checks'
 import { VersionManifest } from '@libretto/shared/ledger'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { transition } from '../src/case/transition.ts'
-import { charCount, headingCount } from '../src/checks/text.ts'
+import { charCount, headingCount, renderHtml } from '../src/checks/text.ts'
 import { caseDir, initHome } from '../src/ledger/db.ts'
 import type { Ledger } from '../src/ledger/ledger.ts'
 import { createFake, type ScriptEntry, type ScriptReply } from '../src/model/fake.ts'
 import { type Backend, createInvoke } from '../src/model/invoke.ts'
-import { judgeFormat, OUTPUT_FILES } from '../src/roles/judge.ts'
+import { OUTPUT_FILES } from '../src/roles/judge.ts'
 import { MAKER_LIMITS } from '../src/roles/maker.ts'
 import { createServer } from '../src/server/app.ts'
 import { briefDraft, classified, goodChecks } from './fixtures/entrance.ts'
@@ -79,7 +79,7 @@ const draft = (k: number, md = BODY): ScriptReply => ({
   text: '書きました',
   write: {
     [`draft-${nn(k)}.md`]: md,
-    [`draft-${nn(k)}.html`]: '<h1>ブレストのまとめ</h1>',
+    [`draft-${nn(k)}.html`]: renderHtml(md),
     [`draft-${nn(k)}.done`]: 'done',
   },
 })
@@ -511,7 +511,11 @@ describe('判定役', () => {
     expect((await stale.json()).reason).toBe('stale')
     const fp = (await caseView(id)).versions[0]?.fingerprint
     expect((await act(id, { type: 'approval.ok', marks: {}, versionFingerprint: fp })).status).toBe(200)
-    expect(ledger.getCase(id)).toMatchObject({ state: '送付確認待ち', turn: 'libretto' })
+    expect(ledger.listApprovals(id).find((a) => a.gate === '完成稿')).toMatchObject({
+      version: 1,
+      versionFingerprint: fp,
+    })
+    await vi.waitFor(() => expect(ledger.getCase(id)).toMatchObject({ state: '送付確認待ち', turn: '本人' }))
   })
 
   it('T16 → T17: 不合格は 1 行要約だけを作り手へ戻し、3 回目で承認待ち（残りの理由文付き）', async () => {
@@ -728,47 +732,25 @@ describe('判定役', () => {
     expect(ledger.getCase(id)?.stopReason).toBe('つながらない')
   })
 
-  // 仕立て（Issue 12）が書く成果物を置いて、形式の判定を呼ぶ
-  async function readyToFormat() {
-    await setup(script(...upToEntrance, ['作り手', draft(1)], ['判定役・文章', verdicts(true)]), real)
+  // 承認まで進めて、runner が仕立てと形式の判定を流す（6.2.8 (1)）
+  async function approveFinal(maker = draft(1)) {
+    await setup(script(...upToEntrance, ['作り手', maker], ['判定役・文章', verdicts(true)]), real)
     const id = await approved()
     await waitState(id, '承認待ち')
-    const fp = (await caseView(id)).versions[0]?.fingerprint
-    await act(id, { type: 'approval.ok', marks: {}, versionFingerprint: fp })
     return id
   }
-  function tailor(id: string, page: string) {
-    const dir = join(caseDir(home, id), 'versions/01')
-    mkdirSync(join(dir, 'outputs'), { recursive: true })
-    writeFileSync(join(dir, 'outputs', OUTPUT_FILES.page), page)
-    const files = [{ path: OUTPUT_FILES.page, sha256: 'x', bytes: page.length }]
-    writeFileSync(
-      join(dir, 'outputs.json'),
-      JSON.stringify({ n: 1, at: new Date().toISOString(), files, fingerprint: 'out-1' }),
-    )
-  }
-  const deps = () => ({
-    home,
-    ledger,
-    invoke: () => Promise.reject(new Error('not used')),
-    emit: (_: string, r: ReturnType<typeof transition>) => r.ok && !r.replayed,
-    onAuthExpired: () => {},
-    log: () => {},
-  })
-  const PAGE = '<h1>ブレストのまとめ</h1><p>決まったことは 3 つです。</p><h2>1 つ目</h2><p>本文。</p>'
+  const ok = async (id: string) =>
+    act(id, { type: 'approval.ok', marks: {}, versionFingerprint: (await caseView(id)).versions[0]?.fingerprint })
 
-  it('T20: 形式が通れば送付確認待ち（本人の番）、送付成果物の指紋を書く', async () => {
-    const id = await readyToFormat()
-    tailor(id, PAGE)
-    const c = ledger.getCase(id)
-    if (!c) throw new Error('no case')
-    expect(await judgeFormat(deps(), c, new AbortController().signal)).toBe(true)
-    expect(ledger.getCase(id)).toMatchObject({
-      state: '送付確認待ち',
-      turn: '本人',
-      outputFingerprint: 'out-1',
-      round: 2,
-    })
+  it('T20: 仕立てた成果物の形式が通れば送付確認待ち（本人の番）、送付成果物の指紋を書く', async () => {
+    const id = await approveFinal()
+    await ok(id)
+    await vi.waitFor(() => expect(ledger.getCase(id)).toMatchObject({ state: '送付確認待ち', turn: '本人' }))
+    const outputs = VersionManifest.parse(
+      JSON.parse(readFileSync(join(caseDir(home, id), 'versions/01/outputs.json'), 'utf-8')),
+    )
+    expect(outputs.files.map((f) => f.path)).toEqual([OUTPUT_FILES.page])
+    expect(ledger.getCase(id)).toMatchObject({ outputFingerprint: outputs.fingerprint, round: 2 })
     expect(Review.parse(JSON.parse(readFileSync(reviewPath(id, 'review-01-f1.json'), 'utf-8')))).toMatchObject({
       phase: '形式',
       attempt: 1,
@@ -779,22 +761,23 @@ describe('判定役', () => {
     expect(v.review?.passed).toBe(7)
   })
 
-  it('T21: 形式の不合格は下書きへ戻し、完成稿の承認を無効にする。成果物が無ければ判定できなかった', async () => {
-    const id = await readyToFormat()
-    tailor(id, '<h1>ブレストのまとめ</h1>')
-    const c = ledger.getCase(id)
-    if (!c) throw new Error('no case')
-    await server.runs.abort(id)
-    expect(await judgeFormat(deps(), c, new AbortController().signal)).toBe(true)
-    expect(ledger.getCase(id)?.state).toBe('下書き中')
+  it('T21: ページが本文と食い違えば下書きへ戻し、完成稿の承認を無効にする', async () => {
+    const id = await approveFinal({
+      text: '書きました',
+      write: { 'draft-01.md': BODY, 'draft-01.html': '<h1>ブレストのまとめ</h1>', 'draft-01.done': 'done' },
+    })
+    await ok(id)
+    await waitState(id, '下書き中')
     expect(ledger.listApprovals(id).find((a) => a.gate === '完成稿')?.supersededBy).toBeDefined()
-    await server.runs.abortAll()
+    expect(readFileSync(work(id, 'feedback.md'), 'utf-8')).toContain('# 直してほしいこと')
+  })
 
-    const lost = await readyToFormat()
-    const c2 = ledger.getCase(lost)
-    if (!c2) throw new Error('no case')
-    expect(await judgeFormat(deps(), c2, new AbortController().signal)).toBe(true)
-    expect(ledger.getCase(lost)?.stopReason).toBe('判定できなかった')
+  it('版のファイルが読めなければ仕立てずに fail.system(判定できなかった)', async () => {
+    const id = await approveFinal()
+    rmSync(join(caseDir(home, id), 'versions/01/draft-01.html'))
+    await ok(id)
+    await waitState(id, '停止')
+    expect(ledger.getCase(id)?.stopReason).toBe('判定できなかった')
   })
 
   it('本文の API: md・組み立てた html（作り手の HTML は出さない）・差分', async () => {
@@ -813,9 +796,142 @@ describe('判定役', () => {
     expect(body).not.toContain('<script>')
     expect(body).toContain('<strong>強調</strong>')
     expect((await get(`/api/cases/${id}/drafts/3?format=md`)).status).toBe(404)
-    expect((await get(`/api/cases/${id}/drafts/1?format=paste`)).status).toBe(400)
+    expect((await get(`/api/cases/${id}/drafts/1?format=paste`)).status).toBe(404) // 仕立ての前
+    expect((await get(`/api/cases/${id}/drafts/1?format=pdf`)).status).toBe(400)
     const d = DraftDiff.parse(await (await get(`/api/cases/${id}/diff?from=1&to=2`)).json())
     expect(d.changes.length).toBeGreaterThan(0)
     expect((await get(`/api/cases/${id}/diff?from=0&to=2`)).status).toBe(400)
+  })
+})
+
+describe('送付と完了（6.2.8）', () => {
+  const both = { ...intake, intake: { ...intake.intake, destinations: ['paste', 'page'] } }
+  const toFinal: [Role, ScriptReply][] = [
+    ['話し相手', say(both)],
+    ...upToEntrance.slice(1),
+    ['作り手', draft(1)],
+    ['判定役・文章', verdicts(true)],
+  ]
+  const fingerprint = async (id: string) => (await caseView(id)).versions[0]?.fingerprint
+  const toConfirm = async () => {
+    await setup(script(...toFinal), real)
+    const id = await approved()
+    await waitState(id, '承認待ち')
+    await act(id, { type: 'approval.ok', marks: {}, versionFingerprint: await fingerprint(id) })
+    await vi.waitFor(() => expect(ledger.getCase(id)).toMatchObject({ state: '送付確認待ち', turn: '本人' }))
+    return id
+  }
+  const send = async (id: string) =>
+    act(id, { type: 'delivery.send', planFingerprint: (await caseView(id)).deliveryPlan.fingerprint })
+  // ホストの通常の終了（4.2 の末尾）と同じ止め方で止めて、同じ LIBRETTO_HOME で起こし直す
+  const restart = async () => {
+    await server.runs.abortAll()
+    ledger.close()
+    await setup([], real, true)
+    server.runner.resume()
+  }
+
+  it('受け入れ (2): 承認待ちで止めて起こし直すと、確認待ちは承認待ちの 1 件。続けて T18 → T20 → T22 → T24 で完了しページで受け取る', async () => {
+    await setup(script(...toFinal), real)
+    const id = await approved()
+    await waitState(id, '承認待ち')
+    await idle()
+
+    await restart()
+    const home1 = HomeView.parse(await (await get('/api/home')).json())
+    expect(home1.yourTurn.map((c) => [c.id, c.state, c.approvalKind])).toEqual([[id, '承認待ち', '完成稿']])
+    expect(home1.active).toEqual([])
+    expect(server.runner.running()).toEqual([])
+
+    expect((await act(id, { type: 'approval.ok', marks: {}, versionFingerprint: await fingerprint(id) })).status).toBe(
+      200,
+    )
+    await vi.waitFor(() => expect(ledger.getCase(id)).toMatchObject({ state: '送付確認待ち', turn: '本人' }))
+    // 送付の確認の前はページを出さない（保存した版だけ。6.2.8 (4)）
+    expect((await get(`/cases/${id}/page`)).status).toBe(404)
+    const paste = await get(`/api/cases/${id}/drafts/1?format=paste`)
+    expect(paste.headers.get('content-type')).toContain('text/plain')
+    expect(await paste.text()).toBe('ブレストのまとめ\n\n決まったことは 3 つです。\n\n1 つ目\n\n本文。\n')
+
+    expect((await send(id)).status).toBe(200)
+    await waitState(id, '完了')
+    const v = await caseView(id)
+    expect(v.deliveries.map((d) => [d.target.kind, d.status])).toEqual([
+      ['paste', '送付済'],
+      ['page', '送付済'],
+    ])
+    expect(v.deliveries.find((d) => d.target.kind === 'page')?.link).toBe(`/cases/${id}/page?v=1`)
+    expect(v.doneAt).toBeDefined()
+    expect(ledger.listDecisions(id).at(-1)?.text).toBe('バージョン 1 を保存しました')
+
+    const page = await get(`/cases/${id}/page`)
+    expect(page.status).toBe(200)
+    expect(page.headers.get('content-security-policy')).toContain("default-src 'none'")
+    expect(page.headers.get('x-content-type-options')).toBe('nosniff')
+    const html = await page.text()
+    expect(html).toContain('<h1>ブレストのまとめ</h1>')
+    expect(html).toContain('<title>ブレストのまとめ</title>')
+    expect((await get(`/cases/${id}/page?v=1`)).status).toBe(200)
+    expect((await get(`/cases/${id}/page?v=2`)).status).toBe(404)
+    expect((await server.app.request(`/cases/${id}/page`)).status).toBe(401)
+    const dl = await get(`/cases/${id}/page?download=1`)
+    expect(dl.headers.get('content-disposition')).toBe(
+      `attachment; filename="page-v1.html"; filename*=UTF-8''${encodeURIComponent('ブレストのまとめ-第1版.html')}`,
+    )
+    expect(await dl.text()).toBe(html)
+
+    const done = CaseCard.array().parse(await (await get('/api/cases?state=完了')).json())
+    expect(done.map((c) => c.id)).toEqual([id])
+    expect((await get('/api/cases?state=どれでもない')).status).toBe(400)
+  })
+
+  it('受け入れ (2): 送付中に 1 つ目を送付済にしたところで止めても、起こし直すと残りだけを送付済にして完了（T24）', async () => {
+    const id = await toConfirm()
+    // HTTP を通さずに T22 と 1 つ目の T24 を書き、runner が送る前に落ちた形を作る
+    const c = ledger.getCase(id)
+    if (!c) throw new Error('no case')
+    const plan = (await caseView(id)).deliveryPlan.fingerprint
+    expect(
+      transition(ledger, {
+        type: 'delivery.send',
+        eventId: uuid(),
+        caseId: id,
+        expectedRevision: c.revision,
+        planFingerprint: plan,
+        by: '本人',
+      }).ok,
+    ).toBe(true)
+    const [first] = ledger.listDeliveries(id)
+    if (!first) throw new Error('no delivery')
+    transition(ledger, {
+      type: 'delivery.done',
+      eventId: `${id}:delivery.done:${first.attemptId}`,
+      caseId: id,
+      attemptId: first.attemptId,
+      receiptId: `${first.target.kind}:v1`,
+      by: 'libretto',
+    })
+    expect(ledger.getCase(id)?.state).toBe('送付中')
+
+    await restart()
+    await waitState(id, '完了')
+    const rows = ledger.listDeliveries(id)
+    expect(rows.filter((d) => d.attemptId === first.attemptId && d.status === '送付済')).toHaveLength(1)
+    expect(new Set(rows.filter((d) => d.status === '送付済').map((d) => d.attemptId)).size).toBe(2)
+  })
+
+  it('T26: 形式の判定の後に成果物が書き換わっていれば、保存したことにせず停止（送付失敗）', async () => {
+    const id = await toConfirm()
+    writeFileSync(join(caseDir(home, id), 'versions/01/outputs', OUTPUT_FILES.page), '<p>判定していない字</p>')
+    await send(id)
+    await waitState(id, '停止')
+    expect(ledger.getCase(id)?.stopReason).toBe('送付失敗')
+    expect((await get(`/cases/${id}/page`)).status).toBe(404)
+  })
+
+  it('T23: 保存しないで戻ると承認待ち（完成稿）', async () => {
+    const id = await toConfirm()
+    expect((await act(id, { type: 'delivery.decline' })).status).toBe(200)
+    expect(ledger.getCase(id)).toMatchObject({ state: '承認待ち', approvalKind: '完成稿' })
   })
 })
