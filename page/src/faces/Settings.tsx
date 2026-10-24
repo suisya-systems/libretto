@@ -33,17 +33,24 @@ async function sendKey(kind: Kind, value?: string): Promise<'ok' | 'invalid' | '
 
 const day = (at: string) => at.slice(0, 10).replaceAll('-', '/')
 
-function KeyRow({
-  status,
-  label,
-  use,
-  reload,
-}: {
-  status: ApiKeyStatus
-  label: string
-  use: string
-  reload: () => void
-}) {
+// 文は種類ごと（用途・未設定の注記・削除の確かめ。7.6 (10)）
+const TEXT: Record<Kind, Record<'label' | 'use' | 'unsetNote' | 'deleteBody', WKey>> = {
+  openai: {
+    label: 'settings.openai.label',
+    use: 'settings.openai.use',
+    unsetNote: 'settings.openai.unsetNote',
+    deleteBody: 'settings.openai.deleteBody',
+  },
+  jev: {
+    label: 'settings.jev.label',
+    use: 'settings.jev.use',
+    unsetNote: 'settings.jev.unsetNote',
+    deleteBody: 'settings.jev.deleteBody',
+  },
+}
+
+function KeyRow({ status, reload }: { status: ApiKeyStatus; reload: () => void }) {
+  const t = TEXT[status.kind]
   const id = useId()
   const [editing, setEditing] = useState(false)
   const [value, setValue] = useState('')
@@ -69,9 +76,9 @@ function KeyRow({
       <div className="key-head">
         <div className="grow">
           <h3 className="key-label" id={`${id}-l`}>
-            {label}
+            {W[t.label]}
           </h3>
-          <p className="muted small">{use}</p>
+          <p className="muted small">{W[t.use]}</p>
         </div>
         {status.set ? (
           <span className="badge b-done key-status">{w('settings.key.set', { last4: status.last4 })}</span>
@@ -82,7 +89,7 @@ function KeyRow({
       {status.set ? (
         <p className="muted small key-saved">{w('settings.key.savedAt', { at: day(status.savedAt) })}</p>
       ) : (
-        <p className="note-warn small">{W['settings.key.unsetNote']}</p>
+        <p className="note-warn small">{W[t.unsetNote]}</p>
       )}
       {open ? (
         <form
@@ -137,7 +144,7 @@ function KeyRow({
           <Confirm
             trigger={W['settings.key.delete']}
             title={W['settings.key.deleteTitle']}
-            body={W['settings.key.deleteBody']}
+            body={W[t.deleteBody]}
             confirm={W['settings.key.delete']}
             cancel={W['settings.key.cancel']}
             danger
@@ -260,12 +267,8 @@ export function Settings() {
           <section aria-labelledby="h-keys" className="card pad">
             <h2 id="h-keys">{W['settings.keysHeading']}</h2>
             <ul className="key-list">
-              <KeyRow
-                status={keys.data.openai}
-                label={W['settings.openai.label']}
-                use={W['settings.openai.use']}
-                reload={keys.reload}
-              />
+              <KeyRow status={keys.data.openai} reload={keys.reload} />
+              <KeyRow status={keys.data.jev} reload={keys.reload} />
             </ul>
           </section>
         )

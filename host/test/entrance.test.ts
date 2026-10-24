@@ -54,18 +54,24 @@ const entranceOk = (): [Role, ScriptReply][] => [
   ['事実係・分類', say(classified)],
 ]
 
-async function setup(entries: ScriptEntry[], wrap: (b: Backend) => Backend = (b) => b, openaiKey = false) {
+async function setup(
+  entries: ScriptEntry[],
+  wrap: (b: Backend) => Backend = (b) => b,
+  openaiKey = false,
+  jevKey = false,
+) {
   n = 0
   home = mkdtempSync(join(tmpdir(), 'libretto-entrance-'))
   ledger = initHome(home)
   if (openaiKey) setKey(home, 'openai', 'sk-test-0123456789')
+  if (jevKey) setKey(home, 'jev', 'jev-test-0123456789')
   const staticDir = join(home, 'dist')
   mkdirSync(staticDir)
   writeFileSync(join(staticDir, 'index.html'), '<div></div>')
   fake = createFake(entries)
   const invoke = createInvoke({
     ledger,
-    backends: { claude: wrap(fake.backend), openai: wrap(fake.backend) },
+    backends: { claude: wrap(fake.backend), openai: wrap(fake.backend), jev: wrap(fake.backend) },
     caps: () => ({ caseCapYen: 1500, monthCapYen: null }),
     onCostCap: () => {},
     log: () => {},
@@ -671,5 +677,98 @@ describe('受け入れ (3): 確認項目の下書き役に依頼書の本文が�
         expect(m).toEqual({ name: m.name, chars: text.length, sha256: sha(text) })
       }
     }
+  })
+})
+
+describe('項目の点検（7.6 (7)）', () => {
+  // 項目ごとに 3 つの問いへ答える Jev（全部の qid を 1 つの答えに並べる。送っていない qid は使われない）
+  const inspected = (v: (id: string, k: string) => number): ScriptReply =>
+    say({
+      answers: Object.fromEntries(
+        goodChecks.flatMap((c) => ['derivable', 'positive', 'shapeOnly'].map((k) => [`${c.id}:${k}`, v(c.id, k)])),
+      ),
+    })
+  const jevRows = (r: ScriptReply): [Role, ScriptReply][] => goodChecks.map(() => ['事実係・命題', r])
+
+  it('同系統で書き、Jev の鍵があれば点検し、決まらない見込みを分類に渡し、形だけの項目を書く側にも伝わる側に出す', async () => {
+    const r = inspected((id, k) =>
+      k === 'positive' ? 0.9 : k === 'derivable' ? (id === 'C02' ? 0.2 : 0.8) : id === 'C06' ? 0.9 : 0.1,
+    )
+    await setup(
+      script(
+        ['話し相手', say(done)],
+        ...entranceOk().slice(0, 2),
+        ...jevRows(r),
+        entranceOk()[2] as [Role, ScriptReply],
+      ),
+      undefined,
+      false,
+      true,
+    )
+    const id = await request()
+    await waitTurn(id)
+    const asks = callsOf('事実係・命題')
+    expect(asks).toHaveLength(goodChecks.length)
+    expect(asks.every((c) => c.family === 'jev')).toBe(true)
+    // state は依頼と項目。summary は渡さない
+    expect(asks[0]?.materials.map((m) => m.name)).toEqual(['依頼', '項目'])
+    expect(JSON.stringify(asks)).not.toContain(goodChecks[0]?.summary)
+    expect(material(callsOf('事実係・分類')[0], '依頼から決まらない見込みの項目')).toBe('["C02"]')
+    expect(file(id, 'checks/checks.json', ChecksFile)).toMatchObject({ inspected: true, shapeOnly: ['C06'] })
+    const items = (await caseView(id)).entrance?.checks.items ?? []
+    // ファイルの hidden は変えず、入口の面でだけ書く側にも伝わる側に出す
+    expect(file(id, 'checks/checks.json', ChecksFile).checks.find((c) => c.id === 'C06')?.hidden).toBe(true)
+    expect(items.find((x) => x.id === 'C06')?.hidden).toBe(false)
+    expect(items.find((x) => x.id === 'C05')?.hidden).toBe(true)
+  })
+
+  it('肯定形でない見込みの項目があれば、下書き役に 1 回だけ書き直させてもう 1 度点検する', async () => {
+    const bad = inspected((id, k) => (k === 'positive' && id === 'C05' ? 0.2 : 0.8))
+    const good = inspected(() => 0.8)
+    await setup(
+      script(
+        ['話し相手', say(done)],
+        ...entranceOk().slice(0, 2),
+        ...jevRows(bad),
+        ['下書き役・確認項目', say({ checks: goodChecks })],
+        ...jevRows(good),
+        entranceOk()[2] as [Role, ScriptReply],
+      ),
+      undefined,
+      false,
+      true,
+    )
+    const id = await request()
+    await waitTurn(id)
+    const drafts = callsOf('下書き役・確認項目')
+    expect(drafts).toHaveLength(2)
+    expect(material(drafts[1], '書き直してほしい項目')).toBe('["C05"]')
+    expect(JSON.parse(material(drafts[1], '前のチェック項目') ?? '[]')).toHaveLength(goodChecks.length)
+    expect(callsOf('事実係・命題')).toHaveLength(goodChecks.length * 2)
+    expect(fake.unused()).toEqual([])
+  })
+
+  it('Jev の鍵が無い・別系統で書いたときは点検しない', async () => {
+    await setup(script(['話し相手', say(done)], ...entranceOk()))
+    const id = await request()
+    await waitTurn(id)
+    expect(callsOf('事実係・命題')).toHaveLength(0)
+    expect(file(id, 'checks/checks.json', ChecksFile).inspected).toBeUndefined()
+
+    const noMinority = goodChecks.map(({ minority: _, ...c }) => c)
+    await setup(
+      script(
+        ['話し相手', say(done)],
+        ['下書き役・依頼書', say(briefDraft)],
+        ['下書き役・確認項目', say({ checks: noMinority })],
+        ['事実係・分類', say(classified)],
+      ),
+      undefined,
+      true,
+      true,
+    )
+    const id2 = await request()
+    await waitTurn(id2)
+    expect(callsOf('事実係・命題')).toHaveLength(0)
   })
 })

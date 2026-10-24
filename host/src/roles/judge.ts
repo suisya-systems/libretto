@@ -9,6 +9,8 @@ import {
   type CheckResult,
   type CodeFn,
   type Escalate,
+  JEV_NOTE,
+  JEV_PARTIAL,
   type Phase,
   Review,
 } from '@libretto/shared/checks'
@@ -21,13 +23,14 @@ import { paragraphUnits, sections } from '../checks/text.ts'
 import { caseDir } from '../ledger/db.ts'
 import type { Ledger } from '../ledger/ledger.ts'
 import type { Job, Outcome } from '../model/invoke.ts'
+import { askNoul, BAND, type NoulGroup, yesOf } from '../model/noul.ts'
 import { isStorageError } from '../server/stop.ts'
 import { approvedSet, renderBrief, writeAtomic } from './entrance.ts'
 import { canaryOf, draftNames, leakedIn, nn, versionDir } from './maker.ts'
 
 export const JUDGE_LIMITS = { maxYen: 160, timeoutMs: 600_000 }
 export const FAMILY_NOTE = '確認項目は作り手と同じ系統が書きました'
-export const JEV_NOTE = '判定専用モデルは使っていません'
+export { JEV_NOTE, JEV_PARTIAL }
 export const TOO_HEAVY = '確かめ方が重すぎて判定できませんでした'
 
 // --- Claude の文章判定の出力（6.2.5 (3)）。yes: null は「この単位は決められない」なので withoutNulls は使わない
@@ -42,7 +45,8 @@ export const JudgeReply = z.object({
   ),
 })
 export type JudgeReply = z.infer<typeof JudgeReply>
-type Asked = { id: string; ask: string; scope: string; units: number }
+// units は聞く単位の index の並び（jev の項目は Claude に回す単位だけ。7.6 (5)）
+type Asked = { id: string; ask: string; scope: string; units: number[] }
 
 export function replyViolations(r: JudgeReply, asked: readonly Asked[]): string[] {
   const v: string[] = []
@@ -53,8 +57,9 @@ export function replyViolations(r: JudgeReply, asked: readonly Asked[]): string[
       continue
     }
     const idx = (got[0] as JudgeReply['results'][number]).units.map((u) => u.index).sort((x, y) => x - y)
-    if (idx.length !== a.units || idx.some((x, i) => x !== i))
-      v.push(`${a.id} の units には index 0〜${a.units - 1} を 1 つずつ全部書いてください`)
+    const want = [...a.units].sort((x, y) => x - y)
+    if (idx.length !== want.length || idx.some((x, i) => x !== want[i]))
+      v.push(`${a.id} の units には index ${want.join('・')} を 1 つずつ全部書いてください`)
   }
   for (const x of r.results)
     if (!asked.some((a) => a.id === x.id)) v.push(`${x.id} は聞いていない項目です。書かないでください`)
@@ -80,7 +85,7 @@ export const JUDGE_INSTRUCTION = `あなたは libretto の「判定役」です
 材料「確かめること」の項目ごとに:
 - ask が、scope の単位（document = 本文全体、section = 見出しごとの節、paragraph = 段落）の 1 つずつについて成り立つかを判定します。単位は「本文の単位」の同じ scope の index で指します
 - 成り立てば yes: true、成り立たなければ yes: false、本文からは決められなければ yes: null
-- units には index 0 から（units の数 - 1）までを 1 つずつ全部書きます
+- units には、その項目の units に並べた index を 1 つずつ全部書きます（並べていない index は書きません）
 - reason に判定の理由を 1〜3 文（400 字以内）で書きます。前提知識の無い人が読んで分かる、ふだんの日本語で書きます
 
 出力は次の形の JSON だけにしてください（形だけの例）。
@@ -149,6 +154,45 @@ const needsBrief = (c: Check) =>
 const statesOf = (c: Check): Scope[] =>
   c.judge.by === 'jev' ? c.judge.state.filter((s): s is Scope => ['document', 'section', 'paragraph'].includes(s)) : []
 
+// --- Jev の群（7.6 (5)）。単位と state の組が同じ項目を 1 群（1 要求の state）にまとめる
+
+const STATE_NAME: Record<string, string> = {
+  document: '本文',
+  section: '節',
+  paragraph: '段落',
+  'brief.audience': '読む人',
+  'brief.mustNot': 'してはいけないこと',
+}
+// 単位そのもの・本文全体・依頼書の欄だけを state に挙げた項目は、置く単位が 1 つに決まるので Jev に出せる
+const jevable = (c: Check) =>
+  c.judge.by === 'jev' &&
+  c.judge.state.every((x) => x === scopeOf(c) || x === 'document' || x === 'brief.audience' || x === 'brief.mustNot')
+
+function jevGroups(cs: readonly Check[], units: Map<string, Unit[]>, md: string, b: BriefFile): NoulGroup[] {
+  const extraText = (x: string) =>
+    x === 'document' ? md : x === 'brief.audience' ? b.audience : b.mustNot.join('\n') || 'なし'
+  const groups = new Map<string, NoulGroup>()
+  for (const c of cs) {
+    if (c.judge.by !== 'jev') continue
+    const s = scopeOf(c)
+    const name = STATE_NAME[s] as string
+    const extra = [...new Set(c.judge.state.filter((x) => x !== s))].sort()
+    const against = extra.length ? `（${extra.map((x) => `「${STATE_NAME[x]}」`).join('')}と照らして）` : ''
+    for (const u of units.get(c.id) as Unit[]) {
+      const key = `${s}:${u.index}:${extra.join(',')}`
+      const text = s === 'section' && u.heading ? `${u.heading}\n\n${u.text}` : u.text
+      const g: NoulGroup = groups.get(key) ?? {
+        state: { [name]: text, ...Object.fromEntries(extra.map((x) => [STATE_NAME[x], extraText(x)])) },
+        questions: {},
+      }
+      // 文章は state に置き、instructions は名前で参照する（7.4）
+      g.questions[`${c.id}:${u.index}`] = `「${name}」について: ${c.judge.proposition}${against}`
+      groups.set(key, g)
+    }
+  }
+  return [...groups.values()]
+}
+
 // --- judge()（7.3）
 
 type Failure = Extract<Outcome, { ok: false }>
@@ -162,18 +206,25 @@ export type JudgeInput = {
   signal: AbortSignal
 }
 export type Judged = {
-  body: Pick<Review, 'results' | 'pass' | 'failedSummaries' | 'marks' | 'sources' | 'familyNote' | 'jevNote'>
+  body: Pick<
+    Review,
+    'results' | 'pass' | 'failedSummaries' | 'marks' | 'sources' | 'familyNote' | 'jevNote' | 'jevBand'
+  >
   reasons: Record<string, string>
 }
 
+// jev が無ければ Jev を使わない（jev の項目も全部 Claude に回す。S1 の形）
 export async function judge(
   j: JudgeInput,
   invoke: (job: Job) => Promise<Outcome>,
+  jev?: { home: string },
 ): Promise<{ ok: true; judged: Judged } | { ok: false; out: Failure }> {
   const checks = j.checks.filter((c) => c.phase === j.phase)
   if (!checks.length) throw new Error(`no checks for phase ${j.phase}`)
   const results = new Map<string, CheckResult>()
   const reasons: Record<string, string> = {}
+  let jevUsed = false
+  let jevPartial = false
 
   // 1. 機械判定を全部
   for (const c of checks.filter((x) => x.judge.by === 'code')) {
@@ -194,14 +245,43 @@ export async function judge(
     // 1 つでも落ちたらモデル判定は流さない（費用を使わない。7.5）
     for (const c of model) results.set(c.id, { id: c.id, verdict: 'skipped', by: c.judge.by as 'jev' | 'claude' })
   } else if (model.length) {
-    // 2・3. jev（S1 は Claude に回す）と claude を 1 回のセッションで
     const units = new Map(model.map((c) => [c.id, unitsOf(scopeOf(c), j.input.md)]))
+    // 2. Jev の項目を単位ごとに聞く（7.6 (5)）
+    const noul = new Map<string, number>()
+    const jevChecks = model.filter(jevable)
+    if (jev && jevChecks.length) {
+      const asked = await askNoul(
+        { home: jev.home, invoke },
+        {
+          caseId: j.caseId,
+          role: '判定役・命題',
+          groups: jevGroups(jevChecks, units, j.input.md, j.brief),
+          signal: j.signal,
+        },
+      )
+      if (!asked.ok) return { ok: false, out: asked.out }
+      for (const [q, n] of asked.answers) noul.set(q, n)
+      jevUsed = noul.size > 0
+      jevPartial = asked.partial
+    }
+    const noulOf = (c: Check, i: number) => noul.get(`${c.id}:${i}`)
+    // Claude に回す単位: claude の項目は全部、jev の項目は帯の中と答えの無い単位。Jev だけで結論が決まれば回さない
+    const toClaude = new Map(
+      model.map((c) => {
+        const all = (units.get(c.id) as Unit[]).map((u) => u.index)
+        if (c.judge.by !== 'jev') return [c.id, all]
+        const ys = all.map((i) => yesOf(noulOf(c, i)))
+        return [c.id, verdictOf(c.pass, ys) === 'unable' ? all.filter((i) => ys[i] === null) : []]
+      }),
+    )
+    // 3. 回すものを 1 回の Claude のセッションで
     const asked: Asked[] = model
-      .filter((c) => (units.get(c.id) as Unit[]).length > 0)
-      .map((c) => ({ id: c.id, ask: askOf(c), scope: scopeOf(c), units: (units.get(c.id) as Unit[]).length }))
+      .filter((c) => (toClaude.get(c.id) as number[]).length > 0)
+      .map((c) => ({ id: c.id, ask: askOf(c), scope: scopeOf(c), units: toClaude.get(c.id) as number[] }))
     let reply: JudgeReply = { results: [] }
     if (asked.length) {
-      const scopes = new Set<Scope>(model.flatMap((c) => [scopeOf(c), ...statesOf(c)]))
+      const sent = model.filter((c) => asked.some((a) => a.id === c.id))
+      const scopes = new Set<Scope>(sent.flatMap((c) => [scopeOf(c), ...statesOf(c)]))
       const body = Object.fromEntries([...scopes].map((s) => [s, unitsOf(s, j.input.md)]))
       const out = await invoke({
         role: '判定役・文章',
@@ -210,7 +290,7 @@ export async function judge(
         instruction: JUDGE_INSTRUCTION,
         materials: [
           { name: '本文の単位', text: JSON.stringify(body) },
-          ...(model.some(needsBrief) ? [{ name: '依頼書', text: renderBrief(j.brief) }] : []),
+          ...(sent.some(needsBrief) ? [{ name: '依頼書', text: renderBrief(j.brief) }] : []),
           { name: '確かめること', text: JSON.stringify(asked) },
         ],
         output: { kind: 'json', schema: JudgeReply, accept: (x) => replyViolations(x as JudgeReply, asked) },
@@ -222,13 +302,26 @@ export async function judge(
     }
     for (const c of model) {
       const got = reply.results.find((x) => x.id === c.id)
-      const ys = got ? [...got.units].sort((a, b) => a.index - b.index).map((u) => u.yes) : []
       if (got) reasons[c.id] = got.reason
+      const sent = new Set(toClaude.get(c.id))
+      const us = (units.get(c.id) as Unit[]).map(({ index }) => {
+        const n = noulOf(c, index)
+        const yes = sent.has(index) ? (got?.units.find((u) => u.index === index)?.yes ?? null) : yesOf(n)
+        return {
+          index,
+          yes,
+          ...(n !== undefined && { noul: n }),
+          ...(c.judge.by === 'jev' && sent.has(index) && { claude: true as const }),
+        }
+      })
       results.set(c.id, {
         id: c.id,
-        verdict: verdictOf(c.pass, ys),
-        by: 'claude',
-        units: ys.map((yes, index) => ({ index, yes })),
+        verdict: verdictOf(
+          c.pass,
+          us.map((u) => u.yes),
+        ),
+        by: us.some((u) => u.noul !== undefined) ? 'jev' : 'claude',
+        units: us,
         ...(got && { reasonRef: c.id }),
       })
     }
@@ -247,7 +340,10 @@ export async function judge(
         marks: [],
         sources: [],
         ...(j.family === '同系統' && { familyNote: FAMILY_NOTE }),
-        ...(checks.some((c) => c.judge.by === 'jev') && { jevNote: JEV_NOTE }),
+        // Jev が 1 単位も答えなければ「使っていません」、答えたが失敗した要求があれば「一部は」（7.6 (5)）
+        ...(checks.some((c) => c.judge.by === 'jev') &&
+          (!jevUsed ? { jevNote: JEV_NOTE } : jevPartial ? { jevNote: JEV_PARTIAL } : {})),
+        ...(jevUsed && { jevBand: [BAND.low, BAND.high] as [number, number] }),
       },
       reasons,
     },
@@ -379,7 +475,7 @@ async function run(
     review = how.reuse ? prior(join(dir, `${how.name}.json`), c) : undefined
     if (!review) {
       const src = how.read()
-      const out = await judge({ caseId: c.caseId, phase: how.phase, signal, ...src }, d.invoke)
+      const out = await judge({ caseId: c.caseId, phase: how.phase, signal, ...src }, d.invoke, { home })
       if (!out.ok) {
         const o = out.out
         if (o.kind === 'timeout') return fail('時間切れ')
@@ -566,6 +662,13 @@ function summary(r: Review, checks: readonly Check[], reasons: Record<string, st
     sources: r.sources,
     ...(r.familyNote && { familyNote: r.familyNote }),
     ...(r.jevNote && { jevNote: r.jevNote }),
+    ...(jevOf(r) && { jev: jevOf(r) }),
     ...(r.escalate && { escalate: r.escalate }),
   }
+}
+
+// Jev が答えた単位の数と、そのうち別の読み手に回した数（7.6 (6)）。結論が決まって回さなかった帯の単位は数えない
+export function jevOf(r: Review): { units: number; unsure: number } | undefined {
+  const us = r.results.flatMap((x) => (x.units ?? []).filter((u) => u.noul !== undefined))
+  return us.length ? { units: us.length, unsure: us.filter((u) => u.claude).length } : undefined
 }

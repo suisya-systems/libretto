@@ -136,7 +136,15 @@ export const CheckResult = z
     by: z.enum(['code', 'jev', 'claude']),
     measured: z.record(z.string(), z.number()).optional(),
     units: z
-      .array(z.object({ index: z.number().int().min(0), yes: z.boolean().nullable(), noul: z.number().optional() }))
+      // noul = Jev の答え、claude = Claude に回した単位（docs/implementation.md 7.6 (5)）
+      .array(
+        z.object({
+          index: z.number().int().min(0),
+          yes: z.boolean().nullable(),
+          noul: z.number().optional(),
+          claude: z.literal(true).optional(),
+        }),
+      )
       .optional(),
     reasonRef: z.string().optional(),
   })
@@ -145,6 +153,10 @@ export const CheckResult = z
     message: 'skipped の結果は units / reasonRef を持たない',
   })
 export type CheckResult = z.infer<typeof CheckResult>
+
+// 判定の注記（7.5・7.6 (5)）。画面は値で引き分けて wording の文を出す
+export const JEV_NOTE = '判定専用モデルは使っていません'
+export const JEV_PARTIAL = '一部は判定専用モデルにつながらず、別の読み手が判定しました'
 
 // 3 回目を待たずに本人に上げた理由（docs/implementation.md 6.2.7 (2)）
 export const Escalate = z.object({ why: z.enum(['直らない', '判定できない']), checkIds: z.array(CheckId).min(1) })
@@ -166,6 +178,7 @@ export const Review = z
     sources: z.array(SourceRow),
     familyNote: z.string().optional(),
     jevNote: z.string().optional(),
+    jevBand: z.tuple([z.number(), z.number()]).optional(), // Jev を使った判定の帯（7.6 (5)）
     escalate: Escalate.optional(),
   })
   .refine((r) => r.pass === r.results.every((x) => x.verdict === 'pass'), {

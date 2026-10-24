@@ -147,18 +147,22 @@ const INSTRUCTION = `あなたは libretto の「事実係」です。文書づ�
   - options の id に「${LEAVE_IT}」は使わない。
 - "食い違う": 依頼書が項目の期待と違うことを言っている。このときは依頼書が何と言っているかを briefSays に 1 文で書く。
 
+材料に「依頼から決まらない見込みの項目」があれば、それは別の読み手の見立てです。参考にしてよいですが、決めるのはあなたです。
+
 前提知識の無い人が読んで分かる、ふだんの日本語で書く。直訳調の言い回し（「することができる」「において」「に関して」「を行う」など）を使わない。
 
 出力は次の形の JSON だけにしてください。渡したチェック項目の id を 1 回ずつ、漏れなく答えます。
 ${JSON.stringify(CLASSIFIED_EXAMPLE)}`
 
-// 渡すのは下書き役が書いた項目だけ（canary とホストの形式の項目は呼ぶ側が除く）
+// 渡すのは下書き役が書いた項目だけ（canary とホストの形式の項目は呼ぶ側が除く）。
+// hints は Jev の項目の点検で「依頼から導けない」見込みの項目の id（同系統のときだけ。7.6 (7)）
 export function classifyJob(
   brief: Brief,
   assumptions: readonly Assumption[],
   checks: readonly Check[],
   caseId: string,
   signal: AbortSignal,
+  hints: readonly string[] = [],
 ): Job {
   const ids = checks.map((c) => c.id)
   return {
@@ -173,6 +177,7 @@ export function classifyJob(
           checks.map((c) => ({ id: c.id, category: c.category, title: c.title, expects: expects(c) })),
         ),
       },
+      ...(hints.length ? [{ name: '依頼から決まらない見込みの項目', text: JSON.stringify(hints) }] : []),
     ],
     access: 'none',
     output: {

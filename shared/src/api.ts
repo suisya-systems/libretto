@@ -173,6 +173,8 @@ export const ReviewSummary = z.object({
   sources: z.array(SourceRow),
   familyNote: z.string().optional(),
   jevNote: z.string().optional(),
+  // Jev が答えた単位の数と、そのうち帯の中で別の読み手に回した数（7.6 (6)）
+  jev: z.object({ units: z.number().int().min(1), unsure: z.number().int().min(0) }).optional(),
   escalate: Escalate.optional(), // 3 回目を待たずに上げた（6.2.7 (5)）
 })
 

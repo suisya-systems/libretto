@@ -68,7 +68,8 @@ export type Hold = Pick<
   Extract<CostRecord, { type: 'hold' }>,
   'callId' | 'caseId' | 'role' | 'family' | 'model' | 'holdYen'
 >
-export type Reserve = Hold & { caseCapYen: number | null; monthCapYen: number | null }
+// daily は系統ごとの 1 日（JST）の呼び出しの数の上限（hold 行の数。docs/implementation.md 7.6 (4)）
+export type Reserve = Hold & { caseCapYen: number | null; monthCapYen: number | null; daily?: number }
 export type Charge = Pick<Extract<CostRecord, { type: 'charge' }>, 'callId' | 'yen' | 'tokensIn' | 'tokensOut'>
 
 // 生の行（snake_case・0/1・JSON 文字列・null）
@@ -724,9 +725,9 @@ export class Ledger {
   // --- costs
 
   // 集計 → 上限と比べる → hold を 1 つの BEGIN IMMEDIATE で（4.4・9.4 (3)）。超えるなら hold を書かない
-  reserveCost(r: Reserve): { ok: true } | { ok: false; scope: '案件' | '全体' } {
+  reserveCost(r: Reserve): { ok: true } | { ok: false; scope: '案件' | '全体' | '1日' } {
     return this.transaction(() => {
-      const { caseCapYen, monthCapYen, ...h } = r
+      const { caseCapYen, monthCapYen, daily, ...h } = r
       const now = this.#now() // 比べる月と hold の月を同じにする（9.4 (2)）
       checkCost({ ...h, type: 'hold' })
       if (!NON_CASE_COSTS.includes(r.caseId) && !this.getCase(r.caseId)) throw new Error(`no case ${r.caseId}`)
@@ -738,6 +739,7 @@ export class Ledger {
       )
         return { ok: false, scope: '案件' }
       if (monthCapYen !== null && this.monthCostYen(now) + r.holdYen > monthCapYen) return { ok: false, scope: '全体' }
+      if (daily !== undefined && this.callsToday(r.family, now) >= daily) return { ok: false, scope: '1日' }
       this.#db
         .prepare(
           `INSERT INTO costs (type, call_id, case_id, role, family, model, hold_yen, at)
@@ -812,6 +814,15 @@ export class Ledger {
   monthCostYen(at: Date = this.#now()): number {
     const [start, end] = jstMonth(at)
     return (this.#db.prepare(`${SUM_CALLS} AND h.at >= ? AND h.at < ?`).get(start, end) as { yen: number }).yen
+  }
+
+  // 系統ごとの 1 日（JST）の呼び出しの数。再試行も 1 回（7.6 (4)）
+  callsToday(family: string, at: Date = this.#now()): number {
+    const [start, end] = jstDay(at)
+    const r = this.#db
+      .prepare(`SELECT COUNT(*) AS n FROM costs WHERE type = 'hold' AND family = ? AND at >= ? AND at < ?`)
+      .get(family, start, end) as { n: number }
+    return r.n
   }
 
   // 推測の 1 日（JST）の分類件数

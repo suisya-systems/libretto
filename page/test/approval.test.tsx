@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 // 承認の面（画面 4。docs/implementation.md 6.2.5 (8)）
 import type { CaseView } from '@libretto/shared/api'
+import { JEV_PARTIAL } from '@libretto/shared/checks'
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -115,6 +116,23 @@ describe('承認の面', () => {
     // 判定の注記の文はホストの文ではなく画面の文
     expect(r.text()).not.toContain('確認項目は作り手と同じ系統が書きました')
     r.done()
+  })
+
+  it('判定専用の AI が確かめた数と、確信が低く回した数を 1 行で出す。一部つながらなかった注記（7.6 (6)）', async () => {
+    const { jevNote: _, ...rest } = review()
+    const r = await render({
+      ...base,
+      review: { ...rest, jev: { units: 12, unsure: 1 }, jevNote: JEV_PARTIAL },
+    })
+    expect(r.text()).toContain(w('approval.judgeModel', { units: 12 }))
+    expect(r.text()).toContain(w('approval.judgeModelUnsure', { unsure: 1 }))
+    expect(r.text()).toContain(W['approval.judgeModelPartial'])
+    expect(r.text()).not.toContain(W['approval.noJudgeModel'])
+    r.done()
+    const r2 = await render({ ...base, review: { ...rest, jev: { units: 3, unsure: 0 } } })
+    expect(r2.text()).toContain(w('approval.judgeModel', { units: 3 }))
+    expect(r2.text()).not.toContain(w('approval.judgeModelUnsure', { unsure: 0 }))
+    r2.done()
   })
 
   it('残りあり（往復上限）: 件数・項目・理由文。形式の不合格も並ぶ', async () => {

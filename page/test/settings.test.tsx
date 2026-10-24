@@ -14,24 +14,26 @@ const unset: ApiKeyStatus = { kind: 'openai', set: false }
 const set: ApiKeyStatus = { kind: 'openai', set: true, last4: '5678', savedAt: '2026-10-24T17:00:00+09:00' }
 let keys: ApiKeyStatus
 let conn: ConnectionsView
+// Jev の行は既定で設定済み（入力欄とボタンを OpenAI の行だけにする）
+let jev: ApiKeyStatus
 let respond: (method: string) => Response
 const sent: { method: string; path: string; body?: unknown }[] = []
 
 beforeEach(() => {
   sent.length = 0
   keys = unset
+  jev = { kind: 'jev', set: true, last4: 'WXYZ', savedAt: '2026-10-24T17:00:00+09:00' }
   conn = { isolation: { level: 'strong', running: false } }
   respond = () => new Response('{}')
   vi.stubGlobal('fetch', async (path: string, init: RequestInit = {}) => {
-    if (path === '/api/settings/keys')
-      return new Response(JSON.stringify({ openai: keys, jev: { kind: 'jev', set: false } }))
+    if (path === '/api/settings/keys') return new Response(JSON.stringify({ openai: keys, jev }))
     if (path === '/api/connections') return new Response(JSON.stringify(conn))
     if (path === '/api/checks/run' && init.method) {
       sent.push({ method: init.method, path })
       conn = { isolation: { ...conn.isolation, running: true } }
       return new Response('{}', { status: 202 })
     }
-    if (path === '/api/settings/keys/openai' && init.method) {
+    if (/^\/api\/settings\/keys\/(openai|jev)$/.test(path) && init.method) {
       sent.push({ method: init.method, path, ...(init.body && { body: JSON.parse(String(init.body)) }) })
       return respond(init.method)
     }
@@ -69,7 +71,7 @@ async function render() {
 describe('API キーの節', () => {
   it('未設定: 欄の名前・未設定・同じ種類の AI が作ることを出し、伏せた入力欄で保存する', async () => {
     const r = await render()
-    for (const s of [W['settings.openai.label'], W['settings.key.unset'], W['settings.key.unsetNote']])
+    for (const s of [W['settings.openai.label'], W['settings.key.unset'], W['settings.openai.unsetNote']])
       expect(r.text()).toContain(s)
     expect(r.input()?.type).toBe('password')
     expect(r.button(W['settings.key.save'])?.disabled).toBe(true)
@@ -90,7 +92,7 @@ describe('API キーの節', () => {
     const r = await render()
     expect(r.text()).toContain(w('settings.key.set', { last4: '5678' }))
     expect(r.text()).toContain(w('settings.key.savedAt', { at: '2026/10/24' }))
-    expect(r.text()).not.toContain(W['settings.key.unsetNote'])
+    expect(r.text()).not.toContain(W['settings.openai.unsetNote'])
     expect(r.input()).toBeNull()
     await r.click(r.button(W['settings.key.replace']))
     expect(r.input()).not.toBeNull()
@@ -117,7 +119,7 @@ describe('API キーの節', () => {
     keys = set
     const r = await render()
     await r.click(r.button(W['settings.key.delete']))
-    expect(document.querySelector('.dialog')?.textContent).toContain(W['settings.key.deleteBody'])
+    expect(document.querySelector('.dialog')?.textContent).toContain(W['settings.openai.deleteBody'])
     keys = unset
     await r.click(
       [...document.querySelectorAll('.dialog button')].find((b) => b.textContent === W['settings.key.delete']),
@@ -179,6 +181,21 @@ describe('動作環境の確認（8.10 (6)）', () => {
     expect(sent).toEqual([{ method: 'POST', path: '/api/checks/run' }])
     await vi.waitFor(() => expect(r.text()).toContain(W['settings.probe.running']))
     expect(r.button(W['settings.probe.run'])?.disabled).toBe(true)
+    r.done()
+  })
+})
+
+describe('Jev の API キーの行（7.6 (10)）', () => {
+  it('未設定: 欄の名前と、判定を同じ種類の AI が行うことを出し、jev に保存する', async () => {
+    keys = set
+    jev = { kind: 'jev', set: false }
+    const r = await render()
+    for (const s of [W['settings.jev.label'], W['settings.jev.use'], W['settings.jev.unsetNote']])
+      expect(r.text()).toContain(s)
+    expect(r.text()).not.toContain(W['settings.openai.unsetNote'])
+    await r.type(KEY)
+    await r.click(r.button(W['settings.key.save']))
+    expect(sent).toEqual([{ method: 'PUT', path: '/api/settings/keys/jev', body: { value: KEY } }])
     r.done()
   })
 })
