@@ -254,6 +254,7 @@ libretto の画面に出す言葉の正本。設計書（[`docs/design.md`](./de
 | `entrance.brief.docType` | 作るもの |
 | `entrance.brief.subject` | 書く内容 |
 | `entrance.brief.wanted` | 渡してほしいもの |
+| `entrance.brief.gather` | libretto が集めるもの |
 | `entrance.brief.audience` | 読む人 |
 | `entrance.brief.destinations` | 保存先 |
 | `entrance.brief.shape` | 分量・形 |
@@ -263,6 +264,7 @@ libretto の画面に出す言葉の正本。設計書（[`docs/design.md`](./de
 | `entrance.brief.mustNot` | してはいけないこと |
 | `entrance.none` | なし |
 | `entrance.wantedNote` | 進めると、次にこれを貼り付けてもらいます。 |
+| `entrance.gatherNote` | 進めると、libretto がこれをウェブで探します。 |
 | `entrance.voice.合わせる` | あなたの文体に合わせる |
 | `entrance.voice.合わせない` | 合わせない |
 | `entrance.sources.出典付き` | 出典を付ける |
@@ -363,6 +365,8 @@ libretto の画面に出す言葉の正本。設計書（[`docs/design.md`](./de
 | `progress.ver.不合格` | 書き直しへ |
 | `progress.ver.承認済み` | 承認済み |
 | `progress.materialsHeading` | 資料 |
+| `progress.materialGathered` | libretto が集めた |
+| `progress.gatherFailed` | ウェブで資料を見つけられませんでした |
 | `materials.eyebrow` | あなたの番 |
 | `materials.lead` | 下書きに使う資料を、ここに貼り付けてください。 |
 | `materials.wantedHeading` | 渡してほしいもの |
