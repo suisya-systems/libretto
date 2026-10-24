@@ -139,6 +139,7 @@ describe('POST /api/checks/run と GET /api/connections', () => {
   let server: ReturnType<typeof createServer>
   let cookie: string
   let release: () => void
+  let failWith: (e: unknown) => void
   let started: number
   const record: IsolationRecord = {
     at: '2026-10-24T10:00:00.000Z',
@@ -168,9 +169,10 @@ describe('POST /api/checks/run と GET /api/connections', () => {
       isolation: 'weak',
       cause: 'windows',
       probe: (signal) =>
-        new Promise((done) => {
+        new Promise((done, reject) => {
           started++
           release = () => done(record)
+          failWith = reject
           signal.addEventListener('abort', () => done(undefined), { once: true })
         }),
     })
@@ -195,6 +197,13 @@ describe('POST /api/checks/run と GET /api/connections', () => {
     await vi.waitFor(async () => expect((await view()).isolation.running).toBe(false))
     expect((await view()).isolation.last).toEqual({ at: record.at, verdict: 'hidden' })
     expect(JSON.parse(readFileSync(isolationFile(home), 'utf-8'))).toEqual(record)
+  })
+
+  it('書けない（容量）で落ちたら保存の帯を立てる', async () => {
+    expect((await post('/api/checks/run')).status).toBe(202)
+    failWith(Object.assign(new Error('disk full'), { code: 'ENOSPC' }))
+    await vi.waitFor(async () => expect((await view()).isolation.running).toBe(false))
+    expect(server.status.storageOk).toBe(false)
   })
 
   it('すべて停止で切れたら記録しない。止めている間の POST は 409', async () => {

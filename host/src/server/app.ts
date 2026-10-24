@@ -228,8 +228,13 @@ export function createServer(o: ServerOptions) {
     probing = (async () => {
       try {
         const r = await probe(ac.signal)
-        if (r && !ac.signal.aborted) writeIsolation(home, r)
+        if (r && !ac.signal.aborted) {
+          writeIsolation(home, r)
+          storage(true)
+        }
       } catch (e) {
+        // 書けない（容量・台帳）は保存の帯に出す。ほかは log だけ（5.7 (8)）
+        if (isStorageError(e)) storage(false)
         log(`isolation check: ${e instanceof Error ? e.stack : String(e)}`)
       } finally {
         runs.close('点検', ac)
