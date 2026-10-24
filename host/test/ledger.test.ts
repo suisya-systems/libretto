@@ -3,7 +3,7 @@ import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { initHome, MIGRATIONS, openDb, resolveHome } from '../src/ledger/db.ts'
+import { initHome, MIGRATIONS, monthCapFromEnv, openDb, resolveHome } from '../src/ledger/db.ts'
 import { derivedEventId, type Hold, jst, Ledger, type NewCase } from '../src/ledger/ledger.ts'
 
 const newCase = (caseId: string, eventId = `${caseId}:created`): NewCase => ({
@@ -415,5 +415,13 @@ describe('実ファイルのデータベースと LIBRETTO_HOME（9.4 (5)(6)）'
     const abs = tmp()
     expect(resolveHome({ LIBRETTO_HOME: abs })).toBe(abs)
     expect(() => resolveHome({ LIBRETTO_HOME: 'rel/dir' })).toThrow(/absolute/)
+  })
+
+  it('LIBRETTO_MONTH_CAP_YEN: 未設定・空は null、正の整数だけ読み、ほかは起動しない（11.3 (2)）', () => {
+    expect(monthCapFromEnv({})).toBeNull()
+    expect(monthCapFromEnv({ LIBRETTO_MONTH_CAP_YEN: '' })).toBeNull()
+    expect(monthCapFromEnv({ LIBRETTO_MONTH_CAP_YEN: '3000' })).toBe(3000)
+    for (const v of ['abc', '0', '-1', '1.5', '03', ' 3000'])
+      expect(() => monthCapFromEnv({ LIBRETTO_MONTH_CAP_YEN: v })).toThrow()
   })
 })

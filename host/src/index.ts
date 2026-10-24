@@ -5,7 +5,7 @@ import { serve } from '@hono/node-server'
 import { transition } from './case/transition.ts'
 import { causeOf, checkIsolation, probeDir } from './checks/isolation.ts'
 import { purgeClosed } from './facts/purge.ts'
-import { callsDir, caseDir, initHome, resolveHome } from './ledger/db.ts'
+import { callsDir, caseDir, initHome, monthCapFromEnv, resolveHome } from './ledger/db.ts'
 import { createClaudeCli, resolveClaude } from './model/claude-cli.ts'
 import { createInvoke, type Job } from './model/invoke.ts'
 import { createJev } from './model/jev.ts'
@@ -18,6 +18,7 @@ import { createServer } from './server/app.ts'
 import { writeStopFile } from './server/stop.ts'
 
 const home = resolveHome()
+const monthCapYen = monthCapFromEnv()
 
 if (process.argv[2] === 'stop') {
   writeStopFile(home)
@@ -54,7 +55,7 @@ const control = createSandbox({
   check: () => sandboxCheck,
   reopen: [join(probeDir(home), 'checks')],
 })
-// ponytail: 為替と上限は 5.3 の既定（P3: 全体は未入力）。settings.json から読むのは設定の Issue
+// ponytail: 為替と上限は 5.3 の既定（P3: 全体は未入力。検証では LIBRETTO_MONTH_CAP_YEN。11.3 (2)）。settings.json から読むのは設定の Issue
 const usdJpy = () => 150
 const invokeWith = (box: Sandbox) =>
   createInvoke({
@@ -70,7 +71,7 @@ const invokeWith = (box: Sandbox) =>
       openai: createOpenai({ key: () => readKey(home, 'openai'), usdJpy }),
       jev: createJev({ key: () => readKey(home, 'jev'), usdJpy }),
     },
-    caps: () => ({ caseCapYen: 1500, monthCapYen: null }),
+    caps: () => ({ caseCapYen: 1500, monthCapYen }),
     dailyLimits: { jev: JEV_DAILY_LIMIT },
     // 費用上限で案件を止める（6.1.1 (1)）。revision は確かめない。止めたら画面に知らせる（6.2.2 (1)）
     onCostCap: (n) => {
