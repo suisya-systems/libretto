@@ -1,6 +1,6 @@
 // 会話欄（画面案 1 の「チャットで依頼する」と、画面案 2 の「話して内容を変える」。docs/implementation.md 6.2.1 (2)(3)(9)・6.2.2 (8)）
 import { type ConversationMessage, ConversationView } from '@libretto/shared/api'
-import { type FormEvent, type KeyboardEvent, useEffect, useRef, useState } from 'react'
+import { type FormEvent, type KeyboardEvent, useEffect, useId, useRef, useState } from 'react'
 import { Link } from 'wouter'
 import { useLoad } from '../load.ts'
 import { W } from '../wording.ts'
@@ -13,7 +13,9 @@ type Body = { text: string } | { choiceId: string }
 type Sent = 'ok' | 'reload' | 'failed'
 
 // 通信の失敗は同じ requestId で送り直す（6.2.1 (3)）。409 は取り直す
-async function postMessage(body: Body & { requestId: string; lastSeq: number; caseId?: string }): Promise<Sent> {
+async function postMessage(
+  body: Body & { requestId: string; lastSeq: number; caseId?: string; candidateId?: string },
+): Promise<Sent> {
   try {
     const res = await fetch('/api/conversation/messages', {
       method: 'POST',
@@ -27,28 +29,43 @@ async function postMessage(body: Body & { requestId: string; lastSeq: number; ca
   }
 }
 
-// caseId があれば案件の中の会話（スレッド = 案件 id）
-export function Chat({ stopped, caseId }: { stopped: boolean; caseId?: string }) {
+// caseId があれば案件の中の会話（スレッド = 案件 id）、candidateId があれば候補の中の会話（「内容を修正」。6.4 (5)）
+export function Chat({ stopped, caseId, candidateId }: { stopped: boolean; caseId?: string; candidateId?: string }) {
   const conv = useLoad(
-    caseId ? `/api/conversation?caseId=${encodeURIComponent(caseId)}` : '/api/conversation',
+    caseId
+      ? `/api/conversation?caseId=${encodeURIComponent(caseId)}`
+      : candidateId
+        ? `/api/conversation?candidateId=${encodeURIComponent(candidateId)}`
+        : '/api/conversation',
     ConversationView,
     (s) => s.event === 'conversation.message',
   )
-  const L = caseId
+  const L = candidateId
     ? {
-        heading: W['talk.heading'],
-        label: W['talk.label'],
-        placeholder: W['talk.placeholder'],
-        note: W['talk.note'],
+        heading: W['cand.talkHeading'],
+        label: W['cand.talkLabel'],
+        placeholder: W['cand.talkPlaceholder'],
+        note: W['cand.talkNote'],
         button: W['chat.send'],
       }
-    : {
-        heading: W['home.askHeading'],
-        label: W['home.askLabel'],
-        placeholder: W['home.askPlaceholder'],
-        note: W['home.askNote'],
-        button: W['home.askButton'],
-      }
+    : caseId
+      ? {
+          heading: W['talk.heading'],
+          label: W['talk.label'],
+          placeholder: W['talk.placeholder'],
+          note: W['talk.note'],
+          button: W['chat.send'],
+        }
+      : {
+          heading: W['home.askHeading'],
+          label: W['home.askLabel'],
+          placeholder: W['home.askPlaceholder'],
+          note: W['home.askNote'],
+          button: W['home.askButton'],
+        }
+  // 1 つの面に会話欄が 2 つ並ぶ（ホームの依頼と候補の修正）ので、id はホームの依頼の欄以外で分ける
+  const uid = useId()
+  const ask = caseId || candidateId ? `ask${uid}` : 'ask'
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
   const [failed, setFailed] = useState(false)
@@ -77,7 +94,13 @@ export function Chat({ stopped, caseId }: { stopped: boolean; caseId?: string })
     retry.current = { key, id }
     setSending(true)
     setFailed(false)
-    const r = await postMessage({ ...body, requestId: id, lastSeq, ...(caseId && { caseId }) })
+    const r = await postMessage({
+      ...body,
+      requestId: id,
+      lastSeq,
+      ...(caseId && { caseId }),
+      ...(candidateId && { candidateId }),
+    })
     setSending(false)
     if (r === 'failed') return setFailed(true)
     retry.current = null
@@ -97,8 +120,8 @@ export function Chat({ stopped, caseId }: { stopped: boolean; caseId?: string })
   }
 
   return (
-    <section aria-labelledby="h-ask" className="card ask chat">
-      <h2 id="h-ask">{L.heading}</h2>
+    <section aria-labelledby={`h-${ask}`} className="card ask chat">
+      <h2 id={`h-${ask}`}>{L.heading}</h2>
       {/* 読めないまま送れない欄にしない（5.8 (3)） */}
       {conv.problem && <ProblemView problem={conv.problem} retry={conv.reload} />}
       {messages.length > 0 && (
@@ -141,16 +164,16 @@ export function Chat({ stopped, caseId }: { stopped: boolean; caseId?: string })
         </ol>
       )}
       <form className="chat-form" onSubmit={submit}>
-        <label htmlFor="ask" className={fresh ? 'muted small' : 'sr-only'}>
+        <label htmlFor={ask} className={fresh ? 'muted small' : 'sr-only'}>
           {L.label}
         </label>
         {stopped && (
-          <p id="ask-stopped" className="small pending-note">
+          <p id={`${ask}-stopped`} className="small pending-note">
             {W['chat.stopped']}
           </p>
         )}
         <textarea
-          id="ask"
+          id={ask}
           rows={fresh ? 3 : 2}
           placeholder={fresh ? L.placeholder : undefined}
           value={draft}
@@ -158,10 +181,10 @@ export function Chat({ stopped, caseId }: { stopped: boolean; caseId?: string })
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={onKey}
           disabled={stopped}
-          aria-describedby={stopped ? 'ask-stopped' : 'ask-hint'}
+          aria-describedby={stopped ? `${ask}-stopped` : `${ask}-hint`}
         />
         <div className="row-between wrap">
-          <div className="muted small">{fresh ? L.note : <span id="ask-hint">{W['chat.hint']}</span>}</div>
+          <div className="muted small">{fresh ? L.note : <span id={`${ask}-hint`}>{W['chat.hint']}</span>}</div>
           <button
             type="submit"
             className="btn btn-primary"

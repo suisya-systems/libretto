@@ -57,6 +57,7 @@ export function denyRules(home: string, configDir: string): string[] {
     `Read(${h}/libretto.db*)`,
     `Read(${h}/.env*)`,
     `Read(${h}/api-keys.json)`,
+    `Read(${h}/google.json)`,
     `Read(${h}/calls/**)`,
     `Read(${rulePath(configDir)}/**)`,
   ]

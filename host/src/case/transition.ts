@@ -639,6 +639,7 @@ function candidate(ledger: Ledger, ev: CandidateInput): Result {
     const { candidateId, senderKey, source } = cand
     ledger.appendCandidateEvent({ type: 'dismissed', candidateId, reason: ev.reason }, { status: 'dismissed' })
     ledger.deleteCandidateCard(candidateId)
+    ledger.deleteMessages(candidateId) // 候補の中の会話（6.4 (5)）
     if (ev.reason === '拾わなくてよい')
       ledger.addSuppression(source === 'slack' ? 'channel' : 'sender', senderKey, ev.reason)
     const count = ev.reason === '依頼ではない' ? ledger.countDismissed(senderKey, ev.reason) : 0

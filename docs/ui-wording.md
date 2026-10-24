@@ -120,7 +120,7 @@ libretto の画面に出す言葉の正本。設計書（[`docs/design.md`](./de
 
 **話し相手の代わりに会話欄に書く 1 行（`host/src/roles/conversation.ts` の `TALK`。実装設計書 6.2.1 (7)）**
 
-`retry` と `retryWhy` は `failed` の行に付ける選択肢の文と、その 1 行。`moved` は案件の中の会話で直す内容がまとまったが、その間に依頼の状態が変わっていたときの 1 行（実装設計書 6.2.2 (8)）。
+`retry` と `retryWhy` は `failed` の行に付ける選択肢の文と、その 1 行。`moved` は案件の中の会話で直す内容がまとまったが、その間に依頼の状態が変わっていたときの 1 行（実装設計書 6.2.2 (8)）。`candidateMoved` は候補の中の会話（「内容を修正」）で同じことが起きたときの 1 行（実装設計書 6.4 (5)）。
 
 | キー | 文 |
 |---|---|
@@ -130,6 +130,7 @@ libretto の画面に出す言葉の正本。設計書（[`docs/design.md`](./de
 | `retry` | もう一度送る |
 | `retryWhy` | 同じ内容で、もう一度返事を作ります |
 | `moved` | 依頼の状態が変わったので、直す内容を受け付けられませんでした |
+| `candidateMoved` | 候補の状態が変わったので、直す内容を受け付けられませんでした |
 
 ### 画面が `wording.ts` で引くラベル
 
@@ -594,3 +595,69 @@ libretto の画面に出す言葉の正本。設計書（[`docs/design.md`](./de
 | `settings.probe.at` | {at} に確認 |
 | `settings.probe.run` | 今すぐ確認 |
 | `settings.probe.failed` | 確認を始められませんでした。もう一度お試しください。 |
+
+**ホームの依頼の候補（ラベルを付けたメールのカード。実装設計書 6.4 (7)）**
+
+`cand.reason.*` は見送りの理由。ラベルのカードでは「この人・この場所からは拾わなくてよい」を出さない（実装設計書 6.4 (5)）。
+
+| キー | 文 |
+|---|---|
+| `home.candHeading` | 依頼の候補 |
+| `home.candRefresh` | 今すぐ取り込む |
+| `home.candRefreshing` | 取り込んでいます |
+| `home.candEmpty` | 依頼の候補はありません。メールにラベル libretto を付けると、ここに出ます |
+| `home.candLast` | {at} に取り込み |
+| `cand.mark.gmail` | ラベル libretto |
+| `cand.from` | {from}・{at} |
+| `cand.askLabel` | 頼まれていそうなこと |
+| `cand.make` | 作るもの: {doc}　保存先: {dest} |
+| `cand.attach` | 添付「{names}」の中身は読んでいません。進めたあと、資料として貼り付けてください |
+| `cand.aiNote` | AI への指示に見える行があります（無視します） |
+| `cand.open` | メールを開く |
+| `cand.proceed` | 進める |
+| `cand.dismiss` | 見送る |
+| `cand.dismissTitle` | この候補を見送りますか |
+| `cand.dismissBody` | 理由を 1 つ選んでください。見送った候補は、もう出しません。 |
+| `cand.reason.依頼ではない` | 依頼ではない |
+| `cand.reason.自分の仕事ではない` | 自分の仕事ではない |
+| `cand.reason.もう済んだ` | もう済んだ |
+| `cand.cancel` | やめる |
+| `cand.change` | 内容を修正 |
+| `cand.changeClose` | 閉じる |
+| `cand.talkHeading` | 内容を修正 |
+| `cand.talkLabel` | 作るものや保存先、頼まれていることをどう変えたいか、ふだんの言葉で書いてください。 |
+| `cand.talkPlaceholder` | 例: 会議で映すスライドにして。 |
+| `cand.talkNote` | まとまったら候補の内容を書き直します。よければ「進める」を押してください。 |
+
+**設定の面の連携（Google。実装設計書 6.4 (2)(7)）**
+
+`settings.google.result.*` は連携の戻りの後に 1 回だけ出す 1 行。
+
+| キー | 文 |
+|---|---|
+| `settings.linkHeading` | 連携 |
+| `settings.google.label` | Google（Gmail） |
+| `settings.google.use` | メールの本文を読めます。添付は読みません。ラベルは付けません（送りません・消しません） |
+| `settings.google.signal` | 取り込みの目印はラベル {label} です。このラベルを付けたメールが依頼の候補に出ます。 |
+| `settings.google.connected` | 連携済み |
+| `settings.google.as` | {email} で連携しています |
+| `settings.google.none` | 未連携 |
+| `settings.google.expired` | 連携し直してください |
+| `settings.google.expiredNote` | Google との連携が切れました。もう一度「連携する」を押してください。 |
+| `settings.google.unconfigured` | 設定がありません |
+| `settings.google.unconfiguredNote` | Google と連携する設定がまだありません。PC の `.env.local` に設定を入れて、libretto を再起動してください。 |
+| `settings.google.pcNote` | 連携は、libretto を動かしている PC のブラウザで行ってください。 |
+| `settings.google.connect` | 連携する |
+| `settings.google.disconnect` | 連携を解除 |
+| `settings.google.disconnectTitle` | Google との連携を解除しますか |
+| `settings.google.disconnectBody` | メールの取り込みを止めます。出ている依頼の候補はそのまま残ります。 |
+| `settings.google.cancel` | やめる |
+| `settings.google.labelMissing` | Gmail にラベル {label} がありません。Gmail でラベルを作って、取り込みたいメールに付けてください。 |
+| `settings.google.problem.rate_limited` | Gmail が混み合っていたので、取り込みを次の回に回しました。 |
+| `settings.google.problem.network` | Gmail につながりませんでした。15 分後にもう一度見ます。 |
+| `settings.google.lastAt` | {at} に取り込み |
+| `settings.google.result.connected` | 連携しました。 |
+| `settings.google.result.denied` | 連携をやめました。 |
+| `settings.google.result.failed` | 連携できませんでした。もう一度お試しください。 |
+| `settings.google.startFailed` | 連携を始められませんでした。もう一度お試しください。 |
+| `settings.google.disconnectFailed` | 連携を解除できませんでした。もう一度お試しください。 |

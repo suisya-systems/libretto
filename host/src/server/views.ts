@@ -1,5 +1,6 @@
 // 台帳の行 → 画面の型（docs/implementation.md 5.2・5.3）
 import type {
+  CandidateCard,
   CaseCard,
   CaseState,
   CaseView,
@@ -52,18 +53,38 @@ export function toCard(ledger: Ledger, c: CaseRecord): CaseCard {
 const doneAt = (ledger: Ledger, caseId: string) =>
   ledger.listCaseEvents(caseId).findLast((e) => e.type === 'transition' && e.to === '完了' && e.from !== '完了')?.at
 
-export function homeView(ledger: Ledger, host: HostStatus): HomeView {
+export function homeView(ledger: Ledger, host: HostStatus, intake: HomeView['intake']): HomeView {
   const open = ledger.listCases(OPEN).map((c) => toCard(ledger, c))
   return {
     yourTurn: open.filter((c) => c.turn === '本人'),
     notices: ledger.listNotices(20),
-    // ponytail: 候補カードの一覧は拾い上げの Issue（20）で埋める。S0 では候補を作る経路が無い
-    candidates: { signal: [], meeting: [], inferred: { high: [], mid: [], low: [] } },
+    candidates: candidateLists(ledger),
     autoStarted: open.filter((c) => c.auto),
     active: open.filter((c) => c.turn === 'libretto'),
     defaults: DEFAULTS,
+    intake,
     host,
   }
+}
+
+// 出したままの候補を由来と可能性で分ける。どの欄も新しい順（6.4 (7)）
+function candidateLists(ledger: Ledger): HomeView['candidates'] {
+  const lists: HomeView['candidates'] = { signal: [], meeting: [], inferred: { high: [], mid: [], low: [] } }
+  const BY = { 高: 'high', 中: 'mid', 低: 'low' } as const
+  for (const { candidate: c, card } of ledger.listPresentedCandidates()) {
+    const v: CandidateCard = {
+      id: c.candidateId,
+      source: c.source,
+      origin: c.origin,
+      ...(c.confidence && { confidence: c.confidence }),
+      aiInstructionFlag: c.aiInstructionFlag,
+      ...card,
+    }
+    if (c.origin === '合図') lists.signal.push(v)
+    else if (c.origin === '会議') lists.meeting.push(v)
+    else lists.inferred[BY[c.confidence ?? '低']].push(v)
+  }
+  return lists
 }
 
 // entrance は案件フォルダの今の組から（6.2.2 (9)。roles/entrance.ts の entranceView）。versions は versions/NN/ から（6.2.3 (8)）。

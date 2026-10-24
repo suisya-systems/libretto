@@ -22,17 +22,18 @@ function load(home: string): File {
   }
 }
 
-// 作るときから 0600 の一時ファイルに書いて置き換える（途中で落ちても前の版が残る。9.2）
-function save(home: string, f: File) {
-  const tmp = `${pathOf(home)}.${randomUUID()}.tmp`
-  writeFileSync(tmp, JSON.stringify(f), { encoding: 'utf-8', mode: 0o600, flag: 'wx' })
+// 作るときから 0600 の一時ファイルに書いて置き換える（途中で落ちても前の版が残る。9.2）。Google の連携も使う（6.4 (2)）
+export function writeSecret(path: string, text: string) {
+  const tmp = `${path}.${randomUUID()}.tmp`
+  writeFileSync(tmp, text, { encoding: 'utf-8', mode: 0o600, flag: 'wx' })
   try {
-    renameSync(tmp, pathOf(home))
+    renameSync(tmp, path)
   } catch (e) {
     unlinkSync(tmp)
     throw e
   }
 }
+const save = (home: string, f: File) => writeSecret(pathOf(home), JSON.stringify(f))
 
 const statusOf = (kind: Kind, e: z.infer<typeof Entry> | undefined): ApiKeyStatus =>
   e ? { kind, set: true, last4: e.value.slice(-4), savedAt: e.savedAt } : { kind, set: false }

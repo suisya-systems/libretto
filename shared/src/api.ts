@@ -347,7 +347,7 @@ export const HostStatus = z.object({
 })
 export type HostStatus = z.infer<typeof HostStatus>
 
-// GET /api/connections。この Issue で使う欄だけ（接続の欄は S5 以降。8.10 (5)）
+// GET /api/connections。隔離（8.10 (5)）と Google の連携（6.4 (7)）
 export const IsolationCause = z.enum(['windows', 'tools', 'userns', 'srt', 'network'])
 export type IsolationCause = z.infer<typeof IsolationCause>
 export const ConnectionsView = z.object({
@@ -356,6 +356,16 @@ export const ConnectionsView = z.object({
     cause: IsolationCause.optional(),
     running: z.boolean(),
     last: z.object({ at: z.string(), verdict: z.enum(['hidden', 'visible', 'unknown']) }).optional(),
+  }),
+  // configured は .env.local に OAuth クライアントの 2 つがあるか。labelFound は最後の取り込みで見つかったか
+  google: z.object({
+    configured: z.boolean(),
+    state: z.enum(['none', 'connected', 'expired']),
+    email: z.string().optional(),
+    label: z.string(),
+    labelFound: z.boolean().optional(),
+    lastAt: z.string().optional(),
+    problem: z.enum(['rate_limited', 'network']).optional(),
   }),
 })
 export type ConnectionsView = z.infer<typeof ConnectionsView>
@@ -374,7 +384,19 @@ export const CandidateCard = z.object({
   summary: z.string(),
   proposal: z.object({ docType: DocType, destination: z.array(DeliveryTarget) }),
   attachmentsNeeded: z.array(z.string()).optional(),
+  attachments: z.array(z.string()).optional(), // 添付の名前の全部（中身は読まない。6.4 (4)）
+  account: z.string().optional(), // 取り込んだ本人のアドレス（読み直すときの照合。6.4 (5)）
 })
+export type CandidateCard = z.infer<typeof CandidateCard>
+
+// POST /api/candidates/:id/actions（6.4 (5)）。「内容を修正」は候補の中の会話（ConversationPost の candidateId）、keep は推測の Issue で足す
+export const DismissReason = z.enum(['依頼ではない', '自分の仕事ではない', 'もう済んだ', '拾わなくてよい'])
+export const CandidateAction = z.discriminatedUnion('type', [
+  z.strictObject({ type: z.literal('proceed') }),
+  z.strictObject({ type: z.literal('dismiss'), reason: DismissReason }),
+])
+export type CandidateAction = z.infer<typeof CandidateAction>
+export const CandidateActionResult = z.object({ caseId: z.string().optional() })
 
 export const EntranceDefaults = z.record(z.enum(['会話', 'gmail', 'slack', 'meet']), Mode)
 
@@ -389,6 +411,8 @@ export const HomeView = z.object({
   autoStarted: z.array(CaseCard),
   active: z.array(CaseCard),
   defaults: EntranceDefaults,
+  // 取り込み（6.4 (7)）。connected でないときは候補の欄を、候補があるときだけ出す
+  intake: z.object({ connected: z.boolean(), running: z.boolean(), lastAt: z.string().optional() }),
   host: HostStatus,
   askSuppress: z.object({ sender: z.string(), count: z.number().int() }).optional(),
 })
@@ -414,11 +438,17 @@ export const ConversationView = z.object({ messages: z.array(ConversationMessage
 export type ConversationView = z.infer<typeof ConversationView>
 
 // POST /api/conversation/messages。requestId は送り直しで同じ値、lastSeq は画面が見ている最後の行（6.2.1 (3)）。
-// caseId 付きは案件の中で話す（6.2.2 (8)）
-const said = { requestId: z.uuid(), lastSeq: z.number().int().min(0), caseId: z.string().min(1).optional() }
+// caseId 付きは案件の中で話す（6.2.2 (8)）。candidateId 付きは候補の中で話す（「内容を修正」。6.4 (5)）。両方は付けない
+const said = {
+  requestId: z.uuid(),
+  lastSeq: z.number().int().min(0),
+  caseId: z.string().min(1).optional(),
+  candidateId: z.string().min(1).optional(),
+}
+const oneThread = (v: { caseId?: string | undefined; candidateId?: string | undefined }) => !(v.caseId && v.candidateId)
 export const ConversationPost = z.union([
-  z.strictObject({ ...said, text: z.string().trim().min(1).max(2000) }),
-  z.strictObject({ ...said, choiceId: z.string().min(1) }),
+  z.strictObject({ ...said, text: z.string().trim().min(1).max(2000) }).refine(oneThread),
+  z.strictObject({ ...said, choiceId: z.string().min(1) }).refine(oneThread),
 ])
 export type ConversationPost = z.infer<typeof ConversationPost>
 export const ConversationAccepted = z.object({ seq: z.number().int(), replayed: z.boolean() })
