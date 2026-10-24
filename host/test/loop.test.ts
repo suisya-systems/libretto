@@ -223,7 +223,7 @@ describe('ループ（11.3 (1)）', () => {
       monthCapYen: null,
     })
     const md = facts(ledger, notebook, join(home, 'debug'))
-    expect(md).toContain('- 使った額: 560 円（精算されていない予約 1 件を予約の額で含む）')
+    expect(md).toContain('- 使った額: 560.0 円（精算されていない予約 1 件を予約の額で含む）')
     expect(md).toContain('- 最後の状態: 停止（本人が止めた）')
     expect(md).not.toContain('本人だけが知っている理由')
   })

@@ -18,6 +18,8 @@ export type Session = {
 export type Notebook = { startedAt: string; month: string; capYen: number; sessions: Session[] }
 
 const CONVERSATION = '会話'
+// 費用は実額（ドル建ての換算）で小数が長いので、記録には 0.1 円まで
+const yen = (n: number) => n.toFixed(1)
 const MARGIN_MS = 2 * 3_600_000
 
 export const monthOf = (d: Date) => jst(d).slice(0, 7)
@@ -83,11 +85,11 @@ export function facts(ledger: Ledger, nb: Notebook, debugDir: string): string {
   const { rows, total, unsettled } = costTable(ledger, [CONVERSATION, ...cases.map((x) => x.c.caseId)])
   out.push('', '### 費用', '')
   out.push(`- 上限: ${nb.capYen} 円（この家の全部。始めた月 ${nb.month}）`)
-  out.push(`- 使った額: ${total} 円（精算されていない予約 ${unsettled} 件を予約の額で含む）`)
+  out.push(`- 使った額: ${yen(total)} 円（精算されていない予約 ${unsettled} 件を予約の額で含む）`)
   const recovered = cases.filter((x) => ledger.costUnknown(x.c.caseId)).length
   out.push(`- 再起動の精算で予約の額にした呼び出しがある案件: ${recovered} 件`)
   out.push('', '| 役割 | 回数 | 円 |', '|---|---|---|')
-  for (const [role, r] of rows) out.push(`| ${role} | ${r.calls} | ${r.yen} |`)
+  for (const [role, r] of rows) out.push(`| ${role} | ${r.calls} | ${yen(r.yen)} |`)
 
   out.push('', '### 案件')
   cases.forEach(({ c, events }, i) => {

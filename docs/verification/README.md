@@ -1,6 +1,6 @@
 # 実モデル検証
 
-本物のモデルで libretto を 1 本流し、記録を `docs/verification/<YYYY-MM-DD>.md` に残す（[`implementation.md` 11.1・11.3](../implementation.md)）。テスト（`npm run verify`）は全部偽のモデルで回り、ここだけが本物のモデルを呼ぶ。CI では回さない。
+本物のモデルで libretto を 1 本流し、記録を `docs/verification/<YYYY-MM-DD>.md` に残す（同じ日に 2 回以上流したら `<YYYY-MM-DD>-1.md`・`-2.md`）（[`implementation.md` 11.1・11.3](../implementation.md)）。テスト（`npm run verify`）は全部偽のモデルで回り、ここだけが本物のモデルを呼ぶ。CI では回さない。
 
 ## 流し方
 
@@ -17,7 +17,7 @@ npm run verify:live -- --home <家> --report      # 起こさずに記録の下�
 2. ターミナルに出たペアリングの URL をブラウザで開く
 3. 画面だけで 1 本流す: 会話で頼む → 入口で承認 → （渡してほしいものがあれば貼る）→ 検品を待つ → 承認 → 送付 → 完了
 4. 終わったら（途中で止まっても）ターミナルで Ctrl-C。`<家>/verification.md` に記録の下書きができる
-5. 下書きの人が書く欄を埋め、`docs/verification/<YYYY-MM-DD>.md` として取り込む
+5. 下書きの人が書く欄を埋め、`docs/verification/<YYYY-MM-DD>.md`（同じ日の 2 回目からは `-N`）として取り込む
 
 費用: この家の中の全部（会話・入口・案件）で上限まで。上限に達すると案件は「費用の上限」で止まる。案件 1 件の上限（1,500 円）も効く。全体上限は月（JST）で区切るので、別の月に同じ家を起こし直すことはできず、月末の残り 2 時間を切っていると新しく始められない。
 
