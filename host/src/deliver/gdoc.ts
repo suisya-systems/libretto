@@ -49,8 +49,11 @@ async function within<T>(signal: AbortSignal, f: (s: AbortSignal) => Promise<T |
   }
 }
 
-async function search(g: Google, attemptId: string, signal: AbortSignal): Promise<File | undefined | GoogleFail> {
-  const q = `appProperties has { key='librettoAttempt' and value='${attemptId.replace(/['\\]/g, '\\$&')}' } and trashed=false`
+const quote = (s: string) => s.replace(/['\\]/g, '\\$&')
+const byProp = (key: string, value: string) =>
+  `appProperties has { key='${key}' and value='${quote(value)}' } and trashed=false`
+
+async function search(g: Google, q: string, signal: AbortSignal): Promise<File | undefined | GoogleFail> {
   let page: string | undefined
   do {
     const p = new URLSearchParams({ q, spaces: 'drive', fields: 'nextPageToken,files(id,webViewLink)' })
@@ -66,8 +69,51 @@ async function search(g: Google, attemptId: string, signal: AbortSignal): Promis
   return undefined
 }
 
-function upload(g: Google, c: CaseRecord, a: DeliveryRecord, docx: Buffer, signal: AbortSignal) {
-  const folderId = a.target.kind === 'gdoc' ? a.target.folderId : 'root'
+// 保存先のフォルダ「libretto」（6.5 (3)）。覚えた id が今の連携のアカウントのもので、消されていなければそれを使い、
+// 無ければ libretto が作ったフォルダを印で探し、それも無ければ作る。drive.file では本人が手で作った同名のフォルダは見えない
+const FOLDER = 'application/vnd.google-apps.folder'
+export const FOLDER_NAME = 'libretto'
+export async function libFolder(d: Pick<Deps, 'home' | 'google'>, signal: AbortSignal): Promise<string | GoogleFail> {
+  const path = join(d.home, 'drive-folder.json')
+  const account = d.google.status().email ?? ''
+  const saved = existsSync(path)
+    ? (JSON.parse(readFileSync(path, 'utf-8')) as { account: string; id: string })
+    : undefined
+  if (saved?.account === account) {
+    const r = await within(signal, (s) =>
+      d.google.drive<{ trashed?: boolean }>(`/drive/v3/files/${encodeURIComponent(saved.id)}?fields=id,trashed`, {}, s),
+    )
+    if (r.ok && !r.json.trashed) return saved.id
+    if (!r.ok && r.why !== 'rejected') return r // 404（消された）だけ作り直す。届かないときは次の周期
+  }
+  const found = await search(d.google, `${byProp('librettoFolder', '1')} and mimeType='${FOLDER}'`, signal)
+  let id = found && 'id' in found ? found.id : undefined
+  if (found && !('id' in found)) return found
+  if (!id) {
+    const r = await within(signal, (s) =>
+      d.google.drive<File>(
+        '/drive/v3/files?fields=id',
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json; charset=UTF-8' },
+          body: JSON.stringify({
+            name: FOLDER_NAME,
+            mimeType: FOLDER,
+            parents: ['root'],
+            appProperties: { librettoFolder: '1' },
+          }),
+        },
+        s,
+      ),
+    )
+    if (!r.ok) return r
+    id = r.json.id
+  }
+  writeAtomic(path, `${JSON.stringify({ account, id })}\n`)
+  return id
+}
+
+function upload(g: Google, c: CaseRecord, a: DeliveryRecord, folderId: string, docx: Buffer, signal: AbortSignal) {
   const meta = {
     name: `${c.title}（第 ${a.version} 版）`,
     mimeType: 'application/vnd.google-apps.document',
@@ -126,14 +172,19 @@ export async function deliverGdoc(
 
   if (a.status === '不明' && !recheck) return undefined
   if (!marker) {
-    if (a.status !== '送付中') return miss() // 印が無いまま不明は無い（念のため）
-    // 作る前に確かめる。作っていないことが確かなので、連携が無ければ不明にせず失敗
+    // 印が無ければ作成を送っていない（不明でも、フォルダが用意できなかった周期の後なので作ってよい）。
+    // 作っていないことが確かなので、連携が無ければ不明にせず失敗
     const st = d.google.status()
     if (st.state !== 'connected' || !st.docs) return failed(GDOC_SAY.notLinked)
+    const target = a.target.kind === 'gdoc' ? a.target.folderId : FOLDER_NAME
+    const folder = target === FOLDER_NAME ? await libFolder(d, signal) : target
+    if (typeof folder !== 'string')
+      // 断られたら作れない。届かないなどは次の周期にもう一度（フォルダが用意できない周期も数える。6.5 (7)）
+      return folder.why === 'rejected' || folder.why === 'rate_limited' ? failed(GDOC_SAY.rejected) : miss()
     if (signal.aborted) return undefined
     writeAtomic(path, '{}\n')
     marker = {}
-    const r = await upload(d.google, c, a, docx, signal)
+    const r = await upload(d.google, c, a, folder, docx, signal)
     if (!r.ok) {
       // 応答で断られたものは作られていない。届かない・時間切れ・連携の切れ目は作られたか分からない
       if (r.why === 'rejected' || r.why === 'rate_limited') return failed(GDOC_SAY.rejected)
@@ -142,7 +193,7 @@ export async function deliverGdoc(
     marker = { fileId: r.json.id, ...(r.json.webViewLink && { link: r.json.webViewLink }) }
     writeAtomic(path, `${JSON.stringify(marker)}\n`)
   } else if (!marker.fileId) {
-    const f = await search(d.google, a.attemptId, signal)
+    const f = await search(d.google, byProp('librettoAttempt', a.attemptId), signal)
     if (!f || !('id' in f)) return miss()
     marker = { fileId: f.id, ...(f.webViewLink && { link: f.webViewLink }) }
     writeAtomic(path, `${JSON.stringify(marker)}\n`)

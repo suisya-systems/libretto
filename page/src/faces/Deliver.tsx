@@ -9,9 +9,13 @@ import { CaseHeader, History, Leftovers, Versions } from './Progress.tsx'
 
 export const destLabel = (t: DeliveryTarget) =>
   t.kind === 'file' ? w('dest.file', { format: t.format }) : W[`dest.${t.kind}`]
-// 画面から選べる保存先の種類（CaseView.destinationChoices）を保存先に。Google ドキュメントはマイドライブの直下（6.5 (3)）
+// 画面から選べる保存先の種類（CaseView.destinationChoices）を保存先に。Google ドキュメントは libretto フォルダ（6.5 (3)）
 export const targetOf = (k: CaseView['destinationChoices'][number]): DeliveryTarget =>
-  k === 'page' ? { kind: 'page', shared: false } : k === 'gdoc' ? { kind: 'gdoc', folderId: 'root' } : { kind: 'paste' }
+  k === 'page'
+    ? { kind: 'page', shared: false }
+    : k === 'gdoc'
+      ? { kind: 'gdoc', folderId: 'libretto' }
+      : { kind: 'paste' }
 
 const day = (at: string) =>
   new Intl.DateTimeFormat('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(

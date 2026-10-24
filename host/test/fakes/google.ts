@@ -1,4 +1,4 @@
-// 偽の Google（docs/implementation.md 11.1・6.4 (8)・6.5 (9)）。OAuth のトークン・取り消しと Gmail の 4 口、
+// 偽の Google（docs/implementation.md 11.1・6.4 (8)・6.5 (10)）。OAuth のトークン・取り消しと Gmail の 4 口、
 // Drive の 3 口（multipart の作成・appProperties の検索・HTML の書き出し）をプロセス内の HTTP で受け、受けた要求を記録する。
 // テストは「添付の口を呼んでいない」をこの記録で確かめる
 import { createServer, type Server } from 'node:http'
@@ -56,6 +56,7 @@ export type DriveFile = {
   appProperties: Record<string, string>
   docx: Buffer
   mimeType: string
+  trashed?: boolean
 }
 
 // multipart/related の 2 つの部分（メタデータの JSON と中身）。中身はバイト列のまま
@@ -170,9 +171,33 @@ export async function startFakeGoogle() {
       }
       return json(200, pick(f))
     }
+    // フォルダの作成（メタデータだけ）
+    if (req.method === 'POST' && url.pathname === '/drive/v3/files') {
+      const meta = JSON.parse(body) as Record<string, unknown>
+      const f: DriveFile = {
+        id: `folder-${files.size + 1}`,
+        name: String(meta.name),
+        parents: meta.parents as string[],
+        appProperties: meta.appProperties as Record<string, string>,
+        docx: Buffer.alloc(0),
+        mimeType: String(meta.mimeType),
+      }
+      files.set(f.id, f)
+      return json(200, pick(f))
+    }
     if (url.pathname === '/drive/v3/files') {
-      const v = /value='([^']*)'/.exec(url.searchParams.get('q') ?? '')?.[1]
-      return json(200, { files: [...files.values()].filter((f) => f.appProperties.librettoAttempt === v).map(pick) })
+      const q = url.searchParams.get('q') ?? ''
+      const [, k, v] = /key='([^']*)' and value='([^']*)'/.exec(q) ?? []
+      const mime = /mimeType='([^']*)'/.exec(q)?.[1]
+      const hit = [...files.values()].filter(
+        (f) => !f.trashed && f.appProperties[k as string] === v && (!mime || f.mimeType === mime),
+      )
+      return json(200, { files: hit.map(pick) })
+    }
+    const one = /^\/drive\/v3\/files\/([^/]+)$/.exec(url.pathname)
+    if (one) {
+      const f = files.get(decodeURIComponent(one[1] as string))
+      return f ? json(200, { id: f.id, trashed: !!f.trashed }) : json(404, { error: { code: 404 } })
     }
     const ex = /^\/drive\/v3\/files\/([^/]+)\/export$/.exec(url.pathname)
     if (ex) {

@@ -516,7 +516,7 @@ libretto の画面に出す言葉の正本。設計書（[`docs/design.md`](./de
 | `deliver.looksHeading` | 保存先ごとの見え方 |
 | `deliver.pageNote` | 保存すると、バージョン付きの Web ページで開けます。ほかの人に見せるときは、HTML をダウンロードして渡せます。 |
 | `deliver.pasteNote` | 保存すると、この文をコピーして note などに貼り付けられます。 |
-| `deliver.gdocNote` | 保存すると、あなたの Google ドライブに「{title}（第 {n} 版）」という Google ドキュメントを作ります。共有はしません。ほかの人に渡すときは、あなたがドライブで共有してください。 |
+| `deliver.gdocNote` | 保存すると、あなたの Google ドライブの「libretto」フォルダに「{title}（第 {n} 版）」という Google ドキュメントを作ります。フォルダが無ければ作ります。共有はしません。ほかの人に渡すときは、あなたがドライブで共有してください。 |
 | `deliver.pasteFailed` | 貼り付け用の文を読み込めませんでした |
 
 **成果の面（完了。実装設計書 6.2.8 (7)）**

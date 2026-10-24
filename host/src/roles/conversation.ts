@@ -160,17 +160,17 @@ function proposalViolations(r: CandidateReply, attachments: readonly string[]): 
   return v
 }
 
-// 保存先の選択肢（6.5 (3)）。gdoc は Google ドキュメントに保存できる連携があるときだけ。フォルダはマイドライブの直下
+// 保存先の選択肢（6.5 (3)）。gdoc は Google ドキュメントに保存できる連携があるときだけ。folderId 'libretto' は libretto フォルダ
 type DestKind = IntakeDraft['destinations'][number]
 export const TARGET: Record<DestKind, DeliveryTarget> = {
   page: { kind: 'page', shared: false },
   paste: { kind: 'paste' },
-  gdoc: { kind: 'gdoc', folderId: 'root' },
+  gdoc: { kind: 'gdoc', folderId: 'libretto' },
 }
 export const DEST_NOTE: Record<DestKind, string> = {
   page: '本人だけが見られる、履歴付きの Web ページ',
   paste: 'ほかのサービスに貼り付ける文章',
-  gdoc: '本人の Google ドライブに作る Google ドキュメント（共有はしない）',
+  gdoc: '本人の Google ドライブの「libretto」フォルダに作る Google ドキュメント（共有はしない）',
 }
 const destKinds = (gdoc: boolean): DestKind[] => (gdoc ? ['page', 'paste', 'gdoc'] : ['page', 'paste'])
 export const destMaterial = (gdoc: boolean) => ({

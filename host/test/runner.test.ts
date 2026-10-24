@@ -8,7 +8,7 @@ import { VersionManifest } from '@libretto/shared/ledger'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SAY, transition } from '../src/case/transition.ts'
 import { charCount, headingCount, renderHtml } from '../src/checks/text.ts'
-import { GDOC_SAY } from '../src/deliver/gdoc.ts'
+import { GDOC_SAY, libFolder } from '../src/deliver/gdoc.ts'
 import type { Fetched, FetchFailure } from '../src/facts/fetch.ts'
 import { createGoogle, DRIVE_SCOPE, GMAIL_SCOPE, type Google } from '../src/intake/google.ts'
 import { caseDir, initHome } from '../src/ledger/db.ts'
@@ -18,7 +18,7 @@ import { type Backend, createInvoke } from '../src/model/invoke.ts'
 import { OUTPUT_FILES } from '../src/roles/judge.ts'
 import { MAKER_LIMITS } from '../src/roles/maker.ts'
 import { createServer } from '../src/server/app.ts'
-import { startFakeGoogle } from './fakes/google.ts'
+import { type DriveFile, startFakeGoogle } from './fakes/google.ts'
 import { briefDraft, classified, goodChecks } from './fixtures/entrance.ts'
 
 const ORIGIN = 'http://127.0.0.1:7780'
@@ -1329,6 +1329,9 @@ describe('Google ドキュメントの届け先（6.5）', () => {
     act(id, { type: 'delivery.send', planFingerprint: (await caseView(id)).deliveryPlan.fingerprint })
   const gdocRows = (id: string) => ledger.listDeliveries(id).filter((x) => x.target.kind === 'gdoc')
   const uploads = () => g.seen.filter((x) => x.method === 'POST' && x.path.startsWith('/upload/'))
+  const FOLDER = 'application/vnd.google-apps.folder'
+  const docs = () => [...g.files.values()].filter((f) => f.mimeType !== FOLDER)
+  const folders = () => [...g.files.values()].filter((f) => f.mimeType === FOLDER)
 
   beforeEach(async () => {
     g = await startFakeGoogle()
@@ -1338,18 +1341,21 @@ describe('Google ドキュメントの届け先（6.5）', () => {
     await g.close()
   })
 
-  it('T24: docx を変換付きで作り、書き出して照合が合えば保存済み。題に（第 N 版）、マイドライブ、attempt の印、共有しない', async () => {
+  it('T24: docx を変換付きで作り、書き出して照合が合えば保存済み。題に（第 N 版）、libretto のフォルダ、attempt の印、共有しない', async () => {
     const id = await toConfirm(['page', 'gdoc'])
     const v0 = await caseView(id)
     expect(v0.destinationChoices).toEqual(['page', 'paste', 'gdoc'])
     expect(v0.formatReview?.failed).toEqual([])
     expect((await send(id)).status).toBe(200)
     await waitState(id, '完了')
-    const [f] = [...g.files.values()]
-    expect(g.files.size).toBe(1)
+    const [f] = docs()
+    expect(docs()).toHaveLength(1)
+    // libretto のフォルダをマイドライブに作り、その中に作る（6.5 (3)）
+    const [dir] = folders()
+    expect(dir).toMatchObject({ name: 'libretto', parents: ['root'], appProperties: { librettoFolder: '1' } })
     expect(f).toMatchObject({
       name: 'ブレストのまとめ（第 1 版）',
-      parents: ['root'],
+      parents: [dir?.id],
       mimeType: 'application/vnd.google-apps.document',
     })
     const row = gdocRows(id).at(-1)
@@ -1390,7 +1396,7 @@ describe('Google ドキュメントの届け先（6.5）', () => {
     server.runner.recheck()
     await waitState(id, '完了')
     expect(uploads()).toHaveLength(1)
-    expect(g.files.size).toBe(1)
+    expect(docs()).toHaveLength(1)
   })
 
   it('T26: 不明のまま 3 回探しても見つからなければ停止（送付失敗）', async () => {
@@ -1471,7 +1477,9 @@ describe('Google ドキュメントの届け先（6.5）', () => {
     await setup(script(...toFinal(['page'])), real, true)
     const id = await approved()
     await waitState(id, '承認待ち')
-    expect((await act(id, { type: 'delivery.change', targets: [{ kind: 'gdoc', folderId: 'root' }] })).status).toBe(200)
+    expect((await act(id, { type: 'delivery.change', targets: [{ kind: 'gdoc', folderId: 'libretto' }] })).status).toBe(
+      200,
+    )
     await act(id, { type: 'approval.ok', marks: {}, versionFingerprint: await fingerprint(id) })
     await vi.waitFor(() => expect(ledger.getCase(id)).toMatchObject({ state: '送付確認待ち', turn: '本人' }))
     const v = await caseView(id)
@@ -1486,12 +1494,58 @@ describe('Google ドキュメントの届け先（6.5）', () => {
     const id = await toConfirm(['page'])
     await send(id)
     await waitState(id, '完了')
-    expect((await act(id, { type: 'delivery.add', target: { kind: 'gdoc', folderId: 'root' } })).status).toBe(200)
+    expect((await act(id, { type: 'delivery.add', target: { kind: 'gdoc', folderId: 'libretto' } })).status).toBe(200)
     await vi.waitFor(() => expect(ledger.getCase(id)).toMatchObject({ state: '送付確認待ち', turn: '本人' }))
     await send(id)
     await waitState(id, '完了')
     const sent = ledger.listDeliveries(id).filter((x) => x.status === '送付済')
     expect(sent.map((x) => x.target.kind)).toEqual(['page', 'gdoc'])
-    expect(g.files.size).toBe(1)
+    expect(docs()).toHaveLength(1)
+  })
+})
+
+describe('libretto のフォルダ（6.5 (3)）', () => {
+  it('覚えた id を使い回し、ゴミ箱に入った・消された・別のアカウントなら libretto が作ったものを探すか作り直す', async () => {
+    const g = await startFakeGoogle()
+    try {
+      const h = mkdtempSync(join(tmpdir(), 'libretto-folder-'))
+      writeFileSync(
+        join(h, 'google.json'),
+        JSON.stringify({
+          refreshToken: 'rt-1',
+          email: 'me@example.com',
+          scopes: [GMAIL_SCOPE, DRIVE_SCOPE],
+          savedAt: 'x',
+        }),
+      )
+      const gg = createGoogle({
+        home: h,
+        config: { clientId: 'c', clientSecret: 's' },
+        redirectUri: 'http://127.0.0.1/oauth/google/callback',
+        endpoints: g.endpoints,
+      })
+      const signal = new AbortController().signal
+      const posts = () => g.seen.filter((x) => x.method === 'POST' && x.path.startsWith('/drive/v3/files')).length
+      const a = await libFolder({ home: h, google: gg }, signal)
+      expect(await libFolder({ home: h, google: gg }, signal)).toBe(a)
+      expect(posts()).toBe(1)
+      // ゴミ箱に入れた → 作り直す
+      const f = g.files.get(a as string)
+      if (f) f.trashed = true
+      const b = await libFolder({ home: h, google: gg }, signal)
+      expect(b).not.toBe(a)
+      expect(posts()).toBe(2)
+      // 消された（404）→ 印で探して見つかれば作らない
+      g.files.set('folder-x', { ...(g.files.get(b as string) as DriveFile), id: 'folder-x' })
+      g.files.delete(b as string)
+      expect(await libFolder({ home: h, google: gg }, signal)).toBe('folder-x')
+      expect(posts()).toBe(2)
+      // 別のアカウントで覚えた id は使わない
+      writeFileSync(join(h, 'drive-folder.json'), JSON.stringify({ account: 'other@example.com', id: 'zzz' }))
+      expect(await libFolder({ home: h, google: gg }, signal)).toBe('folder-x')
+      expect(g.seen.some((x) => x.path.startsWith('/drive/v3/files/zzz'))).toBe(false)
+    } finally {
+      await g.close()
+    }
   })
 })
