@@ -342,6 +342,9 @@ describe('取り寄せ（6.3.1 (5)）', () => {
     expect(paras[0]).toBe('頭の段落')
     expect(paras.join('').length).toBeLessThanOrEqual(2 * 1024 * 1024)
     expect(paras).not.toContain('末尾の段落')
+    // HTML の切れ目が script の中なら、その中身は段落にしない。閉じタグの無い head は捨てない
+    expect(htmlText(`<p>本文</p><script>var data = "${'x'.repeat(50)}`).paragraphs).toEqual(['本文'])
+    expect(htmlText('<html><head><meta charset="utf-8"><body><p>本文</p>').paragraphs).toEqual(['本文'])
     expect(await fetchSource(`${base}/hang`, { ...open, timeoutMs: 200 })).toEqual({ ok: false, why: 'timeout' })
     expect(await fetchSource(`${base}/nothing`, open)).toEqual({ ok: false, why: 'refused' })
   })

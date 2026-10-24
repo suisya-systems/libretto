@@ -67,7 +67,7 @@ beforeEach(() => {
 describe('gatherSources', () => {
   it('集めるものと今日だけを渡し、道具は search。開けた URL を返して 済み を書く', async () => {
     expect(await run(found(['https://example.com/a', 'https://example.com/gone']))).toEqual(['https://example.com/a'])
-    expect(jobs[0]).toMatchObject({ role: '事実係・集め', access: 'search', limits: { maxYen: 100 } })
+    expect(jobs[0]).toMatchObject({ role: '事実係・集め', access: 'search', limits: { maxYen: 50 } })
     expect(jobs[0]?.materials).toEqual([
       { name: '集めるもの', text: '- 今月の公式のお知らせ' },
       { name: '今日', text: '2026-10-25' },

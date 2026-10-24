@@ -38,8 +38,8 @@ const INSTRUCTION = `あなたは libretto の「事実係」です。材料「�
 出力は次の形の JSON だけにしてください（形だけの例）。
 ${JSON.stringify(GATHER_EXAMPLE)}`
 
-// 1 回の上限。invoke は言い直し 1 回と混雑の再試行 1 回で最大 3 回呼ぶので、1 案件で最大 ¥300・9 分（6.3.3 (5)）
-export const GATHER_LIMITS = { maxYen: 100, timeoutMs: 3 * 60_000 }
+// 1 回の上限。invoke は言い直し 1 回と混雑の再試行 1 回で最大 3 回呼ぶので、1 案件で最大 ¥150・9 分（6.3.3 (5)）
+export const GATHER_LIMITS = { maxYen: 50, timeoutMs: 3 * 60_000 }
 
 const Source = z.object({ url: z.string(), why: z.string(), title: z.string().optional(), opened: z.boolean() })
 export const GatheredFile = z.discriminatedUnion('state', [

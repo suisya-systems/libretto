@@ -52,7 +52,11 @@ const sha256 = (s: string) => createHash('sha256').update(s).digest('hex')
 
 // --- HTML → 題と段落。ponytail: 正規表現の簡易な取り出し。ナビやフッターも段落に残る。困ったら本文の抽出を入れる
 
-const DROP = /<(script|style|noscript|template|svg|head|title|iframe|object|select|textarea)\b[\s\S]*?<\/\1\s*>/gi
+const DROPPED = 'script|style|noscript|template|svg|head|title|iframe|object|select|textarea'
+const DROP = new RegExp(`<(${DROPPED})\\b[\\s\\S]*?<\\/\\1\\s*>`, 'gi')
+// 先頭 2 MB で切ったとき、閉じていない要素は末尾まで捨てる（中身を段落にしない。6.3.3 (5)）。
+// head は閉じタグを省けるので入れない
+const DROP_OPEN = new RegExp(`<(${DROPPED.replace('|head', '')})\\b[\\s\\S]*$`, 'i')
 const BLOCK =
   /<\/?(p|div|br|li|ul|ol|h[1-6]|tr|td|th|table|section|article|header|footer|nav|aside|main|blockquote|pre|dd|dt|figcaption)\b[^>]*>/gi
 
@@ -63,6 +67,7 @@ export function htmlText(html: string): { title: string; paragraphs: string[] } 
   const body = html
     .replace(/<!--[\s\S]*?-->/g, '')
     .replace(DROP, '')
+    .replace(DROP_OPEN, '')
     .replace(BLOCK, '\n\n')
     .replace(/<[^>]*>/g, '')
   return { title, paragraphs: textParagraphs(decode(body)) }
