@@ -210,8 +210,20 @@ describe('ループ（11.3 (1)）', () => {
     expect(fake.calls).toHaveLength(calls)
     expect(fake.unused()).toEqual([])
 
-    // 本人が「止める」に付けた文は記録に写さない（11.3 (3)）
+    // 本人が「止める」に付けた文は記録に写さない（11.3 (3)）。止めた作り手は予約の額（400 円）で精算される。
+    // 落ちて精算されていない予約も予約の額で数える
+    ledger.reserveCost({
+      callId: 'unsettled',
+      caseId: id,
+      role: '判定役・文章',
+      family: 'claude',
+      model: 'x',
+      holdYen: 160,
+      caseCapYen: null,
+      monthCapYen: null,
+    })
     const md = facts(ledger, notebook, join(home, 'debug'))
+    expect(md).toContain('- 使った額: 560 円（精算されていない予約 1 件を予約の額で含む）')
     expect(md).toContain('- 最後の状態: 停止（本人が止めた）')
     expect(md).not.toContain('本人だけが知っている理由')
   })

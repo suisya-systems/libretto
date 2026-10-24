@@ -37,24 +37,23 @@ export function refusal(nb: Notebook | undefined, now: Date): string | undefined
 function costTable(ledger: Ledger, caseIds: string[]) {
   const rows = new Map<string, { calls: number; yen: number }>()
   let total = 0
+  let unsettled = 0
   for (const id of caseIds) {
     const costs = ledger.listCosts(id)
-    const roleOf = new Map(costs.flatMap((c) => (c.type === 'hold' ? [[c.callId, c.role] as const] : [])))
+    const charged = new Map(costs.flatMap((c) => (c.type === 'charge' ? [[c.callId, c.yen] as const] : [])))
     for (const c of costs) {
-      if (c.type === 'hold') {
-        const r = rows.get(c.role) ?? { calls: 0, yen: 0 }
-        r.calls += 1
-        rows.set(c.role, r)
-      }
-      if (c.type === 'charge') {
-        const role = roleOf.get(c.callId)
-        const r = role && rows.get(role)
-        if (r) r.yen += c.yen
-        total += c.yen
-      }
+      if (c.type !== 'hold') continue
+      // 精算されていない予約（落ちた後に起こさず --report したとき）は予約の額で数える（上限の数え方と同じ。9.4 (2)）
+      const yen = charged.get(c.callId) ?? c.holdYen
+      if (!charged.has(c.callId)) unsettled += 1
+      const r = rows.get(c.role) ?? { calls: 0, yen: 0 }
+      r.calls += 1
+      r.yen += yen
+      rows.set(c.role, r)
+      total += yen
     }
   }
-  return { rows, total }
+  return { rows, total, unsettled }
 }
 
 // debug/ の 1 ファイル = 1 回の出力（invoke の debugDir）。中身は写さず、違反があったかだけ数える
@@ -81,10 +80,10 @@ export function facts(ledger: Ledger, nb: Notebook, debugDir: string): string {
     .listCases()
     .map((c) => ({ c, events: ledger.listCaseEvents(c.caseId) }))
     .sort((a, b) => (a.events[0]?.at ?? '').localeCompare(b.events[0]?.at ?? ''))
-  const { rows, total } = costTable(ledger, [CONVERSATION, ...cases.map((x) => x.c.caseId)])
+  const { rows, total, unsettled } = costTable(ledger, [CONVERSATION, ...cases.map((x) => x.c.caseId)])
   out.push('', '### 費用', '')
   out.push(`- 上限: ${nb.capYen} 円（この家の全部。始めた月 ${nb.month}）`)
-  out.push(`- 使った額: ${total} 円`)
+  out.push(`- 使った額: ${total} 円（精算されていない予約 ${unsettled} 件を予約の額で含む）`)
   const recovered = cases.filter((x) => ledger.costUnknown(x.c.caseId)).length
   out.push(`- 再起動の精算で予約の額にした呼び出しがある案件: ${recovered} 件`)
   out.push('', '| 役割 | 回数 | 円 |', '|---|---|---|')
