@@ -76,12 +76,15 @@ export const numbersIn = (s: string) =>
       .matchAll(/\d+(?:\.\d+)?/g),
   ].map((m) => Number(m[0]))
 
-// --- 要約に添える行（6.2.9）。目標は数が全部依頼書の文にあるときだけ。無ければ今の値だけ
+// --- 要約に添える行（6.2.9）。字数・見出しの目標は数が全部依頼書の文にあるときだけ（inBrief）、無ければ今の値だけ。
+// 文体の数値（文の長さ・文末）は依頼書に無くても目標を返す（設計書 5.2 の「見せても同じ」の側）
 const fmt = (n: number) => n.toLocaleString('ja-JP')
-function told(subject: string, r: Range, unit: string, now: number, brief = '') {
+const inBrief = (r: Range, brief = '') => {
   const known = numbersIn(brief)
-  const ns = [r.min, r.max].filter((x) => x !== undefined)
-  if (!ns.every((x) => known.includes(x))) return [`${subject}今 ${fmt(now)} ${unit}です`]
+  return [r.min, r.max].every((x) => x === undefined || known.includes(x))
+}
+function told(subject: string, r: Range, unit: string, now: number, shown: boolean) {
+  if (!shown) return [`${subject}今 ${fmt(now)} ${unit}です`]
   const want =
     r.min !== undefined && r.max !== undefined
       ? r.min === r.max
@@ -162,7 +165,7 @@ export const FNS: Partial<Record<CodeFn, Fn<unknown>>> = {
       return {
         units: [inRange(chars, a)],
         measured: { chars, gap: outside(chars, a) },
-        ...(!inRange(chars, a) && { told: told('字数は', a, '字', chars, brief) }),
+        ...(!inRange(chars, a) && { told: told('字数は', a, '字', chars, inBrief(a, brief)) }),
       }
     },
   }),
@@ -184,7 +187,7 @@ export const FNS: Partial<Record<CodeFn, Fn<unknown>>> = {
       return {
         units: [inRange(headings, a)],
         measured: { headings, gap: outside(headings, a) },
-        ...(!inRange(headings, a) && { told: told(subject, a, '個', headings, brief) }),
+        ...(!inRange(headings, a) && { told: told(subject, a, '個', headings, inBrief(a, brief)) }),
       }
     },
   }),
@@ -231,7 +234,16 @@ export const FNS: Partial<Record<CodeFn, Fn<unknown>>> = {
     phase: '本文',
     run: (a, { md }) => {
       const units = sentences(md).map((s) => a.endings.some((e) => ending(s).endsWith(e)))
-      return { units, measured: { ratio: units.length ? units.filter(Boolean).length / units.length : 0 } }
+      const hits = units.filter(Boolean).length
+      // 落ちたかは judge が pass で決めるので、全部そろっていないときに添える（judge は fail のときだけ使う）
+      const want = a.endings.map((e) => `「${e}」`).join('')
+      return {
+        units,
+        measured: { ratio: units.length ? hits / units.length : 0 },
+        ...(hits < units.length && {
+          told: [`文末を${want}でそろえてください（今は ${units.length} 文中 ${hits} 文）`],
+        }),
+      }
     },
   }),
   sentenceLengthMedian: fn({
@@ -241,14 +253,14 @@ export const FNS: Partial<Record<CodeFn, Fn<unknown>>> = {
     yes: '文の長さ（字数）の中央値が max 以下',
     pass: ['all'],
     phase: '本文',
-    run: (a, { md, brief }) => {
+    run: (a, { md }) => {
       const ls = sentences(md).map(sentenceLength)
       if (!ls.length) return { units: [false], measured: { gap: 1 } }
       const m = median(ls)
       return {
         units: [m <= a.max],
         measured: { median: m, gap: Math.max(0, m - a.max) },
-        ...(m > a.max && { told: told('文の長さは中央値で', { max: a.max }, '字', m, brief) }),
+        ...(m > a.max && { told: told('文の長さは中央値で', { max: a.max }, '字', m, true) }),
       }
     },
   }),

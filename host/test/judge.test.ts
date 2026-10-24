@@ -150,7 +150,8 @@ describe('機械判定（6.2.5 (2)）', () => {
     expect((await run(code('headingCount', { max: 0 }, { kind: 'all' }), '本文だけ。')).units).toEqual([true])
   })
 
-  it('数える 3 項目は落ちたときだけ、目標（依頼書にあるときだけ）と今の値を 1 行添える（6.2.9 (2)）', async () => {
+  it('数える項目は落ちたときだけ、目標と今の値を 1 行添える（字数・見出しの目標は依頼書にあるときだけ。6.2.9 (2)）', async () => {
+    const DOC2 = '書きます。書いた。読みます。読んだ。'
     const brief = '- 分量・形: 1,800〜2,200 字、見出し 4〜6、文は 45 字以内'
     const told = async (fn: string, args: Record<string, unknown>, md: string, b = brief) =>
       (await run(code(fn, args, { kind: 'all' }), md, { brief: b })).told
@@ -178,9 +179,16 @@ describe('機械判定（6.2.5 (2)）', () => {
     expect(await told('headingCount', { max: 0 }, seven, '見出しは 0')).toEqual([
       '見出しは置かないでください（今は 7 個）',
     ])
-    expect(await told('sentenceLengthMedian', { max: 45 }, `${'あ'.repeat(51)}。`)).toEqual([
-      '文の長さは中央値で 45 字以下にしてください（今は 52 字）',
+    // 文体の数値は依頼書に無くても目標を返す（設計書 5.2 の「見せても同じ」。オーナー判断 2026-10-25）
+    expect(await told('sentenceLengthMedian', { max: 50 }, `${'あ'.repeat(90)}。`, '')).toEqual([
+      '文の長さは中央値で 50 字以下にしてください（今は 91 字）',
     ])
+    expect(
+      (await run(code('sentenceEndingRatio', { endings: ['です', 'ます'] }, { kind: 'ratio', min: 0.9 }), DOC2)).told,
+    ).toEqual(['文末を「です」「ます」でそろえてください（今は 4 文中 2 文）'])
+    expect(
+      (await run(code('sentenceEndingRatio', { endings: ['です'] }, { kind: 'ratio', min: 0.9 }), 'です。')).told,
+    ).toBeUndefined()
     // 文が無ければ中央値が無いので添えない
     expect(await told('sentenceLengthMedian', { max: 45 }, '# 題だけ')).toBeUndefined()
     // 依頼書が無ければ（judge の外から流したとき）今の値だけ
@@ -315,7 +323,7 @@ describe('3 回目を待たずに上げる（6.2.7）', () => {
       marks: [],
       sources: [],
     })
-  it('同じ項目が 2 回続けて fail で、距離が縮んでいなければ直らない（縮めば上げない）', () => {
+  it('落ちている項目のどれも近づいていなければ直らない（1 つでも近づけば上げない。6.2.7 (2)）', () => {
     const before = prev([res('C01', 'fail', 110), res('C03', 'fail', 2)])
     const now = (c01: number, c03: number) => ({
       results: [res('C01', 'fail', c01), res('C03', 'fail', c03)],
@@ -323,11 +331,23 @@ describe('3 回目を待たずに上げる（6.2.7）', () => {
       failedSummaries: ['a', 'b'],
       round: 2,
     })
-    expect(escalateOf(now(331, 1), before)).toEqual({ why: '直らない', checkIds: ['C01'] })
+    // C03 が近づいたので、C01 が遠のいても続ける（オーナー判断 2026-10-25）
+    expect(escalateOf(now(331, 1), before)).toBeUndefined()
+    expect(escalateOf(now(331, 2), before)).toEqual({ why: '直らない', checkIds: ['C01', 'C03'] })
     expect(escalateOf(now(110, 2), before)).toEqual({ why: '直らない', checkIds: ['C01', 'C03'] })
+    // 前に落ちていた項目が合格したのも近づいた側（実ホストの C01・C20）
+    const passed = { ...now(331, 2), results: [res('C01', 'fail', 331), res('C03', 'pass', 0)] }
+    expect(escalateOf(passed, before)).toBeUndefined()
+    // 前に通っていて今回落ちた項目は「近づいた」に数えない
+    expect(
+      escalateOf(
+        { ...now(110, 2), results: [...now(110, 2).results, res('C05', 'fail', 1)] },
+        prev([...before.results, res('C05', 'pass', 0)]),
+      ),
+    ).toEqual({ why: '直らない', checkIds: ['C01', 'C03'] })
     expect(escalateOf(now(50, 1), before)).toBeUndefined()
-    expect(escalateOf(now(331, 1), undefined)).toBeUndefined() // 前の判定が無い（1 回目・系列が違う）
-    expect(escalateOf({ ...now(331, 1), round: 3 }, before)).toBeUndefined() // 3 回目は往復上限
+    expect(escalateOf(now(331, 2), undefined)).toBeUndefined() // 前の判定が無い（1 回目・系列が違う）
+    expect(escalateOf({ ...now(331, 2), round: 3 }, before)).toBeUndefined() // 3 回目は往復上限
     // 前の判定で通っていた項目は「2 回続けて」ではない
     expect(escalateOf(now(331, 1), prev([res('C01', 'pass', 0), res('C03', 'fail', 2)]))).toBeUndefined()
   })

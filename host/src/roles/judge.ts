@@ -568,12 +568,19 @@ export function escalateOf(
   prev?: Review,
 ): Escalate | undefined {
   if (r.pass || r.round >= MAX_ROUNDS) return undefined
+  const before = (x: CheckResult) => gapOf(prev?.results.find((p) => p.id === x.id))
   const stuck = r.results.filter((x) => {
     const now = gapOf(x)
-    const before = gapOf(prev?.results.find((p) => p.id === x.id))
-    return now !== undefined && before !== undefined && now >= before
+    const b = before(x)
+    return now !== undefined && b !== undefined && now >= b
   })
-  if (stuck.length) return { why: '直らない', checkIds: stuck.map((x) => x.id) }
+  // 前に機械判定で落ちていた項目が 1 つでも近づいた（合格を含む）なら続ける（オーナー判断 2026-10-25。6.2.7 (2)）
+  const closer = r.results.some((x) => {
+    const b = before(x)
+    const now = x.by === 'code' && x.verdict === 'pass' ? 0 : gapOf(x)
+    return b !== undefined && now !== undefined && now < b
+  })
+  if (stuck.length && !closer) return { why: '直らない', checkIds: stuck.map((x) => x.id) }
   if (!r.failedSummaries.length)
     return { why: '判定できない', checkIds: r.results.filter((x) => x.verdict === 'unable').map((x) => x.id) }
   return undefined
