@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { serve } from '@hono/node-server'
 import { transition } from './case/transition.ts'
 import { causeOf, checkIsolation, probeDir } from './checks/isolation.ts'
+import { purgeClosed } from './facts/purge.ts'
 import { callsDir, caseDir, initHome, resolveHome } from './ledger/db.ts'
 import { createClaudeCli, resolveClaude } from './model/claude-cli.ts'
 import { createInvoke, type Job } from './model/invoke.ts'
@@ -104,6 +105,8 @@ const server = createServer({
     ),
 })
 server.stop.boot()
+// 閉じた案件の資料と出典の本文を消し残していれば消す（6.3.1 (10)）。runner より前
+purgeClosed(home, ledger)
 // libretto の番の案件の仕事を起こし直す（4.4 の再起動。6.2.3 (1)）。精算と STOP の確認の後
 server.runner.resume()
 // 隔離の点検を裏で 1 回（8.4・8.10 (4)）。止めていれば起動時は流さない

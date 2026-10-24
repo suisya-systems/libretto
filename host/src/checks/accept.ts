@@ -103,8 +103,7 @@ export function checksViolations(
     checks.some((c) => c.category === cat && by.includes(c.judge.by))
   if (!has('依頼適合', ['claude', 'jev'])) v.push('依頼適合 の項目（by "claude" か "jev"）を 1 件以上入れてください')
   if (!has('分量', ['code'])) v.push('分量 の項目（by "code"）を 1 件以上入れてください')
-  if (shape.sources === '出典付き' && !has('事実', ['code', 'jev', 'claude']))
-    v.push('出典付きの依頼なので、事実 の項目を 1 件以上入れてください')
+  // 出典付きの依頼の事実の項目はホストが足す（6.3.1 (6)）
   if (shape.voice === '合わせる' && !has('声', ['code', 'jev', 'claude']))
     v.push('文体を合わせる依頼なので、声 の項目を 1 件以上入れてください')
   const minority = checks.filter((c) => c.minority).length

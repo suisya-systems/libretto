@@ -2,6 +2,7 @@
 // 関数を実装する後の Issue（15・18・19・26）はここに 1 行足す
 import { Worker } from 'node:worker_threads'
 import { type Check, CodeArgs, type CodeFn, type Phase } from '@libretto/shared/checks'
+import type { FactsFile } from '@libretto/shared/ledger'
 import type { z } from 'zod'
 import { markerCheck } from '../facts/markers.ts'
 import {
@@ -21,8 +22,8 @@ import {
 } from './text.ts'
 
 type PassKind = Check['pass']['kind']
-// 判定の材料。page / paste は仕立ての成果物（形式の phase だけ。6.2.5 (5)）
-export type FnInput = { md: string; page?: string; paste?: string }
+// 判定の材料。page / paste は仕立ての成果物（形式の phase だけ。6.2.5 (5)）。facts は版の事実（6.3.1 (7)）
+export type FnInput = { md: string; page?: string; paste?: string; facts?: FactsFile }
 // units は単位ごとの「はい」。timedOut は打ち切った（verdict は unable）。
 // measured.gap は合格までの距離（6.2.7 (1)）。範囲で測る関数だけが書き、ほかは judge が裏返す単位の数で埋める
 export type FnResult = { units: boolean[]; measured?: Record<string, number>; timedOut?: true }
@@ -35,6 +36,7 @@ type Fn<A> = {
   pass: PassKind[]
   phase: Phase
   host?: true // ホストだけが書く（下書き役は使えない）
+  facts?: true // 版の事実（棚卸し）が要る。ほかの機械判定が全部通ったときだけ流す（6.3.1 (7)）
   run: (args: A, input: FnInput) => FnResult | Promise<FnResult>
 }
 const fn = <A>(f: Fn<A>) => f as Fn<unknown>
@@ -52,7 +54,8 @@ const median = (xs: number[]) => {
   const m = Math.floor(s.length / 2)
   return s.length % 2 ? (s[m] as number) : ((s[m - 1] as number) + (s[m] as number)) / 2
 }
-const need = (v: string | undefined, name: string) => {
+const counted = (units: boolean[]) => ({ units, measured: { hits: units.filter(Boolean).length } })
+const need = <T>(v: T | undefined, name: string) => {
   if (v === undefined) throw new Error(`no ${name} output`)
   return v
 }
@@ -231,6 +234,55 @@ export const FNS: Partial<Record<CodeFn, Fn<unknown>>> = {
     phase: '本文',
     host: true,
     run: (a, { md }) => ({ units: [md.includes(a.token)] }),
+  }),
+  // 事実の 3 関数（6.3.1 (6)）。「はい」= 問題がある。0 件で合格
+  claimsInventoried: fn({
+    args: CodeArgs.claimsInventoried,
+    example: {},
+    unit: '事実の主張',
+    yes: '出典にも資料にも要確認の印にも結び付いていない',
+    pass: ['count'],
+    phase: '本文',
+    host: true,
+    facts: true,
+    run: (_, { facts }) => counted(need(facts, 'facts').verdicts.map((v) => v.kind === '出典なし' && !v.mark)),
+  }),
+  sourcesReachable: fn({
+    args: CodeArgs.sourcesReachable,
+    example: {},
+    unit: '本文が示した出典',
+    yes: '開けない、またはそこを示す主張の該当箇所が見つからない',
+    pass: ['count'],
+    phase: '本文',
+    host: true,
+    facts: true,
+    run: (_, { facts }) => {
+      const f = need(facts, 'facts')
+      return counted(
+        f.sources.map(
+          (s) => !s.opened || f.verdicts.some((v) => v.sourceRef === s.url && v.excerptFingerprint === undefined),
+        ),
+      )
+    },
+  }),
+  numbersMatch: fn({
+    args: CodeArgs.numbersMatch,
+    example: {},
+    unit: '数を含む、資料から取った主張',
+    yes: '資料と食い違う数がある',
+    pass: ['count'],
+    phase: '本文',
+    host: true,
+    facts: true,
+    run: (_, { facts }) => {
+      const f = need(facts, 'facts')
+      const hasNumber = (id: string) => /\d/.test(f.claims.find((c) => c.id === id)?.text.normalize('NFKC') ?? '')
+      return counted(
+        f.verdicts
+          .filter((v) => v.kind === '材料由来' && hasNumber(v.claimId))
+          .map((v) => (v.mismatched?.length ?? 0) > 0),
+      )
+    },
   }),
   pasteSafe: fn({
     args: CodeArgs.pasteSafe,

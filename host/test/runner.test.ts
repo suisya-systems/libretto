@@ -8,6 +8,7 @@ import { VersionManifest } from '@libretto/shared/ledger'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SAY, transition } from '../src/case/transition.ts'
 import { charCount, headingCount, renderHtml } from '../src/checks/text.ts'
+import type { Fetched, FetchFailure } from '../src/facts/fetch.ts'
 import { caseDir, initHome } from '../src/ledger/db.ts'
 import type { Ledger } from '../src/ledger/ledger.ts'
 import { createFake, type ScriptEntry, type ScriptReply } from '../src/model/fake.ts'
@@ -84,7 +85,17 @@ const draft = (k: number, md = BODY): ScriptReply => ({
   },
 })
 
+// 出典の取り寄せの偽物（網に出ない。6.3.1 (5)）
+const fetched: string[] = []
+const fakeFetch = async (url: string): Promise<Fetched | FetchFailure> => {
+  fetched.push(url)
+  return url.endsWith('/gone')
+    ? { ok: false, why: 'network' }
+    : { ok: true, url, title: '週報', paragraphs: ['方針は 3 つ。'], fingerprint: 'f' }
+}
+
 async function setup(entries: ScriptEntry[], wrap: (b: Backend) => Backend = hangJudge, keepHome = false) {
+  fetched.length = 0
   n = keepHome ? n : 0
   hung.length = 0
   if (!keepHome) home = mkdtempSync(join(tmpdir(), 'libretto-runner-'))
@@ -111,6 +122,7 @@ async function setup(entries: ScriptEntry[], wrap: (b: Backend) => Backend = han
     log: () => {},
     runsWaitMs: 500,
     token: () => TOKEN,
+    fetch: fakeFetch,
   })
   const { url } = server.issuePairing('テスト')
   const res = await server.app.request(new URL(url).pathname)
@@ -154,7 +166,7 @@ async function approved(mode: '確認しながら' | 'おまかせ' = '確認し
   return id
 }
 // 判定役（Issue 11）の代わりに、判定のファイルと遷移を置く
-function judged(id: string, pass: boolean, failedSummaries: string[] = []) {
+function judged(id: string, pass: boolean, failedSummaries: string[] = [], marks: Review['marks'] = []) {
   const c = ledger.getCase(id)
   if (!c) throw new Error('no case')
   const review: Review = {
@@ -167,7 +179,7 @@ function judged(id: string, pass: boolean, failedSummaries: string[] = []) {
     results: [{ id: 'C01', verdict: pass ? 'pass' : 'fail', by: 'code', reasonRef: 'review-01-a.reasons.md#C01' }],
     pass,
     failedSummaries,
-    marks: [],
+    marks,
     sources: [],
   }
   writeFileSync(join(caseDir(home, id), `review-${nn(c.version)}-a.json`), JSON.stringify(review))
@@ -378,6 +390,30 @@ describe('runner と作り手', () => {
     await waitState(id, '検品中')
   })
 
+  it('承認は今の版の印を全部答える（6.3.1 (9)）。閉じたら資料と出典の本文を消す（6.3.1 (10)）', async () => {
+    await setup(script(...upToEntrance, ['作り手', draft(1)]))
+    const id = await approved()
+    await waitState(id, '検品中')
+    judged(id, true, [], [{ claimId: 'M01', text: '東京が最大だ。', where: '冒頭の 1 段落目' }])
+    const fp = (await caseView(id)).versions.at(-1)?.fingerprint
+    expect((await caseView(id)).review?.needsConfirmation.map((m) => m.claimId)).toEqual(['M01'])
+    const ok = (marks: Record<string, string>) => act(id, { type: 'approval.ok', marks, versionFingerprint: fp })
+    expect((await ok({})).status).toBe(409)
+    expect((await ok({ M02: '印のまま' })).status).toBe(409)
+    expect(ledger.getCase(id)?.state).toBe('承認待ち')
+    expect((await ok({ M01: '印のまま' })).status).toBe(200)
+    expect(ledger.listApprovals(id).at(-1)).toMatchObject({ gate: '完成稿', marks: { M01: '印のまま' } })
+
+    await idle() // 仕立てと形式の判定が終わるまで
+    const dir = caseDir(home, id)
+    mkdirSync(join(dir, 'facts-excerpts'), { recursive: true })
+    writeFileSync(join(dir, 'facts-excerpts', 'x.json'), '{}')
+    expect((await act(id, { type: 'stop.case', reason: '本人が止めた' })).status).toBe(200)
+    await vi.waitFor(() => expect(existsSync(join(dir, 'facts-excerpts'))).toBe(false), { timeout: 2000, interval: 5 })
+    expect(existsSync(work(id, 'materials'))).toBe(false)
+    expect(ledger.listCaseEvents(id).at(-1)).toMatchObject({ type: 'purged' })
+  })
+
   it('1 案件に 1 本: 動いている間の kick は止めてから始め直す', async () => {
     await setup(script(...upToEntrance, ['作り手', { fail: 'hang' }], ['作り手', draft(1)]))
     const id = await approved()
@@ -445,6 +481,28 @@ describe('材料待ち（6.2.4）', () => {
     expect((await paste(id, { text: '別の文' })).status).toBe(409)
     expect(readdirSync(work(id, 'materials'))).toEqual(['pasted-01.md'])
     expect(fake.unused()).toEqual([])
+  })
+
+  it('貼った文の URL を取り寄せて資料の正本に足し、作業場には写しを置く（6.3.1 (5)）', async () => {
+    await setup(script(...withWanted, ['作り手', draft(1)]))
+    const id = await approved()
+    await idle()
+    const text = `${MEMO}\n参考: https://example.com/weekly（週報）と https://example.com/gone`
+    expect((await paste(id, { text })).status).toBe(200)
+    await waitState(id, '検品中')
+    expect(fetched).toEqual(['https://example.com/weekly', 'https://example.com/gone'])
+    const src = join(caseDir(home, id), 'materials')
+    expect(readdirSync(src)).toEqual(['pasted-01.md', 'source-01.md'])
+    expect(readFileSync(join(src, 'source-01.md'), 'utf-8')).toBe(
+      '# 週報\n\nhttps://example.com/weekly\n\n方針は 3 つ。\n',
+    )
+    expect(readdirSync(work(id, 'materials'))).toEqual(['pasted-01.md', 'source-01.md'])
+    expect((await caseView(id)).materials.map((m) => [m.kind, m.title, m.where])).toEqual([
+      ['添付', '貼り付けた文', 'materials/pasted-01.md'],
+      ['出典', '週報', 'https://example.com/weekly'],
+    ])
+    // 取り寄せた本文は facts-excerpts/ に（閉じるときに消す）
+    expect(readdirSync(join(caseDir(home, id), 'facts-excerpts'))).toHaveLength(1)
   })
 
   it('渡してほしいものが無ければ今まで通り本人を待たずに作り手へ。資料の口は 409', async () => {

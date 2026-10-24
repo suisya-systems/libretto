@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import type { DeliveryTarget } from '@libretto/shared/api'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  CUT_LEAD,
   type Input,
   planFingerprint,
   type Result,
@@ -49,7 +50,24 @@ const approveEntrance = () => ok(person('entrance.approve', { answers: {}, mode:
 const ready = () => ok(host('materials.ready'))
 const draft = () => ok(host('draft.done', { n: get().version + 1, versionFingerprint: `v${get().version + 1}` }))
 const review = (pass: boolean) => ok(host(pass ? 'review.pass' : 'review.fail', { n: get().version }))
-const approveFinal = (marks = {}) => ok(person('approval.ok', { marks, versionFingerprint: get().versionFingerprint }))
+// 印は HTTP が今の版の判定から ctx で渡す（6.3.1 (9)）
+const mark = (claimId: string) => ({ claimId, text: `主張 ${claimId}`, where: '冒頭の 1 段落目' })
+const approveFinal = (marks: Record<string, '印のまま' | '削る'> = {}) =>
+  ok(
+    transition(
+      ledger,
+      {
+        type: 'approval.ok',
+        caseId: 'c1',
+        by: '本人',
+        eventId: id(),
+        expectedRevision: get().revision,
+        marks,
+        versionFingerprint: get().versionFingerprint,
+      } as Input,
+      { marks: Object.keys(marks).map(mark) },
+    ),
+  )
 const checked = () => ok(host('format.checked', { n: get().version, outputFingerprint: `o${get().version}` }))
 const send = () => {
   const eventId = id()
@@ -489,7 +507,33 @@ describe('検品と承認（T15〜T19）', () => {
     approveFinal({ k1: '印のまま', k2: '削る' })
     expect(get()).toMatchObject({ state: '下書き中', series: 2, round: 0 })
     expect(ledger.listApprovals('c1').filter((a) => a.gate === '完成稿')).toEqual([])
-    expect(ledger.listDecisions('c1').at(-1)).toMatchObject({ gate: '完成稿', text: '次の主張を削ってください: k2' })
+    expect(ledger.listDecisions('c1').at(-1)).toMatchObject({
+      gate: '完成稿',
+      text: `${CUT_LEAD}\n- 「主張 k2」（冒頭の 1 段落目）`,
+    })
+  })
+
+  it('T18 印の答えが今の版の印の全部でなければ stale（別の版の画面からの送信。6.3.1 (9)）', () => {
+    toFinalApproval()
+    const send = (marks: Record<string, string>, ctx: string[]) =>
+      transition(
+        ledger,
+        {
+          type: 'approval.ok',
+          caseId: 'c1',
+          by: '本人',
+          eventId: id(),
+          expectedRevision: get().revision,
+          marks,
+          versionFingerprint: get().versionFingerprint,
+        } as Input,
+        { marks: ctx.map(mark) },
+      )
+    expect(send({}, ['M01'])).toMatchObject({ ok: false, reason: 'stale' })
+    expect(send({ M01: '印のまま', M02: '削る' }, ['M01'])).toMatchObject({ ok: false, reason: 'stale' })
+    expect(send({ M02: '印のまま' }, ['M01'])).toMatchObject({ ok: false, reason: 'stale' })
+    expect(get().state).toBe('承認待ち')
+    ok(send({ M01: '印のまま' }, ['M01']))
   })
 
   it('T19 承認待ち（完成稿）approval.redo → 下書き中（新しい系列、往復 0、指示は全文）', () => {

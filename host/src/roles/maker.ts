@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, readdirSync, readFileSync, renameSync, rmSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Version } from '@libretto/shared/api'
-import { Review } from '@libretto/shared/checks'
+import { MARK, Review } from '@libretto/shared/checks'
 import { type CaseRecord, MakerAttempt, VersionManifest } from '@libretto/shared/ledger'
 import type { z } from 'zod'
 import { transition } from '../case/transition.ts'
@@ -34,7 +34,13 @@ export const sha256 = (v: string | Buffer) => createHash('sha256').update(v).dig
 // manifest.json / outputs.json の指紋 = 一覧（path・sha256・bytes）の sha256。at は入れない（9.3）
 export const filesFingerprint = (files: VersionManifest['files']) => sha256(JSON.stringify(files))
 
-export function makerInstruction(work: string, n: number, feedback: boolean) {
+// 出典付きの依頼の、出典と「要確認」の約束（6.3.1 (1)）
+export const SOURCES_RULE = `出典と要確認の印（この依頼は出典付き）:
+- 事実の主張（数・日付・名前・比べた言い方・言い切り）に出典があるときは、その主張と同じ文の中に Markdown のリンク [題](https://…) を置く。HTML の版では同じリンクを <a href="https://…">題</a> で書く
+- materials/ の資料から取った主張は、資料の言い方と数のまま書く（リンクは要らない）
+- 出典を示せない事実の主張は、その文の終わり（句点の後）に ${MARK} を付ける。出典をこしらえない`
+
+export function makerInstruction(work: string, n: number, feedback: boolean, sources = false) {
   const f = draftNames(n)
   return `あなたは libretto の「作り手」です。依頼書に沿って文書を書きます。これはバージョン ${n} です。
 
@@ -47,9 +53,9 @@ ${feedback ? '- feedback.md: 前のバージョンで直してほしいこと。
 
 書くもの（この順に）:
 1. ${f.md}: 本文を Markdown で。見出しは # で始める
-2. ${f.html}: 同じ本文を HTML で。使うのは見出し（h1〜h3）・段落（p）・箇条書き（ul / ol / li）だけ。script・style・外部の読み込みは入れない
+2. ${f.html}: 同じ本文を HTML で。使うのは見出し（h1〜h3）・段落（p）・箇条書き（ul / ol / li）${sources ? '・出典のリンク（a）' : ''}だけ。script・style・外部の読み込みは入れない
 3. ${f.done}: 1 と 2 を書き終えてから、done の 1 行だけを書く
-
+${sources ? `\n${SOURCES_RULE}\n` : ''}
 書き終えたら、何を書いたかを 1 行で答えてください。`
 }
 
@@ -91,7 +97,8 @@ export function feedbackOf(home: string, ledger: Ledger, c: CaseRecord): string 
     if (!Number.isFinite(k)) throw new Error(`no format review for ${c.caseId} v${c.version}`)
     return summaries(reviewFile(c.version, `f${k}`))
   }
-  if (event === 'approval.redo') {
+  // 「ここを直して」と、「削る」で新しい系列を始めた承認（6.3.1 (9)）
+  if (event === 'approval.redo' || event === 'approval.ok') {
     const text = ledger
       .listDecisions(c.caseId)
       .filter((d) => d.gate === '完成稿')
@@ -228,7 +235,12 @@ export async function make(d: Deps, c: CaseRecord, signal: AbortSignal): Promise
     caseId: c.caseId,
     access: 'write',
     workdir: work,
-    instruction: makerInstruction(work, n, !!feedback),
+    instruction: makerInstruction(
+      work,
+      n,
+      !!feedback,
+      approvedSet(home, ledger, c.caseId)?.brief.sources === '出典付き',
+    ),
     materials: [],
     output: { kind: 'files', expect: [f.md, f.html, f.done] },
     limits: MAKER_LIMITS,

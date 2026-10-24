@@ -84,7 +84,7 @@ describe('7.2 の受け入れ規則', () => {
     expect(check(many).join()).toContain('5〜40')
   })
 
-  it('最低限の顔ぶれ: 依頼適合（claude / jev）・分量（code）、出典付きなら事実、合わせるなら声', () => {
+  it('最低限の顔ぶれ: 依頼適合（claude / jev）・分量（code）、合わせるなら声。出典付きの事実はホストが足すので求めない（6.3.1 (6)）', () => {
     const noFit = goodChecks.map((c) => (c.category === '依頼適合' ? { ...c, category: '構成' as const } : c))
     expect(check(noFit).join()).toContain('依頼適合')
     expect(
@@ -99,7 +99,9 @@ describe('7.2 の受け入れ規則', () => {
         }),
       ).join(),
     ).toContain('分量')
-    expect(check(goodChecks, { voice: '合わせる', sources: '出典付き' }).join()).toMatch(/事実.*声|声.*事実/)
+    const v = check(goodChecks, { voice: '合わせる', sources: '出典付き' }).join()
+    expect(v).toContain('声')
+    expect(v).not.toContain('事実')
   })
 
   it('下書き役は canary を書かない。同系統なら少数派が 3 件以上', () => {

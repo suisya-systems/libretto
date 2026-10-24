@@ -72,6 +72,9 @@ export const CodeArgs = {
   canary: z.object({ token: z.string().min(1) }),
   pasteSafe: z.object({}),
   pageRoundTrip: z.object({}),
+  claimsInventoried: z.object({}),
+  sourcesReachable: z.object({}),
+  numbersMatch: z.object({}),
 } satisfies Partial<Record<CodeFn, z.ZodType>>
 
 export const JevScope = z.enum(['document', 'section', 'paragraph', 'claim'])
@@ -116,13 +119,15 @@ export const Check = z.object({
 })
 export type Check = z.infer<typeof Check>
 
+// 出典を示せない事実の主張に作り手が付ける印（docs/implementation.md 6.3.1 (1)）
+export const MARK = '【要確認】'
 export const Mark = z.object({ claimId: z.string(), text: z.string(), where: z.string() })
 export type Mark = z.infer<typeof Mark>
 
 export const SourceRow = z.object({
   ref: z.string(),
   title: z.string(),
-  verdict: z.enum(['支持', '一部支持', '支持しない', '開けない']),
+  verdict: z.enum(['支持', '一部支持', '支持しない', '開けない', '未判定']), // 集計の決め方は 6.3.1 (8)
   claimIds: z.array(z.string()),
 })
 export type SourceRow = z.infer<typeof SourceRow>

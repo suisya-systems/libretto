@@ -414,7 +414,7 @@ libretto の画面に出す言葉の正本。設計書（[`docs/design.md`](./de
 
 **承認の面（画面 4。実装設計書 6.2.5 (8)）**
 
-`approval.diff.*` は前のバージョンとの違いの 1 行の印。`approval.early.*` は 3 回目を待たずに本人に上げたときだけ、「直しきれなかった項目が N 件」の下に出す 1 行（なぜ今あなたの番なのか）。`approval.stuck` は 2 回続けて直らなかった項目に付ける印（実装設計書 6.2.7 (5)）。履歴の `event.review.fail` / `event.format.failed` は、行き先が承認待ちなら `.up`、停止なら `.stop` の文に替える。`approval.sameFamily` と `approval.noJudgeModel` / `approval.judgeModelPartial` は判定の結果の注記（`familyNote` / `jevNote` があるとき）。`approval.judgeModel` / `approval.judgeModelUnsure` は判定専用の AI が確かめた数（`ReviewSummary.jev`。実装設計書 7.6 (6)）。
+`approval.diff.*` は前のバージョンとの違いの 1 行の印。`approval.early.*` は 3 回目を待たずに本人に上げたときだけ、「直しきれなかった項目が N 件」の下に出す 1 行（なぜ今あなたの番なのか）。`approval.stuck` は 2 回続けて直らなかった項目に付ける印（実装設計書 6.2.7 (5)）。履歴の `event.review.fail` / `event.format.failed` は、行き先が承認待ちなら `.up`、停止なら `.stop` の文に替える。`approval.sameFamily` と `approval.noJudgeModel` / `approval.judgeModelPartial` は判定の結果の注記（`familyNote` / `jevNote` があるとき）。`approval.judgeModel` / `approval.judgeModelUnsure` は判定専用の AI が確かめた数（`ReviewSummary.jev`。実装設計書 7.6 (6)）。`approval.marks*` / `approval.mark.*` は「要確認」の印ごとの選択で、削るが 1 つでもあれば主ボタンが `approval.okCut` に替わる。`approval.sources*` / `approval.source.*` は出典ごとのチェックの結果（`SourceRow.verdict` の値ごと。実装設計書 6.3.1 (8)(11)）。
 
 | キー | 文 |
 |---|---|
@@ -450,6 +450,19 @@ libretto の画面に出す言葉の正本。設計書（[`docs/design.md`](./de
 | `approval.judgeModelPartial` | 一部の判定は、判定専用の AI につながらず、ライターと同じ種類の AI が読んで行いました |
 | `approval.judgeModel` | 判定専用の AI が {units} か所をチェックしました |
 | `approval.judgeModelUnsure` | {unsure} か所の判定が曖昧だったので、別の AI が再チェックしました |
+| `approval.marksHeading` | 要確認の印 |
+| `approval.marksLead` | 出典を確かめられなかった主張です。印を付けたまま出すか、削るかを選んでください。 |
+| `approval.mark.印のまま` | 印のまま出す |
+| `approval.mark.削る` | 削る |
+| `approval.okCut` | 削って直してもらう |
+| `approval.sourcesHeading` | 出典 |
+| `approval.sourcesLead` | 本文が示した出典を開いて、主張と照らしてチェックしました。 |
+| `approval.source.支持` | 裏付けあり |
+| `approval.source.一部支持` | 一部だけ裏付けあり |
+| `approval.source.支持しない` | 裏付けなし |
+| `approval.source.開けない` | 開けませんでした |
+| `approval.source.未判定` | まだチェックしていません |
+| `approval.sourceClaims` | 主張 {n} 件 |
 
 **送付の面（画面 5。実装設計書 6.2.8 (6)）**
 

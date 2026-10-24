@@ -1938,6 +1938,85 @@ input:disabled {
   align-items: center;
   gap: var(--space-2);
 }
+/* 要確認の印と出典（6.3.1 (11)） */
+.facts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-line);
+}
+.facts h3 {
+  margin: 0;
+}
+.facts > p {
+  margin: 0;
+}
+.fact-mark {
+  gap: var(--space-2);
+  background: color-mix(in srgb, var(--color-turn-bg) 55%, var(--color-surface));
+  box-shadow: inset 3px 0 0 var(--color-turn);
+}
+.segment {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--radius);
+  background: var(--color-sunken);
+  border: 1px solid var(--color-line);
+  align-self: flex-start;
+}
+.segment-item {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: calc(var(--radius) - 2px);
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--color-muted);
+  cursor: pointer;
+}
+.segment-item:has([data-checked]) {
+  background: var(--color-surface);
+  color: var(--color-ink);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--color-ink) 12%, transparent);
+}
+.segment-item:has([data-disabled]) {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+.segment-dot {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  appearance: none;
+  background: none;
+  border: 0;
+  cursor: inherit;
+}
+.segment-dot:focus-visible {
+  outline: 3px solid var(--color-ring);
+  outline-offset: 2px;
+}
+.sources {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.source {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  overflow-wrap: anywhere;
+}
+.source-title {
+  font-weight: 700;
+}
 .notes {
   list-style: none;
   margin: 0;

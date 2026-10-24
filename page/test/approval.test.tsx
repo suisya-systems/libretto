@@ -159,6 +159,54 @@ describe('承認の面', () => {
     r.done()
   })
 
+  it('要確認の印ごとに「印のまま出す / 削る」を選び、全部の答えを送る。削るがあればボタンの文が替わる（6.3.1 (9)）', async () => {
+    const r = await render({
+      ...base,
+      review: {
+        ...review(),
+        needsConfirmation: [
+          { claimId: 'M01', text: '東京が最大の拠点だ。', where: '見出し「題」の 2 段落目' },
+          { claimId: 'M02', text: '昨年は 3 回あった。', where: '冒頭の 1 段落目' },
+        ],
+      },
+    })
+    expect(r.text()).toContain(W['approval.marksHeading'])
+    expect(r.text()).toContain('見出し「題」の 2 段落目')
+    const radios = [...r.el.querySelectorAll('.fact-mark')].map((li) => [...li.querySelectorAll('[role="radio"]')])
+    expect(radios.map((x) => x.length)).toEqual([2, 2])
+    await r.click(radios[1]?.[1])
+    expect(r.button(W['approval.ok'])).toBeUndefined()
+    await r.click(r.button(W['approval.okCut']))
+    expect(sent).toMatchObject([{ type: 'approval.ok', marks: { M01: '印のまま', M02: '削る' } }])
+    r.done()
+  })
+
+  it('出典ごとのチェックの結果と主張の件数。リンクは新しいタブ（6.3.1 (11)）', async () => {
+    const r = await render({
+      ...base,
+      review: {
+        ...review(),
+        sources: [
+          { ref: 'https://example.com/a', title: '調査 A', verdict: '支持', claimIds: ['K01', 'K02'] },
+          { ref: 'https://example.com/b', title: '調査 B', verdict: '開けない', claimIds: ['K03'] },
+        ],
+      },
+    })
+    const items = [...r.el.querySelectorAll('.source')]
+    expect(items.map((x) => x.textContent)).toEqual([
+      `調査 A${W['approval.source.支持']}${w('approval.sourceClaims', { n: 2 })}`,
+      `調査 B${W['approval.source.開けない']}${w('approval.sourceClaims', { n: 1 })}`,
+    ])
+    const a = items[0]?.querySelector('a')
+    expect([a?.getAttribute('href'), a?.getAttribute('target'), a?.getAttribute('rel')]).toEqual([
+      'https://example.com/a',
+      '_blank',
+      'noopener noreferrer',
+    ])
+    expect(r.text()).not.toContain(W['approval.marksHeading'])
+    r.done()
+  })
+
   it('「これで承認する」は見ている版の指紋を approval.ok に添えて送る', async () => {
     const r = await render(base)
     await r.click(r.button(W['approval.ok']))

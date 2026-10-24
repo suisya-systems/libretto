@@ -1,6 +1,6 @@
 // ホストが足す確認項目（docs/implementation.md 7.2 の最後の 2 行・8.4・6.2.2 (5)）。受け入れ規則を通った後に足す
 import { randomBytes } from 'node:crypto'
-import type { DeliveryTarget } from '@libretto/shared/api'
+import type { Brief, DeliveryTarget } from '@libretto/shared/api'
 import type { Check } from '@libretto/shared/checks'
 
 export const CANARY_SUMMARY = '隔離の点検'
@@ -50,6 +50,44 @@ const PAGES = code(
   '中身の無いスライドがあります',
 )
 
+// 出典付きの依頼に足す事実の 4 項目（6.3.1 (6)）。機械の 3 つは「問題がある」を数えて 0 件で合格
+export const SUPPORT_PROPOSITION = '「出典の抜粋」は「主張」を支持している'
+const fact = (fn: 'claimsInventoried' | 'sourcesReachable' | 'numbersMatch', title: string, summary: string): Item => ({
+  category: '事実',
+  title,
+  judge: { by: 'code', fn, args: {} },
+  summary,
+})
+const FACTS: (Item & { pass: Check['pass'] })[] = [
+  {
+    ...fact(
+      'claimsInventoried',
+      '事実の主張がすべて、出典・資料・要確認の印のどれかに結び付いている',
+      '出典も要確認の印も付いていない事実の主張があります',
+    ),
+    pass: { kind: 'count', max: 0 },
+  },
+  {
+    ...fact(
+      'sourcesReachable',
+      '本文が示した出典がすべて開けて、主張の該当箇所が見つかる',
+      '開けない出典か、主張の箇所が見つからない出典があります',
+    ),
+    pass: { kind: 'count', max: 0 },
+  },
+  {
+    ...fact('numbersMatch', '資料から取った数が、資料と同じ値になっている', '資料と違う数を書いているところがあります'),
+    pass: { kind: 'count', max: 0 },
+  },
+  {
+    category: '事実',
+    title: '出典や資料の該当箇所が、本文の主張を支えている',
+    judge: { by: 'jev', proposition: SUPPORT_PROPOSITION, state: ['claim', 'excerpt'], scope: 'claim' },
+    summary: '出典や資料が支えていない主張があります',
+    pass: { kind: 'all' },
+  },
+]
+
 function itemsFor(t: DeliveryTarget): Item[] {
   switch (t.kind) {
     case 'page':
@@ -67,11 +105,12 @@ function itemsFor(t: DeliveryTarget): Item[] {
   }
 }
 
-// 下書き役の項目の後ろに、canary 1 件と保存先ごとの形式の項目（同じものは 1 件）を足す
+// 下書き役の項目の後ろに、canary 1 件と（出典付きなら事実の 4 項目と）保存先ごとの形式の項目（同じものは 1 件）を足す
 export function withHostItems(
   checks: readonly Check[],
   destinations: readonly DeliveryTarget[],
   token = randomBytes(16).toString('hex'),
+  sources: Brief['sources'] = '出典なし',
 ): Check[] {
   const formats = [...new Set(destinations.flatMap(itemsFor))]
   const added: Omit<Check, 'id'>[] = [
@@ -86,6 +125,12 @@ export function withHostItems(
       selfReport: '書いていない',
       canary: true,
     },
+    ...(sources === '出典付き' ? FACTS : []).map((f) => ({
+      ...f,
+      phase: '本文' as const,
+      hidden: false,
+      selfReport: '依頼に書いてある' as const,
+    })),
     ...formats.map((f) => ({
       ...f,
       pass: { kind: 'all' as const },
