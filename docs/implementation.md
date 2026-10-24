@@ -1739,8 +1739,8 @@ S1 で作らないもの: 共有リンク `/p/:shareToken` と `share.revoke` �
 | `fetchSource(ref)` | URL / Drive / 添付から該当段落を切り出す → `Excerpt | Unavailable` | — |
 | `supportsClaim(claim, excerpt)` | 命題「『出典の抜粋』は『主張』を支持している」 → `{ supports: boolean \| null, noul?, by }`（Noul に自信度は付かない。7.6 (8)） | Jev（帯の中・無ければ Claude） |
 | `compareNumbers(materials, draft)` | 材料の数値が最終版で同じ値か → `{ matched, mismatched: { value, where }[] }` | — |
-| `extractVoice(docs)` | 文体カードの数値（設計書 5.5 の表） → `VoiceCard`。3 行の描写だけ Sonnet | 一部 Sonnet |
-| `pickVoiceSamples(docs)` | 読み比べ用の段落 3〜5 → `checks/voice-samples.md` | — |
+| `extractVoice(docs)` | 文体カードの数値（設計書 5.5 の表） → `VoiceCard`。数値は入口で、3 行の描写は T11 で（6.3.2 (3)(8)） | 一部 Sonnet |
+| `pickVoiceSamples(docs)` | 読み比べ用の段落 最大 5 → `checks/voice-samples.md`（6.3.2 (4)） | — |
 | `preflightDeps()` | `soffice` / `pdftoppm` / 各鍵 / `srt`（と Linux の `bwrap` / `socat`）の有無 → `Requirements`（`requirements.md` を機械的に読む） | — |
 | `prefilter(message)` | 自動送信・本人送信を機械的に除く → `boolean` | — |
 | `classifyCandidate(message)` | 「文書づくりを頼んでいるか」 → `{ confidence: '高'|'中'|'低'|'なし', reason: string }`（Haiku の高 / 中 / 低と Jev の確率を設計書 5.7.3 の規則で合成） | Haiku ＋ Jev |
@@ -1860,6 +1860,115 @@ S1 で作らないもの: 共有リンク `/p/:shareToken` と `share.revoke` �
 - 承認の面の「チェックの結果」の下に、あるときだけ 2 つの欄を足す: 「出典が見つからなかった文」（主張の文・場所・【要確認】を付けて残す / この文を削る）と「出典」（題のリンク・判定・主張の件数）。削るが 1 つでもあれば主ボタンの文が「削って直してもらう」に変わる。文言は ui-wording.md。
 
 理由: 出典付きの記事が届け先でリンクを失うと、読む人が出典を辿れない（レビューの指摘で、今のページと貼り付け用はリンクを捨てていた）。
+
+### 6.3.2 文体カードの決め事（Issue 19 の着手前の設計レビューで決めたこと）
+
+6.3 の `extractVoice` / `pickVoiceSamples`、9.3 の `voice.json`・`checks/voice-samples.md`、7.1 の文体の数値の `CodeFn`、7.5 の `voiceMatch`、設計書 5.6・5.8.1 の「本人の過去文書での点検」、13.2 (e) の「あなたの文体の見本」を、`host/src/facts/voice.ts`・`host/src/roles/entrance.ts`・`host/src/case/runner.ts`・`host/src/checks/`・`host/src/roles/judge.ts`・`host/src/settings.ts`・入口 / 承認 / 設定の面に書くにあたって、文書だけでは決まらない 10 点を決める。設計レビュー（Blocker 1・Major 7・Minor 2）の指摘はそれぞれの点に織り込んだ。7.1・7.5・9.3 の該当の行はこの決め事に合わせて直した。
+
+作らないもの: Drive・添付の過去文書（S5。取り寄せは http / https だけ）、案件ごとに過去文書を渡す道（会話・入口に URL を登録する欄。今の会話の案件は `materials: []` で、渡す道が無い。S5 の「材料」で足す）、本文を貼り付けて見本にすること（設計書 10.2 の「本文の写しを残さない」と合わない）、`GET` / `PUT /api/settings` の全体（設定の Issue。ここでは見本の欄だけ）、本人の過去文書でモデル判定の項目を流すこと（(5)）。
+
+**(1) 過去文書はどこから取るか**
+
+決めたこと:
+- 設定の「あなたの文体の見本」（`Settings.voiceSamples`。最大 5 件の題と URL）だけから取る。依頼書が「あなたの文体に合わせる」（`voice: '合わせる'`）のときだけ。
+- 入口の段取りで、確認項目を下書きした後・分類の前に、`fetchSource` で全部を取り寄せる（網の検査・大きさ・時間の上限は 6.3.1 (5) のまま）。本文は保存しない。取り寄せた本文から、カードの数値（(3)）と読み比べ用の段落（(4)）と点検（(5)）を**入口でその場で**作る。
+- 依頼書の下書き役には「本人の文体に合わせるための過去の文章は wanted に入れない（文体の見本は設定から取る）」と指示する。
+
+理由: 13.2 (e) は「材料に過去文書が無ければ設定から取る」。今は案件ごとに過去文書を渡す道が無い（会話の案件の `materials` は空で、`POST …/materials` は貼った文だけ。レビューの指摘）ので、設定が唯一の道になる。依頼書の下書き役は過去の文章が要ると見ると `wanted` に入れ、本人の貼り付けを待つ（6.2.4）が、貼った文は見本に使わないので待つ意味が無い（レビューの指摘）。入口でカードまで作るのは、点検（(5)）と承認した組が同じ本文から出たことを保つため。URL だけを持って T11 で取り直すと、ページが変わったときに本人が承認したものと別の本文からカードができる（レビューの指摘）。
+
+**(2) 承認した組に入れるもの（`ChecksFile.voice`）**
+
+決めたこと:
+- 依頼書が「合わせる」のとき、組の確認項目のファイルに `voice: { docs: { title, url, fingerprint, usable }[], card?: VoiceNumbers, samplesFingerprint?: string, ownChecked: string[], ownFails: string[] }` を書く（取り寄せられなかった見本は `docs` に入れない）。組の指紋（`setFingerprint`）に入れる（無い組は今までの指紋と同じ値）。
+- `card` は使える文書（文が 5 つ以上）が 1 つ以上あるときだけ。無ければカードを作らず、入口の面に「文体の見本が無いので、文体カードは作りません」と、設定で登録できることを出す。止めない（オーナー確認中: 窓口経由で Q2。推奨のまま書く）。
+- `checks/voice-samples.md` は入口で書く（組を作り直すたびに置き換える）。その sha256 を `samplesFingerprint` に入れる。段落が 1 つも選べなければファイルを書かず、`samplesFingerprint` も無い。
+
+理由: カードの数値は本文の写しではないので、承認した組に残してよい（設計書 10.2 の「保存するもの = 文体カード」）。読み比べ用の段落は本文の写しなので `checks/` の別ファイルに置き、閉じるときに消す（6.3.1 (10) の一覧に既にある）。
+
+**(3) 文体カードの数値 `extractVoice(docs)`（決定的）**
+
+取り寄せた HTML は見出しを `# `、箇条書きの項目を `- ` で始まる段落にして Markdown の形で持つ（`fetchSource` の結果に `md` を足す。事実係の `paragraphs` は変えない）。数えるのは判定と同じ `checks/text.ts`（`sentences`・`sentenceLength`・`blocks`）。使える文書を全部つないだ 1 つの文章として数える。
+
+| 欄 | 決め方 |
+|---|---|
+| `endings` | 文ごとに `ending()`（句点と閉じ括弧を外す）の末尾で分ける。順に: **ぼかし**（`と思う` `と思います` `と思いました` `かもしれない` `かもしれません` `でしょう` `だろう` で終わる）→ **です・ます**（`です` `ます` `ました` `でした` `ません` `ましょう` `ください` の後に `か` `ね` `よ` が 0〜1 字）→ **だ・である**（末尾がひらがな）→ **体言止め**（それ以外。末尾が漢字・カタカナ・英数字）。割合（合計 1）と、いちばん多い形 `main`（同数は です・ます → だ・である → 体言止め → ぼかし の順） |
+| `sentenceLength` | 中央値と 90 パーセンタイル（小さい順に並べて ⌈0.9n⌉ 番目） |
+| `firstPerson` | 一人称の表（`FIRST_PERSON`。長い語から当てる）で数え、いちばん多い語（同数は表の順）。0 回なら `なし` |
+| `readerAddress` | `あなた` `みなさん` `皆さん` `読者` で数え、いちばん多い語。0 回なら `なし` |
+| `punctuation` | 1 文あたりの読点（`、` `，`）、`！`・`？`・`（`・`—` を使うか（半角も同じに数える）、英数字のうち全角の割合（英数字が無ければ null） |
+| `script` | 文字（`\p{L}` `\p{N}`）のうち漢字・カタカナの割合 |
+| `openers` | 文頭の接続語の表（しかし・ただ・でも・そして・また・つまり・なので・だから・ところで・さて・まず・次に・一方・実は・もちろん・たとえば・例えば・とはいえ・それでも・ちなみに）で数え、多い順に 5 つまで（同数は表の順。0 回は入れない） |
+| `unused` | 決まり文句の表（いかがでしたか・してみてください・と言えるでしょう・ではないでしょうか・することができ・において・させていただ・注目されています）のうち、過去文書に 1 回も出てこないもの |
+| `paragraphs` | 段落（見出しと箇条書きを除く）あたりの文の数の中央値と、見出しの形（見出しの末尾がひらがななら `文`、それ以外は `体言`。多い方。同数は `体言`、見出しが無ければ `なし`） |
+
+`portrait`（3 行の描写）は T11 で足す（(8)）。
+
+理由: 文末の形の順は「と思います」が です・ます にも当たるのを先に拾うため。だ・である を「末尾がひらがな」で決めるのは、常体の動詞（「書く」「分からない」）を拾うため。表はどれも、ponytail: 語の表は短く、表に無い言い回しは数えない。困ったら表を足す。
+
+**(4) 読み比べ用の段落 `pickVoiceSamples(docs)`**
+
+決めたこと: 使える文書の段落（見出しと箇条書きを除く）のうち 80〜400 字のものを、文書ごとに順に回して（1 本目の 1 つ目、2 本目の 1 つ目、…）最大 5 つ。3 つに届かなくても、あるだけで作る。0 なら読み比べの項目を足さない（(7)）。
+
+**(5) 入口の点検: 本人の過去文書で確認項目を流す（設計書 5.6・5.8.1）**
+
+決めたこと:
+- 下書き役の項目のうち、`category` が `声` か `自然さ` で `by: 'code'`・`phase: '本文'` のものを、使える文書ごとに `runCode` で流す。流した id を `ownChecked`、1 本でも落ちた id を `ownFails` に残す。
+- 入口の面: 流した項目に「あなたの過去の文章でも確かめました」、落ちた項目に「あなたの過去の文章もこのチェックを通りません」を出す。流していない項目には何も出さない（確かめていないものを「通った」と見せない）。外すかは、今までの「直して出し直す」で本人が決める（設計書 5.1 の「libretto は自動で直さない」）。
+- 別系統・同系統のどちらでも流す（費用ゼロ）。
+
+理由: 文体と自然さの機械判定（文末・文の長さ・一人称・翻訳調の言い回し）は、過去文書の長さに関係なく本人の癖と比べられる。分量・構成は文書ごとに違って当然なので流さない。モデル判定（`claude` / `jev`）の声の項目は、流すと入口ごとに費用がかかり、本人の文章で落ちたかを決める線も別に要る。ponytail: 声の項目が全部モデル判定なら点検は何も流さない（レビューの指摘。入口の面には何も出ないので「通った」とは見えない）。困ったら Claude の 1 回にまとめて流す。
+
+**(6) 文体の数値の `CodeFn`（ホストが足す。文体カードとの距離）**
+
+決めたこと: カードが要る関数 3 つ（`FnInput.voice` を足す。表の `host: true`）。単位はどれも本文全体、pass は `all`。
+
+| fn | 「はい」 | `measured` |
+|---|---|---|
+| `voiceEndings` | カードの `main` の形の割合が、カードの割合 −0.15 以上 | `ratio`・`target` |
+| `voiceSentenceLength` | 文の長さの中央値が、カードの中央値の 0.7〜1.3 倍 | `median`・`target` |
+| `voiceFirstPerson` | カードの一人称以外の一人称が出てこない（カードが `なし` なら一人称が出てこない） | `hits` |
+
+- ホストが足すのはカードがあるとき。canary の後・事実の項目の前。`category: '声'`、`hidden: false`、`selfReport: '依頼に書いてある'`（作り手は `voice.md` で同じ数を読む）。
+- 下書き役が書く声の項目と 7.2 の「合わせるなら声を 1 件以上」は変えない（カードが作れないときにも声の項目が残る）。
+
+理由: 設計書 5.2 の「文体の数値」の材料は「文体カードとの距離」。入口で下書き役はカードを知らないので、カードとの距離はホストが足す。幅（−0.15、0.7〜1.3 倍）は、ponytail: 1 人の文章の中のばらつきを見込んだ目安。実ホストで本人の過去文書が自分の幅で落ちたら広げる。
+
+**(7) Claude の読み比べ（ホストが足す 1 項目）**
+
+決めたこと:
+- 段落が選べたとき（`samplesFingerprint` があるとき）に 1 項目: `{ by: 'claude', question: '本文と「本人の文章の見本」を並べて読むと、同じ人が書いた文章に読める', materials: ['draft', 'voice-samples'], scope: 'document' }`、`pass: all`、`category: '声'`、`hidden: true`、`selfReport: '書いていない'`、要約「あなたの過去の文章と書きぶりが違って読めます」。
+- judge は、`voice-samples` を材料に持つ項目を Claude に回すときだけ、材料「本人の文章の見本」に `checks/voice-samples.md` を渡す。ファイルが無い・指紋が `samplesFingerprint` と違えば、その項目は Claude に聞かず `unable`（理由文「文体の見本が読めませんでした」）。
+- 下書き役が使える `materials` は今までどおり `draft` / `brief`。
+
+理由: 読み比べの段落は作り手に見せない（設計書 5.2）ので、作り手が読めない `checks/` から判定役にだけ渡す。
+
+**(8) T11（材料待ち → 下書き中）の文体カード**
+
+決めたこと:
+- `assemble` で、承認した組に `voice.card` があれば、役割 `事実係・描写`（Sonnet、`access: none`）を 1 回呼んで 3 行の描写を作る。材料はカードの数値と読み比べ用の段落（`checks/voice-samples.md`。無ければ数値だけ）。出力 `{ portrait: [s, s, s] }`（zod。指示の例は型の値から作る）。止めた・上限なら遷移しない（今までの「止めた」と同じ）。そのほかの失敗は描写なしで進める。
+- `voice.json`（`VoiceCard` = 数値＋ `portrait?` ＋ `sources`（題と URL））と `voice.md` を案件フォルダに書き、`voice.md` を作業場に写す。作り手の指示に「voice.md: 本人の文体カード。文末・文の長さ・一人称などをこれに合わせる」を足す（承認した組にカードがあるときだけ。ファイルの有無では決めない）。
+- **承認した組にカードが無ければ、作業場の `voice.md` を消す**（出し直しで「合わせない」に変えた組に、前の組のカードが残らない。レビューの指摘）。
+- 取り寄せる出典（6.3.1 (5)）に、文体の見本の URL を入れない（依頼書の文や貼った文に同じ URL があっても）。
+
+理由（最後）: 出典の取り寄せは依頼書と貼った文の URL を全部取り、資料の正本と作業場に写す。見本の URL がそこに入ると、作り手に見せない本人の段落が作業場に届く（レビューの Blocker）。
+
+**(9) `voiceMatch`（7.5）と承認の面**
+
+決めたこと:
+- `Review.voiceMatch?: { endings: { main, you, draft, ok }, sentenceLength: { you, draft, ok }, firstPerson: { you, draft, ok }, readAlike: boolean | null }`。`you` はカード、`draft` は判定した本文を同じ数え方で数えた値（文末は `main` の形の割合、文の長さは中央値、一人称は本文でいちばん多い一人称か `なし`）。`ok` は (6) の項目の結果（pass → true、fail → false、それ以外 → null）。`readAlike` は (7) の結果（同じ）。ホストが文体の項目を足した組の本文の判定にだけ付ける。
+- `ReviewSummary.voiceMatch` に写し、承認の面の「チェックの結果」の下に「あなたの文体と比べました」の欄（文末・文の長さ・一人称・読み比べ。あなた / この版 / 合っています・違います・まだです）。
+
+理由: 項目の `measured` は数だけで、一人称の語を持てない（レビューの指摘）。比べる値はカードと本文から直接作る。
+
+**(10) 設定「あなたの文体の見本」**
+
+決めたこと:
+- `<LIBRETTO_HOME>/settings.json` に `voiceSamples` を書く（9.2 の決まり: 置き換えで書き、前の版を `settings.prev.json` に残す。今は欄がこれだけで、無ければ空）。
+- `GET /api/settings/voice-samples` → `{ samples: MaterialRef[] }`。`PUT` は `{ samples: { title, url }[] }` で全体を置き換える（最大 5 件、題は 1〜80 字、URL は http / https。違えば 400）。id は `V1` から振り直し、`kind: '声の見本'`、`where` = URL。保存したら `settings.changed`。
+- 設定の面に節を 1 つ: 一覧（題・URL・外す）、題と URL を入れて足す、保存。
+- オーナー確認中（窓口経由で Q1）: 見本の形を「題と URL」にした。推奨のまま書く。
+
+理由: 本文の写しを残さない（設計書 10.2）ので、場所だけを持ち、案件ごとに取り寄せる。
 
 ### 6.3.3 事実係が公開の情報を集める決め事（GitHub #28 の着手前の設計レビューで決めたこと）
 
@@ -1994,7 +2103,7 @@ type Check = {
   canary?: true                       // 8.3 の canary。本人には「隔離の点検」と見せる
 }
 type StateRef = 'claim' | 'excerpt' | 'paragraph' | 'section' | 'brief.audience' | 'voice.firstPerson' | …   // Jev の state に置くものの名前
-type CodeFn = 'charCount' | 'headingCount' | 'paragraphsPerHeading' | 'forbiddenStrings' | 'forbiddenPattern' | 'sourcesReachable' | 'numbersMatch' | 'sentenceEndingRatio' | 'sentenceLengthMedian' | 'firstPersonOnly' | 'markerFree' | 'pasteSafe' | 'claimsInventoried' | 'xlsxNoFormulaErrors' | 'xlsxTotalsMatch' | 'pptxNoBlankPages' | 'pageRoundTrip' | 'docsRoundTrip' | 'sheetsRoundTrip' | 'canary'
+type CodeFn = 'charCount' | 'headingCount' | 'paragraphsPerHeading' | 'forbiddenStrings' | 'forbiddenPattern' | 'sourcesReachable' | 'numbersMatch' | 'sentenceEndingRatio' | 'sentenceLengthMedian' | 'firstPersonOnly' | 'markerFree' | 'pasteSafe' | 'claimsInventoried' | 'xlsxNoFormulaErrors' | 'xlsxTotalsMatch' | 'pptxNoBlankPages' | 'pageRoundTrip' | 'docsRoundTrip' | 'sheetsRoundTrip' | 'canary' | 'voiceEndings' | 'voiceSentenceLength' | 'voiceFirstPerson'   // voice* は文体カードとの距離（6.3.2 (6)）
 ```
 
 - **機械判定とモデル判定の対応**: `by: 'code'` が設計書 5.2 の「機械判定」、`by: 'jev'` と `by: 'claude'` が「モデル判定」。1 項目は 1 つの `judge` を持つ。同じ観点を機械とモデルの両方で見たいときは 2 項目にする（AND は項目の間で成り立つ）。
@@ -2064,7 +2173,7 @@ type Review = {
   escalate?: { why: '直らない' | '判定できない', checkIds: string[] }   // 3 回目を待たずに本人に上げた（6.2.7 (2)）
   marks: Mark[]                          // 「要確認」印 { claimId, text, where }
   sources: SourceRow[]                   // { ref, title, verdict: '支持' | '一部支持' | '支持しない' | '開けない', claimIds }
-  voiceMatch?: { endings, sentenceLength, firstPerson, readAlike: boolean }
+  voiceMatch?: { endings: { main, you, draft, ok }, sentenceLength: { you, draft, ok }, firstPerson: { you, draft, ok }, readAlike: boolean | null }   // 6.3.2 (9)
   familyNote?: string                    // 「確認項目は作り手と同じ系統が書きました」
   jevNote?: string                       // 「判定専用モデルは使っていません」等
   jevBand?: [number, number]             // Jev を使った判定の帯（7.6 (5)）
@@ -2764,10 +2873,10 @@ CREATE UNIQUE INDEX conversation_one_per_request ON conversation_messages(reques
 |---|---|---|
 | `intake.json` / `.md` | `Intake { origin, link?, sourceId?, summary, confidence?, reason?, materials: MaterialRef[], conversationRef?, parentCaseId?, heard? }`（`conversationRef = { thread, seq }`、`heard` は会話で聞き取った `IntakeDraft`。6.2.1 (6)） | 置き換え（入口の承認まで）。承認後は不変 |
 | `brief.json` / `.md` | `Brief`（表 4-1 の 13 項目に、書く内容 `subject` と渡してほしいもの `wanted` を足したもの）＋ `assumptions: Assumption[]` ＋ `decisions: { undecidedId, answer, label }[]`（入口で本人が答えたもの。`answer` は選択肢の id の配列か「任せる」。前の形の文字列 1 つは配列に読む。6.2.6 (2)）＋ `approvedFingerprint`（承認時の組の sha256） | 入口の承認で固定。T7 / T7b の出し直しは `brief.v2.json` と番号を進める（番号の決め方と書き方は 6.2.2 (7)） |
-| `checks/checks.json` / `.md` | `{ checks: Check[], family: '別系統'|'同系統', approvedFingerprint }` | 同上 |
-| `checks/voice-samples.md` | 読み比べ用の段落 | 閉じるときに消す |
+| `checks/checks.json` / `.md` | `{ checks: Check[], family: '別系統'|'同系統', voice?（文体の見本と文体カードの数値・本人の過去文書での点検。6.3.2 (2)）, approvedFingerprint }` | 同上 |
+| `checks/voice-samples.md` | 読み比べ用の段落（入口で書く。6.3.2 (2)(4)） | 組を作り直すたびに置き換え。閉じるときに消す |
 | `undecided.json` / `.md` | `{ items: Undecided[], mismatches: Mismatch[], answers: Record<id, string[]|'任せる'> }`（前の形の `recommended` / 答えの文字列 1 つは配列に、`multiple` が無ければ `false` と読む。6.2.6 (2)） | 答えは承認時に 1 回 |
-| `voice.json` / `.md` | `VoiceCard`（設計書 5.5 の表の数値 ＋ `portrait: string[3]`） | 材料が揃うときに 1 回 |
+| `voice.json` / `.md` | `VoiceCard`（設計書 5.5 の表の数値 ＋ `portrait?: string[3]` ＋ `sources`。数値は承認した組の `voice.card` の写し。6.3.2 (8)） | T11 で書く（作業場に `voice.md` を写す） |
 | `facts.json` / `.md` | `FactsFile`（6.3.1 (8)。抜粋の本文は入れない。`quoteOfOther` は S8 で足す） | 版ごとに作り直し（`facts.v<N>.json`。最新を `facts.json` に写す） |
 | `facts-excerpts/<ref>.json` | 取り寄せた出典の本文（URL・題・段落・指紋。6.3.1 (5)） | 閉じるときに消す |
 | `materials/pasted-NN.md` / `source-NN.md` | 資料の正本（本人が貼った文・T11 で取り寄せた出典。6.3.1 (5)）。作り手からは読めない | 閉じるときに消す |
@@ -3049,7 +3158,7 @@ libretto/
 | (b) | 画面 2「決まっていないこと」に**おすすめが選んであり**、そのままでも進められる | 4.1 は「本人が『作り手に任せる』か『決める』」の 2 択 | 画面案の形を採る: 本人が入口の面を見て承認するときは `Undecided.recommended` が既定で選ばれていて、触らなければそれが答えとして記録される（`任せる` は選択肢の 1 つとして残す）。**合図由来の自動入口（Q15）では本人が面を見ないので、答えは全部「任せる」**（設計書 4.2.3 のまま。おすすめで置き換えない） |
 | (c) | 画面 3「やり直しを頼む」が**検品中**に押せる | 「ここを直して」は承認の面（ゲート②）だけ | 検品中は押せない。進行の面にはボタンを置かず、「次にすること」に「チェックが終わったら、直してほしいことを頼めます」と書く（6.2.3 (8)。進行の面が出る状態はどれも `approval.redo` を受けないため）。理由は 4.4。画面案の文言は窓口で直す |
 | (d) | 画面 7「届け先の既定」（作るものごとに最初に出す届け先） | 3.4 の「接続と合図」に無い | **足す**。`Settings.defaultDestinations: Record<DocType, DeliveryTarget[]>`。話し相手が表 4-1 の「届け先」を埋めるときの初期値に使う。設計書の決定を変えない追加 |
-| (e) | 画面 7「あなたの声の見本」（文体カードの元になる本人の文章を登録しておく） | 5.5 は「本人が書いた文章から抽出」とだけ | **足す**。`Settings.voiceSamples: MaterialRef[]`。依頼書の「本人の声を合わせるか」が「合わせる」で、材料に過去文書が無ければここから取る |
+| (e) | 画面 7「あなたの声の見本」（文体カードの元になる本人の文章を登録しておく） | 5.5 は「本人が書いた文章から抽出」とだけ | **足す**。`Settings.voiceSamples: MaterialRef[]`。依頼書の「本人の声を合わせるか」が「合わせる」で、材料に過去文書が無ければここから取る（今は案件ごとに渡す道が無いので、ここだけから取る。題と URL。6.3.2 (1)(10)） |
 | (f) | 画面 7「全体（今月）」の費用上限 | D13 は「全体の上限（オーナーが決める）」 | **P3**。単位は「月」にする（画面案に合わせる） |
 | (g) | 画面 5 で 1 つの依頼に**届け先が 3 つ**（貼り付け用＋控えの Google ドキュメント＋自分だけのページ） | 4.1「1 成果物 = 1 作り手」、7.1 は届け先ごとの表 | 「1 作り手が書いた 1 つの本文を、複数の届け先に仕立てる」と読む。`deliveryPlan.targets` は配列、`deliveries` 表 は届け先ごとに 1 行。作り手は 1 人のまま |
 | (h) | 画面 1「完成した依頼」のナビ | 3.3 に明示は無い（「成果」の面はある） | 経路 `/done`（状態 = 完了 の一覧）。追加のみ |
