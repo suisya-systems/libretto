@@ -14,12 +14,14 @@ import {
   type Phase,
   Review,
 } from '@libretto/shared/checks'
-import { type BriefFile, type CaseRecord, VersionManifest } from '@libretto/shared/ledger'
+import { type BriefFile, type CaseRecord, type FactsFile, VersionManifest } from '@libretto/shared/ledger'
 import { z } from 'zod'
 import { MAX_ROUNDS, transition } from '../case/transition.ts'
 import { CANARY_SUMMARY } from '../checks/host-items.ts'
-import { type FnInput, runCode } from '../checks/judgeable.ts'
+import { FNS, type FnInput, runCode } from '../checks/judgeable.ts'
 import { paragraphUnits, sections } from '../checks/text.ts'
+import { supportsClaims } from '../facts/claims.ts'
+import { collectFacts, type Facts, type Fetch, linkRows, marksOf, renderFacts } from '../facts/inventory.ts'
 import { caseDir } from '../ledger/db.ts'
 import type { Ledger } from '../ledger/ledger.ts'
 import type { Job, Outcome } from '../model/invoke.ts'
@@ -204,6 +206,8 @@ export type JudgeInput = {
   brief: BriefFile
   family: '別系統' | '同系統'
   signal: AbortSignal
+  // 版の事実を集める（棚卸しと取り寄せ）。事実の項目があるときだけ呼ぶ（6.3.1 (7)）
+  facts?: () => Promise<{ ok: true; facts: Facts } | { ok: false; out: Failure }>
 }
 export type Judged = {
   body: Pick<
@@ -211,6 +215,7 @@ export type Judged = {
     'results' | 'pass' | 'failedSummaries' | 'marks' | 'sources' | 'familyNote' | 'jevNote' | 'jevBand'
   >
   reasons: Record<string, string>
+  facts?: FactsFile // 支持の判定を書き込んだもの。棚卸しを流さなかった版には無い
 }
 
 // jev が無ければ Jev を使わない（jev の項目も全部 Claude に回す。S1 の形）
@@ -226,9 +231,19 @@ export async function judge(
   let jevUsed = false
   let jevPartial = false
 
-  // 1. 機械判定を全部
-  for (const c of checks.filter((x) => x.judge.by === 'code')) {
-    const r = await runCode(c, j.input)
+  // 1. 機械判定を全部。事実の関数の前に 1 回だけ棚卸しをする（6.3.1 (7)）
+  const needsFacts = (c: Check) => c.judge.by === 'code' && !!FNS[c.judge.fn]?.facts
+  const plainCode = checks.filter((x) => x.judge.by === 'code' && !needsFacts(x))
+  const factCode = checks.filter(needsFacts)
+  let facts: Facts | undefined
+  for (const c of [...plainCode, ...factCode]) {
+    if (needsFacts(c) && !facts) {
+      if (!j.facts) throw new Error(`no facts for ${c.id}`)
+      const got = await j.facts()
+      if (!got.ok) return { ok: false, out: got.out }
+      facts = got.facts
+    }
+    const r = await runCode(c, { ...j.input, ...(facts && { facts: facts.file }) })
     if (r.timedOut) reasons[c.id] = TOO_HEAVY
     results.set(c.id, {
       id: c.id,
@@ -238,13 +253,58 @@ export async function judge(
       ...(r.timedOut && { reasonRef: c.id }),
     })
   }
-  const model = checks.filter((x) => x.judge.by !== 'code')
+  const claimChecks = checks.filter(isClaimCheck)
+  const model = checks.filter((x) => x.judge.by !== 'code' && !isClaimCheck(x))
   const codeFailed = [...results.values()].some((r) => r.verdict !== 'pass')
 
   if (codeFailed) {
     // 1 つでも落ちたらモデル判定は流さない（費用を使わない。7.5）
-    for (const c of model) results.set(c.id, { id: c.id, verdict: 'skipped', by: c.judge.by as 'jev' | 'claude' })
-  } else if (model.length) {
+    for (const c of [...model, ...claimChecks])
+      results.set(c.id, { id: c.id, verdict: 'skipped', by: c.judge.by as 'jev' | 'claude' })
+  } else {
+    // 事実の支持（jev・scope claim）。抜粋のある主張ごとに supportsClaim。単位 0 個は合格（6.3.1 (6)(7)）
+    if (claimChecks.length) {
+      if (!facts) {
+        if (!j.facts) throw new Error('no facts for claim checks')
+        const got = await j.facts()
+        if (!got.ok) return { ok: false, out: got.out }
+        facts = got.facts
+      }
+      const f = facts
+      const ids = [...f.excerpts.keys()]
+      const textOf = (id: string) => f.file.claims.find((x) => x.id === id)?.text as string
+      const sup = await supportsClaims(
+        ids.map((id) => ({ claim: textOf(id), excerpt: f.excerpts.get(id) as string })),
+        { ...(jev && { home: jev.home }), caseId: j.caseId, invoke, signal: j.signal },
+      )
+      if (!sup.ok) return { ok: false, out: sup.out }
+      if (sup.results.some((r) => r.by === 'jev' || r.noul !== undefined)) jevUsed = true
+      if (sup.partial) jevPartial = true
+      for (const [i, id] of ids.entries()) {
+        const v = f.file.verdicts.find((x) => x.claimId === id)
+        if (v) v.supports = (sup.results[i] as { supports: boolean | null }).supports
+      }
+      const units = sup.results.map((r, index) => ({
+        index,
+        yes: r.supports,
+        ...(r.noul !== undefined && { noul: r.noul }),
+        ...(r.by === 'claude' && { claude: true as const }),
+      }))
+      for (const c of claimChecks)
+        results.set(c.id, {
+          id: c.id,
+          verdict: units.length
+            ? verdictOf(
+                c.pass,
+                units.map((u) => u.yes),
+              )
+            : 'pass',
+          by: units.some((u) => u.noul !== undefined) ? 'jev' : 'claude',
+          units,
+        })
+    }
+  }
+  if (!codeFailed && model.length) {
     const units = new Map(model.map((c) => [c.id, unitsOf(scopeOf(c), j.input.md)]))
     // 2. Jev の項目を単位ごとに聞く（7.6 (5)）
     const noul = new Map<string, number>()
@@ -337,8 +397,8 @@ export async function judge(
         pass: ordered.every((r) => r.verdict === 'pass'),
         // unable は作り手には直せないので返さない（本人にだけ見せる。6.2.7 (3)）
         failedSummaries: ordered.filter((r) => r.verdict === 'fail').map((r) => summaryOf.get(r.id) as string),
-        marks: [],
-        sources: [],
+        marks: marksOf(j.input.md),
+        sources: sourcesOf(facts?.file, j.input.md),
         ...(j.family === '同系統' && { familyNote: FAMILY_NOTE }),
         // Jev が 1 単位も答えなければ「使っていません」、答えたが失敗した要求があれば「一部は」（7.6 (5)）
         ...(checks.some((c) => c.judge.by === 'jev') &&
@@ -346,8 +406,37 @@ export async function judge(
         ...(jevUsed && { jevBand: [BAND.low, BAND.high] as [number, number] }),
       },
       reasons,
+      ...(facts && { facts: facts.file }),
     },
   }
+}
+
+const isClaimCheck = (c: Check) => c.judge.by === 'jev' && c.judge.scope === 'claim'
+
+// 承認の面の出典: 棚卸しで取り寄せたものと、本文のリンクのうちどの主張にも付かなかったもの（まだチェックしていない）
+function sourcesOf(f: FactsFile | undefined, md: string): Review['sources'] {
+  const rows = f ? sourceRows(f) : []
+  return [...rows, ...linkRows(md).filter((l) => !rows.some((r) => r.ref === l.ref))]
+}
+
+// 出典ごとの判定の集計（6.3.1 (8)）
+export function sourceRows(f: FactsFile): Review['sources'] {
+  return f.sources.map((s) => {
+    const vs = f.verdicts.filter((v) => v.sourceRef === s.url)
+    const yes = vs.filter((v) => v.supports === true).length
+    const verdict = !s.opened
+      ? '開けない'
+      : vs.some((v) => v.supports === undefined && v.excerptFingerprint !== undefined) || !vs.length
+        ? '未判定'
+        : yes && yes === vs.length
+          ? '支持'
+          : yes
+            ? '一部支持'
+            : vs.some((v) => v.supports === false || v.excerptFingerprint === undefined)
+              ? '支持しない'
+              : '未判定'
+    return { ref: s.url, title: s.title ?? s.url, verdict, claimIds: vs.map((v) => v.claimId) }
+  })
 }
 
 // --- 判定のファイル（9.3・6.2.5 (4)）。.md → .reasons.md → .json の順（JSON がある = 理由文もある）
@@ -399,6 +488,13 @@ function writeReview(dir: string, name: string, r: Review, reasons: Record<strin
   writeAtomic(join(dir, `${name}.reasons.md`), renderReasons(reasons, checks))
   writeAtomic(join(dir, `${name}.json`), `${JSON.stringify(r, null, 2)}\n`)
 }
+// facts.v<N>.json（正本）→ facts.json（最新の写し）→ facts.md（9.3・6.3.1 (8)）
+function writeFacts(dir: string, f: FactsFile) {
+  const json = `${JSON.stringify(f, null, 2)}\n`
+  writeAtomic(join(dir, `facts.v${f.version}.json`), json)
+  writeAtomic(join(dir, 'facts.json'), json)
+  writeAtomic(join(dir, 'facts.md'), renderFacts(f))
+}
 const readReview = (path: string) => Review.parse(JSON.parse(readFileSync(path, 'utf-8')))
 // 機械判定で落ちた項目の合格までの距離（6.2.7 (1)）
 const gapOf = (x: CheckResult | undefined) => (x?.by === 'code' && x.verdict === 'fail' ? x.measured?.gap : undefined)
@@ -443,6 +539,7 @@ type Deps = {
   onAuthExpired: (caseId: string) => void
   log: (line: string) => void
   now?: () => Date
+  fetch?: Fetch // 出典の取り寄せ（テストは偽物。6.3.1 (5)）
 }
 
 async function run(
@@ -454,7 +551,7 @@ async function run(
     phase: Phase
     reuse: boolean
     previous?: () => Review | undefined
-    read: () => { checks: Check[]; input: FnInput; brief: BriefFile; family: '別系統' | '同系統' }
+    read: () => Pick<JudgeInput, 'checks' | 'input' | 'brief' | 'family' | 'facts'>
   },
   done: (r: Review) => ReturnType<typeof transition>,
 ): Promise<boolean> {
@@ -498,6 +595,7 @@ async function run(
         ...body,
         ...(escalate && { escalate }),
       })
+      if (out.judged.facts) writeFacts(dir, out.judged.facts)
       writeReview(dir, how.name, review, out.judged.reasons, src.checks)
     }
   } catch (e) {
@@ -536,7 +634,19 @@ export function judgeBody(d: Deps, c: CaseRecord, signal: AbortSignal): Promise<
       },
       read: () => {
         const set = approved(d, c)
-        return { checks: set.checks.checks, input: { md: draftOf(d, c) }, brief: set.brief, family: set.checks.family }
+        const md = draftOf(d, c)
+        return {
+          checks: set.checks.checks,
+          input: { md },
+          brief: set.brief,
+          family: set.checks.family,
+          facts: () =>
+            collectFacts(
+              { home: d.home, caseId: c.caseId, invoke: d.invoke, signal, ...(d.fetch && { fetch: d.fetch }) },
+              c.version,
+              md,
+            ),
+        }
       },
     },
     (r) =>
@@ -613,6 +723,14 @@ export function judgeFormat(d: Deps, c: CaseRecord, signal: AbortSignal): Promis
         eventId: `${c.caseId}:format.${r.pass ? 'checked' : 'failed'}:v${c.version}:f${k}`,
       }),
   )
+}
+
+// 今の版の本文の判定の「要確認」印（approval.ok の照らし合わせ。6.3.1 (9)）。判定が無い・系列が違えば無し
+export function currentMarks(home: string, c: CaseRecord): Review['marks'] {
+  const path = join(caseDir(home, c.caseId), `review-${nn(c.version)}-a.json`)
+  if (!c.version || !existsSync(path)) return []
+  const r = readReview(path)
+  return r.series === c.series ? r.marks : []
 }
 
 // --- 画面に返す判定（6.2.5 (6)）。今の系列の今の版だけ（系列が変われば承認した組も変わりうる）

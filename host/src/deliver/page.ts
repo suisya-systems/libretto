@@ -21,15 +21,27 @@ const DROP = new Set([
   'textarea',
   'select',
 ])
-// ブロックの中で残す強調（属性なし）
-const INLINE: Record<string, 'strong' | 'em'> = { strong: 'strong', b: 'strong', em: 'em', i: 'em' }
+// ブロックの中で残す強調（属性なし）と、出典のリンク（http / https の href だけ。6.3.1 (11)）
+type Inline = 'strong' | 'em' | 'a'
+const INLINE: Record<string, Inline> = { strong: 'strong', b: 'strong', em: 'em', i: 'em', a: 'a' }
+const HREF = /\shref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i
+export function safeHref(raw: string | undefined): string | undefined {
+  if (!raw) return undefined
+  try {
+    const u = new URL(decode(raw).trim())
+    return u.protocol === 'http:' || u.protocol === 'https:' ? u.href : undefined
+  } catch {
+    return undefined
+  }
+}
+export const anchor = (href: string) => `<a href="${escapeHtml(href)}" rel="noopener noreferrer">`
 const TOKEN = /<!--[\s\S]*?(?:-->|$)|<![^>]*>|<(\/?)([a-zA-Z][a-zA-Z0-9]*)\b[^>]*>/g
 
 export function pageBlocks(html: string): Block[] {
   const out: Block[] = []
   const lists: ('ul' | 'ol')[] = []
   let drop: string | undefined
-  let block: { kind: Kind; list?: 'ul' | 'ol'; depth: number; parts: string[]; open: ('strong' | 'em')[] } | undefined
+  let block: { kind: Kind; list?: 'ul' | 'ol'; depth: number; parts: string[]; open: Inline[] } | undefined
   const flush = () => {
     if (!block) return
     const inner =
@@ -94,8 +106,15 @@ export function pageBlocks(html: string): Block[] {
     const tag = INLINE[name]
     if (!tag) continue // ほかのタグはタグだけ捨てて字を残す
     if (!close) {
+      let open = `<${tag}>`
+      if (tag === 'a') {
+        const h = HREF.exec(m[0])
+        const href = safeHref(h?.[1] ?? h?.[2] ?? h?.[3])
+        if (!href || block.open.includes('a')) continue // 字だけ残す
+        open = anchor(href)
+      }
       block.open.push(tag)
-      block.parts.push(`<${tag}>`)
+      block.parts.push(open)
     } else if (block.open.at(-1) === tag) {
       block.open.pop()
       block.parts.push(`</${tag}>`)

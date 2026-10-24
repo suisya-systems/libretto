@@ -199,7 +199,7 @@ ${fnLines}
 - canary の欄は書かない
 
 決まり:
-- 5〜40 件。依頼適合（by "claude" か "jev"）を 1 件以上、分量（by "code"）を 1 件以上。出典付きなら事実を 1 件以上、文体を合わせるなら声を 1 件以上
+- 5〜40 件。依頼適合（by "claude" か "jev"）を 1 件以上、分量（by "code"）を 1 件以上。文体を合わせるなら声を 1 件以上（出典付きの依頼の事実の確かめは、こちらで足す）
 - title・proposition・question に否定語を使わない。「ない」「無い」「ません」「なし」「無し」「せず」は、「少ない」「足りない」「できない」のような語の中にあっても使えない。言い換えの例: 「専門用語が少ない」→「専門用語に説明が付いている」、「電話番号が載っていない」→「電話番号を含む段落を数える（pass は count の max 0）」
 - summary には、judge に書いた語や数を入れない。依頼の題材の名前（依頼に出てくる語）は入れてよい
 - 見た目の項目は by "claude"
@@ -564,7 +564,7 @@ export function createEntrance(d: Deps) {
     const set: EntranceSet = {
       brief: { ...brief, assumptions: bd.assumptions as Assumption[], decisions: [] },
       checks: {
-        checks: withHostItems(drafted, c.destination, token()),
+        checks: withHostItems(drafted, c.destination, token(), brief.sources),
         ...family,
         ...(inspection && { inspected: true as const }),
         ...(inspection?.shapeOnly.length && { shapeOnly: inspection.shapeOnly }),

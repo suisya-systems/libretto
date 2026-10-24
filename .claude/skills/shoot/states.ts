@@ -1,8 +1,10 @@
-// 撮る状態の定義。状態を足すときはここに 1 つ足す（preview.ts と shoot.sh は触らない）
+// 撮る状態の定義。状態を足すときはここに 1 つ足す（preview.ts と shoot.sh は触らない。State の欄は preview.ts がそのまま使う）
 // どの状態も、会話で依頼を 1 つ出して入口待ち（本人の番）に着いたところから始まる（preview.ts）
 import type { CaseAction, CaseView, HostStatus, IsolationCause } from '@libretto/shared/api'
+import { MARK } from '@libretto/shared/checks'
 import type { IsolationRecord } from '../../../host/src/checks/isolation.ts'
-import { paragraphUnits, renderHtml } from '../../../host/src/checks/text.ts'
+import { paragraphUnits, plain, renderHtml } from '../../../host/src/checks/text.ts'
+import { type Fetch, sentencesOf } from '../../../host/src/facts/inventory.ts'
 import type { ScriptEntry } from '../../../host/src/model/fake.ts'
 import { briefDraft, classified, goodChecks } from '../../../host/test/fixtures/entrance.ts'
 import { W, w } from '../../../page/src/wording.ts'
@@ -31,6 +33,7 @@ export type State = {
   sameFirst390?: true // 390 の 1 画面目が他の状態と同じでよい（違いが下の方にだけある）。重複の検査から外す
   // チェック項目を隠す仕組みの水準・原因・前回の確認（8.10。既定は strong・確認なし）
   isolation?: { level: HostStatus['isolation']; cause?: IsolationCause; last?: IsolationRecord }
+  fetch?: Fetch // 出典の取り寄せの偽物（網に出ない。6.3.1 (5)）
 }
 
 const probed = (verdict: IsolationRecord['verdict']): IsolationRecord => ({
@@ -169,6 +172,59 @@ const toDone = async (ctx: Ctx) => {
   await ctx.act({ type: 'delivery.send', planFingerprint: (await ctx.view()).deliveryPlan.fingerprint })
   await ctx.until((v) => v.state === '完了')
 }
+// 出典付きの依頼: 出典のリンクの付いた主張と、【要確認】の付いた（出典が見つからなかった）文を 1 つずつ（6.3.1 (1)）
+const SURVEY = 'https://example.com/survey'
+const factBody = body(2).replace(
+  '\n\n## なぜそう決めたか',
+  `\n\n社内の調査では、記事を最後まで読んだ人の割合は 2025 年に 38% でした（[記事の読了率の調査](${SURVEY})）。同じ進め方は、ほかの編集部でも広がっています。${MARK}\n\n## なぜそう決めたか`,
+)
+const CLAIM = '記事を最後まで読んだ人の割合は 2025 年に 38% でした'
+const factRows: Row[] = [
+  ...entrance({ ...briefDraft, brief: { ...briefDraft.brief, sources: '出典付き' } }),
+  [
+    '作り手',
+    {
+      text: '書きました',
+      write: { 'draft-01.md': factBody, 'draft-01.html': renderHtml(factBody), 'draft-01.done': 'done' },
+    },
+  ],
+  [
+    '事実係・抜き出し',
+    say({
+      claims: [
+        { text: CLAIM, kind: '数値' },
+        { text: '同じ進め方は、ほかの編集部でも広がっています', kind: '断定' },
+      ],
+      // 数字を含むが主張ではない文（方針の数・予定）
+      notClaims: sentencesOf(factBody)
+        .filter((x) => !/^\s*#/.test(x.text) && /\d/.test(plain(x.text)) && !x.text.includes(CLAIM))
+        .map((x) => x.text.trim()),
+    }),
+  ],
+  ['事実係・命題', say({ yes: true, reason: '調査の段落が同じ年と割合を述べています。' })],
+  [
+    '判定役・文章',
+    say({
+      results: [
+        { id: 'C02', units: [{ index: 0, yes: true }], reason: '冒頭で決まったことが分かります。' },
+        { id: 'C05', units: [{ index: 0, yes: true }], reason: 'ふだんの言い回しで書かれています。' },
+        {
+          id: 'C06',
+          units: paragraphUnits(factBody).map((_, index) => ({ index, yes: true })),
+          reason: 'どの段落も、読み手が次にすることにつながっています。',
+        },
+      ],
+    }),
+  ],
+]
+const fakeSurvey: Fetch = async (url) => ({
+  ok: true,
+  url,
+  title: '記事の読了率の調査（2025 年）',
+  paragraphs: ['この調査は社内の記事 120 本を対象にした。', '2025 年に記事を最後まで読んだ人の割合は 38% でした。'],
+  fingerprint: 'shoot',
+})
+
 const clean: Row[] = [...entrance(), draft(1), verdicts(1, false), draft(2), verdicts(2, true)]
 const hang: Row = ['作り手', { fail: 'hang' }]
 // mark の項目数・件数と合わせる（Approval.tsx は本文と形式の判定を足して出す）
@@ -299,6 +355,19 @@ export const STATES: Record<string, State> = {
     drive: toApproval,
     expect: (v) => allPassed(v) && !!v.review?.jev,
     mark: w('approval.judgeModel', { units: paragraphUnits(body(2)).length }),
+    selector: '.doc-body',
+  },
+  // 承認: 出典付きの依頼で、出典が見つからなかった文が 1 つと、裏付けのある出典が 1 つ（6.3.1 (11)）
+  'approval-facts': {
+    script: factRows,
+    fetch: fakeSurvey,
+    drive: toApproval,
+    expect: (v) =>
+      v.state === '承認待ち' &&
+      v.review?.needsConfirmation.length === 1 &&
+      v.review.sources[0]?.verdict === '支持' &&
+      v.review.failed.length === 0,
+    mark: W['approval.marksHeading'],
     selector: '.doc-body',
   },
   // 送付の確認: 仕立てと保存先の形のチェックが済み、本人の番（仕立ては機械だけで、整えている間は撮れない）

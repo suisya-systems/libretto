@@ -5,11 +5,20 @@ import { useEffect, useState } from 'react'
 import { Link } from 'wouter'
 import type { z } from 'zod'
 import { useCaseAction } from '../action.ts'
+import { Segment } from '../parts/Choice.tsx'
 import { IsolationBand } from '../parts/IsolationBand.tsx'
 import { W, w } from '../wording.ts'
 import { CaseHeader, History, Versions } from './Progress.tsx'
 
 type Changes = z.infer<typeof DraftDiff>['changes']
+// 出典ごとの結果の色（凡例は tokens.css）。赤は「出典が主張を支えない」だけ。開けなかったのは分からないだけなので、あなたが開くための黄
+const SOURCE_BADGE = {
+  支持: 'b-done',
+  一部支持: 'b-you',
+  支持しない: 'b-alert',
+  開けない: 'b-you',
+  未判定: 'b-off',
+} as const
 
 // 本文はホストが判定した Markdown から組み立てた HTML（許したタグとエスケープした文字だけ。6.2.5 (7)）
 function useDraft(caseId: string, n: number) {
@@ -55,6 +64,11 @@ export function ApprovalFace({
   const draft = useDraft(c.id, n)
   const [tab, setTab] = useState<'draft' | 'diff'>('draft')
   const [redoing, setRedoing] = useState(false)
+  // 「要確認」の印ごとの答え（6.3.1 (9)）。既定は印のまま
+  const marks = c.review?.needsConfirmation ?? []
+  const sources = c.review?.sources ?? []
+  const [cut, setCut] = useState<ReadonlySet<string>>(new Set())
+  const cutting = marks.some((m) => cut.has(m.claimId))
   const [note, setNote] = useState('')
   const locked = action.busy || stopped
 
@@ -72,7 +86,7 @@ export function ApprovalFace({
     void action.run({
       type: 'approval.ok',
       expectedRevision: c.revision,
-      marks: {},
+      marks: Object.fromEntries(marks.map((m) => [m.claimId, cut.has(m.claimId) ? '削る' : '印のまま'])),
       versionFingerprint: latest.fingerprint,
     })
   const redo = async () => {
@@ -114,7 +128,7 @@ export function ApprovalFace({
             aria-busy={action.busy || undefined}
             onClick={approve}
           >
-            {W['approval.ok']}
+            {cutting ? W['approval.okCut'] : W['approval.ok']}
           </button>
           {!redoing && (
             <button type="button" className="btn btn-secondary" disabled={locked} onClick={() => setRedoing(true)}>
@@ -219,6 +233,63 @@ export function ApprovalFace({
                   ))}
                 </ul>
               </>
+            )}
+            {marks.length > 0 && (
+              <section aria-labelledby="h-marks" className="facts">
+                <h3 id="h-marks" className="small strong">
+                  {W['approval.marksHeading']}
+                </h3>
+                <p className="muted small">{W['approval.marksLead']}</p>
+                <ul className="results">
+                  {marks.map((m) => (
+                    <li key={m.claimId} className="result fact-mark">
+                      <span className="strong">{m.text}</span>
+                      <span className="muted small">{m.where}</span>
+                      <Segment
+                        label={m.text}
+                        value={cut.has(m.claimId) ? '削る' : '印のまま'}
+                        disabled={locked}
+                        options={(['印のまま', '削る'] as const).map((v) => ({
+                          value: v,
+                          label: W[`approval.mark.${v}`],
+                        }))}
+                        onChange={(v) =>
+                          setCut((s) => {
+                            const next = new Set(s)
+                            if (v === '削る') next.add(m.claimId)
+                            else next.delete(m.claimId)
+                            return next
+                          })
+                        }
+                      />
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+            {sources.length > 0 && (
+              <section aria-labelledby="h-sources" className="facts">
+                <h3 id="h-sources" className="small strong">
+                  {W['approval.sourcesHeading']}
+                </h3>
+                <p className="muted small">{W['approval.sourcesLead']}</p>
+                <ul className="sources">
+                  {sources.map((s) => (
+                    <li key={s.ref} className="source">
+                      <a href={s.ref} target="_blank" rel="noopener noreferrer" className="strong source-title">
+                        {s.title}
+                        <span className="muted small">（{W['approval.sourceOpens']}）</span>
+                      </a>
+                      <span className="row-gap">
+                        <span className={`badge badge-sm ${SOURCE_BADGE[s.verdict]}`}>
+                          {W[`approval.source.${s.verdict}`]}
+                        </span>
+                        <span className="muted small">{w('approval.sourceClaims', { n: s.claimIds.length })}</span>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </section>
             )}
             {(c.review?.familyNote || c.review?.jevNote || c.review?.jev) && (
               <ul className="notes muted small">

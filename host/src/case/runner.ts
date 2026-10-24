@@ -1,18 +1,23 @@
 // runner（docs/implementation.md 4.1・4.4・6.2.3 (1)(2)(7)）。状態 × turn=libretto を見て仕事を 1 本起こす。
 // 遷移は transition だけが書く。ここは起動・続き・再起動・ログインし直し待ちを持つ
-import { mkdirSync } from 'node:fs'
+import { copyFileSync, mkdirSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { CaseState } from '@libretto/shared/api'
 import type { CaseRecord } from '@libretto/shared/ledger'
 import { deliver, tailor } from '../deliver/run.ts'
+import { type Fetch, fetchCached, materialsDir } from '../facts/inventory.ts'
 import type { Ledger } from '../ledger/ledger.ts'
 import type { Job, Outcome } from '../model/invoke.ts'
 import { approvedSet, renderBrief, writeAtomic } from '../roles/entrance.ts'
 import { judgeBody, judgeFormat } from '../roles/judge.ts'
-import { make, workDir } from '../roles/maker.ts'
+import { make, nn, workDir } from '../roles/maker.ts'
 import type { Runs } from '../runs.ts'
 import { isStorageError } from '../server/stop.ts'
 import { transition } from './transition.ts'
+
+// 取り寄せる URL（6.3.1 (5)）。閉じ括弧・句読点で切る
+const URL_IN_TEXT = /https?:\/\/[^\s<>"'()[\]（）」』、。]+/g
+const MAX_SOURCES = 5
 
 const WORKING: readonly CaseState[] = ['入口待ち', '材料待ち', '下書き中', '検品中', '送付確認待ち', '送付中']
 
@@ -27,6 +32,7 @@ type Deps = {
   signInChanged: (waiting: boolean) => void
   log: (line: string) => void
   now?: () => Date
+  fetch?: Fetch // 出典の取り寄せ（テストは偽物。6.3.1 (5)）
 }
 
 export type Runner = ReturnType<typeof createRunner>
@@ -44,12 +50,38 @@ export function createRunner(d: Deps) {
     return moved
   }
 
-  // 材料待ち → 作業場（承認した組の brief.md と空の materials/）→ T11（6.2.3 (2)）
+  // 材料待ち → 出典の取り寄せ → 作業場（承認した組の brief.md と資料の写し）→ T11（6.2.3 (2)・6.3.1 (5)）
   async function assemble(c: CaseRecord, signal: AbortSignal): Promise<boolean> {
     const set = approvedSet(home, ledger, c.caseId)
     if (!set) throw new Error(`no approved brief for ${c.caseId}`)
+    const src = materialsDir(home, c.caseId)
+    mkdirSync(src, { recursive: true, mode: 0o700 })
+    // 本人の資料と依頼書に出てくる URL を取り寄せ、資料の正本に足す（作り手は網に出られない）
+    const pasted = readdirSync(src)
+      .filter((f) => f.startsWith('pasted-'))
+      .sort()
+    const text = [
+      set.brief.subject,
+      ...set.brief.materials.map((m) => m.where),
+      ...pasted.map((f) => readFileSync(join(src, f), 'utf-8')),
+    ].join('\n')
+    const urls = [...new Set(text.match(URL_IN_TEXT) ?? [])].slice(0, MAX_SOURCES)
+    const got = await fetchCached(home, c.caseId, urls, signal, d.fetch)
+    if (signal.aborted) return false
+    let k = 0
+    for (const url of urls) {
+      const f = got.get(url)
+      if (!f?.ok) continue
+      k++
+      writeAtomic(
+        join(src, `source-${nn(k)}.md`),
+        [`# ${f.title || url}`, '', url, '', ...f.paragraphs.flatMap((p) => [p, ''])].join('\n'),
+      )
+    }
+    // 作業場の materials/ は写し。照合は正本だけを読む（作り手は作業場に書ける）
     const work = workDir(home, c.caseId)
     mkdirSync(join(work, 'materials'), { recursive: true, mode: 0o700 })
+    for (const f of readdirSync(src)) copyFileSync(join(src, f), join(work, 'materials', f))
     writeAtomic(join(work, 'brief.md'), renderBrief(set.brief))
     if (signal.aborted) return false
     return emit(
@@ -72,6 +104,7 @@ export function createRunner(d: Deps) {
     onAuthExpired,
     log: d.log,
     ...(d.now && { now: d.now }),
+    ...(d.fetch && { fetch: d.fetch }),
   })
 
   // 送付確認待ち → 仕立て → 形式の判定（T20〜T21b。6.2.8 (1)）。版が読めない・作れない保存先は判定できなかった

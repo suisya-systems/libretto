@@ -74,6 +74,7 @@ export function caseView(
   entrance?: Entrance,
   versions: CaseView['versions'] = [],
   reviews: Pick<CaseView, 'review' | 'formatReview'> = {},
+  fetched: { title: string; url: string }[] = [],
 ): CaseView {
   const approvals = ledger.listApprovals(c.caseId).filter((a) => !a.supersededBy)
   const approved = approvals.findLast((a) => a.gate === '入口')
@@ -83,17 +84,26 @@ export function caseView(
   return {
     ...toCard(ledger, c),
     ...(entrance && { entrance }),
-    // ponytail: 事実係の材料（S4）はまだ。materials は本人が貼った文だけ（6.2.4 (3)）
     ...(approved && {
       entranceApproval: { gate: '入口', by: approved.by, at: approved.at },
     }),
-    materials: Array.from({ length: pastedCount(ledger, c.caseId) }, (_, i) => ({
-      id: `M${nn(i + 1)}`,
-      kind: '添付' as const,
-      title: '貼り付けた文',
-      where: `materials/${pastedName(i + 1)}`,
-      status: '取り寄せ済み' as const,
-    })),
+    // 本人が貼った文と、T11 で取り寄せた出典（6.2.4 (3)・6.3.1 (5)）。閉じて消した後は貼った文の行だけ残る
+    materials: [
+      ...Array.from({ length: pastedCount(ledger, c.caseId) }, (_, i) => ({
+        id: `M${nn(i + 1)}`,
+        kind: '添付' as const,
+        title: '貼り付けた文',
+        where: `materials/${pastedName(i + 1)}`,
+        status: '取り寄せ済み' as const,
+      })),
+      ...fetched.map((s, i) => ({
+        id: `S${nn(i + 1)}`,
+        kind: '出典' as const,
+        title: s.title,
+        where: s.url,
+        status: '取り寄せ済み' as const,
+      })),
+    ],
     versions,
     ...reviews,
     rounds: { series: c.series, used: c.round, max: MAX_ROUNDS },

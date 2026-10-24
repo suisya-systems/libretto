@@ -43,6 +43,33 @@ export function Choose(p: {
   )
 }
 
+// 小さな二択（承認の面の「【要確認】を付けて残す / この文を削る」）。押せる幅は 44px 以上
+export function Segment(p: {
+  label: string
+  value: string
+  options: readonly { value: string; label: ReactNode }[]
+  disabled?: boolean
+  onChange: (value: string) => void
+}) {
+  return (
+    <RadioGroup
+      aria-label={p.label}
+      className="segment"
+      value={p.value}
+      disabled={p.disabled ?? false}
+      onValueChange={(v) => p.onChange(String(v))}
+    >
+      {p.options.map((o) => (
+        // biome-ignore lint/a11y/noLabelWithoutControl: Radio.Root が中の操作部品（role=radio）
+        <label key={o.value} className="segment-item">
+          <Radio.Root value={o.value} className="segment-dot" />
+          <span>{o.label}</span>
+        </label>
+      ))}
+    </RadioGroup>
+  )
+}
+
 // 当てはまるものを全部選ぶ問い。カードの形はラジオと同じで、印だけ四角
 export function ChooseMany(p: {
   label: string

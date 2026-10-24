@@ -27,14 +27,16 @@ import { transition } from '../case/transition.ts'
 import { type IsolationRecord, readIsolation, writeIsolation } from '../checks/isolation.ts'
 import { diff, renderHtml } from '../checks/text.ts'
 import { pageVersions } from '../deliver/run.ts'
+import { type Fetch, fetchedSources, materialsDir } from '../facts/inventory.ts'
+import { CLOSED, purge } from '../facts/purge.ts'
 import type { Ledger } from '../ledger/ledger.ts'
 import type { Job, Outcome } from '../model/invoke.ts'
 import { deleteKey, keyStatus, setKey } from '../model/keys.ts'
 import type { Isolation } from '../model/sandbox.ts'
 import { createConversation } from '../roles/conversation.ts'
 import { createEntrance, currentSet, entranceView, writeApproval, writeAtomic } from '../roles/entrance.ts'
-import { OUTPUT_FILES, reviewsOf } from '../roles/judge.ts'
-import { draftNames, pastedCount, pastedName, versionDir, versionsOf, workDir } from '../roles/maker.ts'
+import { currentMarks, OUTPUT_FILES, reviewsOf } from '../roles/judge.ts'
+import { draftNames, pastedCount, pastedName, versionDir, versionsOf } from '../roles/maker.ts'
 import { createRuns, Stopped } from '../runs.ts'
 import { createHub, type SseMessage } from './sse.ts'
 import { createStop, isStorageError } from './stop.ts'
@@ -63,6 +65,7 @@ export type ServerOptions = {
   isolation?: Isolation // 起動時の自己点検の結果（8.9 (5)）
   cause?: IsolationCause // weak / broken の原因（8.10 (5)）
   probe?: (signal: AbortSignal) => Promise<IsolationRecord | undefined> // 隔離の点検（8.10 (4)）
+  fetch?: Fetch // 出典の取り寄せ（テストは偽物。6.3.1 (5)）
 }
 
 export function createServer(o: ServerOptions) {
@@ -80,7 +83,18 @@ export function createServer(o: ServerOptions) {
   }
   const caseChanged = (caseId: string) => {
     const c = ledger.getCase(caseId)
-    if (c) hub.emit('case.changed', { caseId, state: c.state, turn: c.turn })
+    if (!c) return
+    hub.emit('case.changed', { caseId, state: c.state, turn: c.turn })
+    // 閉じたら、動いている仕事の終わりを待ってから資料と出典の本文を消す（6.3.1 (10)）。待ち切れなければ次の起動で
+    if (CLOSED.includes(c.state))
+      void runs.abort(caseId).then((left) => {
+        if (left.length) return log(`purge waits for the next start: ${caseId}`)
+        try {
+          purge(home, ledger, caseId, now())
+        } catch (e) {
+          log(`purge ${caseId}: ${e instanceof Error ? e.stack : String(e)}`)
+        }
+      })
   }
   // runs は stop を、stop は runs を見る
   const runs = createRuns(() => stop.isStopped(), o.runsWaitMs)
@@ -124,6 +138,7 @@ export function createServer(o: ServerOptions) {
     },
     log,
     ...(o.now && { now: o.now }),
+    ...(o.fetch && { fetch: o.fetch }),
   })
 
   const conversation = createConversation({
@@ -298,6 +313,7 @@ export function createServer(o: ServerOptions) {
         entranceView(home, ledger, rec),
         versionsOf(home, ledger, rec),
         reviewsOf(home, ledger, rec),
+        fetchedSources(home, rec.caseId),
       ),
     )
   })
@@ -351,10 +367,13 @@ export function createServer(o: ServerOptions) {
       if (w === 'invalid') return c.json({ reason: 'invalid' }, 400)
     }
     // 承認する組の依頼書に「渡してほしいもの」があれば本人の番の材料待ち（T8。6.2.4 (2)）
+    // 完成稿の承認は今の版の印の一覧と照らす（6.3.1 (9)）
     const ctx =
       action.type === 'entrance.approve' && rec0
         ? { materialsPending: !!currentSet(home, ledger, caseId)?.brief.wanted.length }
-        : {}
+        : action.type === 'approval.ok' && rec0
+          ? { marks: currentMarks(home, rec0) }
+          : {}
     // revision は先に比べない。eventId → expectedRevision の順は transition が持つ（5.3.1・5.7 (5)）
     const r = writing(c, () => transition(ledger, { ...action, caseId, by: '本人' }, ctx))
     if (r instanceof Response) return r
@@ -378,7 +397,8 @@ export function createServer(o: ServerOptions) {
       rec0.revision === p.expectedRevision &&
       !ledger.findEvent(p.eventId)
     ) {
-      const path = join(workDir(home, caseId), 'materials', pastedName(pastedCount(ledger, caseId) + 1))
+      // 資料の正本は作業場の外（6.3.1 (5)）。作業場へは T11 で写す
+      const path = join(materialsDir(home, caseId), pastedName(pastedCount(ledger, caseId) + 1))
       const w = writing(c, () => writeAtomic(path, `${p.text}\n`))
       if (w instanceof Response) return w
     }

@@ -158,15 +158,26 @@ export function align<T>(a: readonly T[], b: readonly T[], eq: (x: T, y: T) => b
 
 export const escapeHtml = (s: string) =>
   s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string)
-// 強調（**）だけ残す
+// 強調（**）と出典のリンク（http / https。6.3.1 (11)）だけ残す
+const LINK_MD = /(!?)\[([^\]]*)\]\(([^)\s]*)\)/g
+// 記号の掃除はリンクの外と題にだけ当てる（URL の __ などを消さない）
+const tidy = (s: string) => escapeHtml(s.replace(/__|~~|`/g, ''))
+const linkify = (s: string) => {
+  let out = ''
+  let at = 0
+  for (const m of s.matchAll(LINK_MD)) {
+    out += tidy(s.slice(at, m.index))
+    const text = tidy(m[2] as string)
+    out +=
+      !m[1] && /^https?:\/\//i.test(m[3] as string)
+        ? `<a href="${escapeHtml(m[3] as string)}" rel="noopener noreferrer" target="_blank">${text}</a>`
+        : text
+    at = m.index + m[0].length
+  }
+  return out + tidy(s.slice(at))
+}
 const inline = (s: string) =>
-  escapeHtml(
-    s
-      .replace(LIST_ITEM, '')
-      .replace(/^\s*>\s?/, '')
-      .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
-      .replace(/__|~~|`/g, ''),
-  ).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+  linkify(s.replace(LIST_ITEM, '').replace(/^\s*>\s?/, '')).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
 
 export function renderHtml(md: string): string {
   return blocks(md)

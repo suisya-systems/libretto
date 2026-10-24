@@ -294,5 +294,34 @@ export const VersionManifest = z.object({
 })
 export type VersionManifest = z.infer<typeof VersionManifest>
 
+// facts.v<N>.json / facts.json（9.3・6.3.1 (8)）。抜粋の本文は入れない（指紋だけ）
+export const ClaimKind = z.enum(['数値', '日付', '固有名詞', '比較', '断定'])
+export type ClaimKind = z.infer<typeof ClaimKind>
+export const FactsFile = z.object({
+  version: z.number().int().min(1),
+  claims: z.array(
+    z.object({
+      id: z.string(),
+      text: z.string(),
+      kind: ClaimKind,
+      range: z.tuple([z.number().int().min(0), z.number().int().min(0)]),
+      where: z.string(),
+    }),
+  ),
+  verdicts: z.array(
+    z.object({
+      claimId: z.string(),
+      kind: z.enum(['出典あり', '材料由来', '出典なし']),
+      sourceRef: z.string().optional(),
+      excerptFingerprint: z.string().optional(),
+      supports: z.boolean().nullable().optional(), // 支持の判定を流していなければ欄が無い
+      mismatched: z.array(z.string()).optional(),
+      mark: z.literal(true).optional(),
+    }),
+  ),
+  sources: z.array(z.object({ ref: z.string(), url: z.string(), title: z.string().optional(), opened: z.boolean() })),
+})
+export type FactsFile = z.infer<typeof FactsFile>
+
 // maker.json（6.2.3 (5)）。作り手を最後に起こしたときの版と系列。再起動で書き終えた版を拾ってよいかの照合に使う
 export const MakerAttempt = z.object({ n: z.number().int().min(1), series: z.number().int().min(1), at: z.string() })

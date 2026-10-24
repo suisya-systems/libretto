@@ -4,7 +4,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Answer, CaseAction, CaseState, DeliveryTarget, Mode, Origin } from '@libretto/shared/api'
-import type { Escalate } from '@libretto/shared/checks'
+import type { Escalate, Mark } from '@libretto/shared/checks'
 import type {
   ApprovalRecord,
   CandidateRecord,
@@ -23,6 +23,8 @@ import {
 import type { CostCapNotice } from '../model/invoke.ts'
 
 export const MAX_ROUNDS = 3
+// 「削る」の作り手への指示の頭（6.3.1 (9)）
+export const CUT_LEAD = '次の主張を削ってください。文ごと削るか、出典を示せる言い方に直してください:'
 
 // 本人に見える 1 行。ui-wording.md の「画面での言葉」で書く（4.1）
 export const STEP = {
@@ -115,7 +117,8 @@ export type RequestInput = { type: 'conversation.request' } & Pick<
 export type Input = CaseInput | CandidateInput | RequestInput | { type: 'stop.all' }
 
 // materialsPending: T8 で承認する組の依頼書に「渡してほしいもの」がある（組を読んだ呼ぶ側が決める。6.2.4 (2)）
-export type Ctx = { materialsPending?: boolean }
+// marks = 今の版の本文の判定の「要確認」印（approval.ok で HTTP が渡す。6.3.1 (9)）
+export type Ctx = { materialsPending?: boolean; marks?: readonly Mark[] }
 
 export type Result =
   | {
@@ -355,8 +358,12 @@ function decide(ledger: Ledger, c: CaseRecord, ev: CaseInput, ctx: Ctx): Plan | 
       // T18（「削る」があれば T19）
       if (!is('承認待ち') || c.approvalKind !== '完成稿') return 'invalid_transition'
       if (ev.versionFingerprint !== c.versionFingerprint) return 'stale'
-      const cut = Object.keys(ev.marks).filter((id) => ev.marks[id] === '削る')
-      if (cut.length) return redo(`次の主張を削ってください: ${cut.join('、')}`)
+      // 印の答えは今の版の印の全部（別の版の画面からの送信は stale。6.3.1 (9)）
+      const marks = ctx.marks ?? []
+      const keys = Object.keys(ev.marks)
+      if (keys.length !== marks.length || marks.some((m) => !(m.claimId in ev.marks))) return 'stale'
+      const cut = marks.filter((m) => ev.marks[m.claimId] === '削る')
+      if (cut.length) return redo([CUT_LEAD, ...cut.map((m) => `- 「${m.text}」（${m.where}）`)].join('\n'))
       const kept = Object.fromEntries(Object.keys(ev.marks).map((id) => [id, '印のまま' as const]))
       return {
         to: '送付確認待ち',
