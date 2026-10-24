@@ -66,6 +66,7 @@ const server = createServer({
   log: (l) => console.error(l),
   ...(def.isolation && { isolation: def.isolation.level }),
   ...(def.isolation?.cause && { cause: def.isolation.cause }),
+  ...(def.fetch && { fetch: def.fetch }),
 })
 if (def.isolation?.last) writeIsolation(home, def.isolation.last)
 let http: ReturnType<typeof serve> | undefined

@@ -86,10 +86,10 @@ describe('棚卸し（6.3.1 (2)）', () => {
 
   it('見つからない text は言い直しの文になる。列挙は zod から', () => {
     const md = '利用者は 120 万人だった。'
-    expect(inventoryViolations(md, { claims: [{ text: '利用者は 120 万人', kind: '数値' }] })).toEqual([])
-    expect(inventoryViolations(md, { claims: [{ text: '利用者は 12 万人', kind: '数値' }] })[0]).toContain(
-      '見つかりません',
+    expect(inventoryViolations(md, { claims: [{ text: '利用者は 120 万人', kind: '数値' }], notClaims: [] })).toEqual(
+      [],
     )
+    expect(inventoryViolations(md, { claims: [], notClaims: ['利用者は 12 万人'] })[0]).toContain('見つかりません')
     for (const k of Inventory.shape.claims.element.shape.kind.options) expect(INVENTORY_INSTRUCTION).toContain(`"${k}"`)
   })
 
@@ -105,6 +105,11 @@ describe('棚卸し（6.3.1 (2)）', () => {
       ['K03', '売上は 30 億円だった。', '数値'],
     ])
     for (const c of cs) expect(md.slice(...c.range)).toBe(c.text)
+  })
+
+  it('数字を含む文でも notClaims に挙げた文は主張に足さない', () => {
+    const md = '来月は 2 本の記事で試します。売上は 30 億円だった。'
+    expect(claimsFrom(md, [], ['来月は 2 本の記事で試します。']).map((c) => c.text)).toEqual(['売上は 30 億円だった。'])
   })
 })
 

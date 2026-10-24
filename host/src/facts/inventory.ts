@@ -115,8 +115,10 @@ export function locate(md: string, text: string): [number, number][] {
 
 // --- inventoryClaims（Haiku が候補、コードが位置）
 
+// notClaims = 数字を含むが事実の主張ではない文（予定・意見・手順の番号など）。書かれなかった数字の文はコードが主張に足す
 export const Inventory = z.object({
   claims: z.array(z.object({ text: z.string().min(1).max(300), kind: ClaimKind })),
+  notClaims: z.array(z.string().min(1).max(400)).default([]),
 })
 type Inventory = z.infer<typeof Inventory>
 const EXAMPLE: Inventory = {
@@ -124,6 +126,7 @@ const EXAMPLE: Inventory = {
     { text: '2025 年の利用者は 120 万人', kind: '数値' },
     { text: '東京都が 4 月に始めた', kind: '固有名詞' },
   ],
+  notClaims: ['来月は 2 本の記事で試します。'],
 }
 export const INVENTORY_INSTRUCTION = `あなたは libretto の「事実係」です。材料の「本文」から、事実の主張を全部抜き出します。文書を直したり評価したりはしません。
 
@@ -138,14 +141,15 @@ export const INVENTORY_INSTRUCTION = `あなたは libretto の「事実係」�
 意見・感想・予定・呼びかけは入れません。
 
 text には本文の文字を 1 字も変えずにそのまま写します（Markdown の記号やリンクの書き方も、本文にあるとおり）。1 つの text は 300 字以内で、主張の部分だけにします。同じ主張が何度出ても 1 回だけ書きます。主張が無ければ claims は [] にします。
+数字を含む文のうち、事実の主張を含まない文（予定・意見・手順の番号など）は、文をそのまま notClaims に写します。数字を含む文は、claims か notClaims のどちらかに必ず入れます。
 
 出力は次の形の JSON だけにしてください（形だけの例）。
 ${JSON.stringify(EXAMPLE)}`
 
 export function inventoryViolations(md: string, r: Inventory): string[] {
-  return r.claims
-    .filter((c) => !locate(md, c.text).length)
-    .map((c) => `「${c.text.slice(0, 60)}」は本文にそのままの形で見つかりません。本文から 1 字も変えずに写してください`)
+  return [...r.claims.map((c) => c.text), ...r.notClaims]
+    .filter((t) => !locate(md, t).length)
+    .map((t) => `「${t.slice(0, 60)}」は本文にそのままの形で見つかりません。本文から 1 字も変えずに写してください`)
 }
 
 export type Claim = FactsFile['claims'][number]
@@ -166,19 +170,22 @@ export async function inventoryClaims(
     signal: d.signal,
   })
   if (!out.ok) return { ok: false, out }
-  return { ok: true, claims: claimsFrom(md, (out.json as Inventory).claims) }
+  const inv = out.json as Inventory
+  return { ok: true, claims: claimsFrom(md, inv.claims, inv.notClaims) }
 }
 
-// 全部の出現を主張に、重なりは先のものに、数字を含むのにどれにも重ならない文はコードが数値の主張として足す
-export function claimsFrom(md: string, found: Inventory['claims']): Claim[] {
+// 全部の出現を主張に、重なりは先のものに。数字を含むのにどの主張にも notClaims にも重ならない文は、コードが数値の主張として足す
+export function claimsFrom(md: string, found: Inventory['claims'], notClaims: readonly string[] = []): Claim[] {
   const spans = found
     .flatMap((c) => locate(md, c.text).map(([start, end]) => ({ start, end, kind: c.kind })))
     .sort((a, b) => a.start - b.start || b.end - a.end)
   const kept: typeof spans = []
   for (const s of spans) if (!kept.some((k) => s.start < k.end && k.start < s.end)) kept.push(s)
+  const excused = notClaims.flatMap((t) => locate(md, t))
   for (const s of sentencesOf(md)) {
     if (/^\s*#/.test(s.text) || !/\d/.test(cleanText(s.text))) continue
     if (kept.some((k) => k.start < s.end && s.start < k.end)) continue
+    if (excused.some(([a, b]) => a < s.end && s.start < b)) continue
     const lead = s.text.length - s.text.trimStart().length
     kept.push({ start: s.start + lead, end: s.end - (s.text.length - s.text.trimEnd().length), kind: '数値' })
   }
