@@ -163,7 +163,7 @@ export const W = {
     'この環境では、ライターからチェック項目を隠す仕組みが弱いです（チェック項目のファイルは別の場所にありますが、OS の仕切りはありません）',
   'band.isolationBroken':
     'ライターからチェック項目を隠す仕組みが動きません。下書きは始まりません。libretto を再起動してください',
-  'band.isolationLink': '設定でチェックする',
+  'band.isolationLink': '設定を開く',
   'progress.now': 'いま',
   'progress.round': '{n} 回目のチェック（最大 {max} 回）',
   'progress.lead': 'このページを閉じても進みます。',
