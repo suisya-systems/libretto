@@ -236,6 +236,27 @@ describe('承認の面', () => {
       [W['approval.voice.readAlike'], W['approval.voice.readAlikeNote'], W['approval.voice.ok.null']],
     ])
     r.done()
+    // 一人称は、あなたかこの版のどちらかが「なし」なら行を出さない
+    for (const firstPerson of [
+      { you: '私', draft: 'なし', ok: true },
+      { you: 'なし', draft: '僕', ok: null },
+    ]) {
+      const v = await render({
+        ...base,
+        review: {
+          ...review(),
+          voiceMatch: {
+            endings: { main: 'です・ます', you: 0.9, draft: 0.9, ok: true },
+            sentenceLength: { you: 30, draft: 30, ok: true },
+            firstPerson,
+            readAlike: true,
+          },
+        },
+      })
+      expect(v.el.querySelectorAll('.voice-match tbody tr')).toHaveLength(3)
+      expect(v.text()).not.toContain(W['approval.voice.firstPerson'])
+      v.done()
+    }
     const plain = await render(base)
     expect(plain.text()).not.toContain(W['approval.voiceHeading'])
     plain.done()

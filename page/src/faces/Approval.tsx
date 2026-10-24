@@ -330,6 +330,7 @@ function Ok({ ok }: { ok: boolean | null }) {
   return <span className={`badge badge-sm ${OK_BADGE[k]}`}>{W[`approval.voice.ok.${k}`]}</span>
 }
 const pct = (n: number) => `${Math.round(n * 100)}%`
+const NONE = 'なし' // 一人称を使っていない（host の文体カードの値）
 
 // 文体カードとの比べ（6.3.2 (9)）。あなた（カード）/ この版 / 合っているか
 function VoiceMatchView({ m }: { m: Match }) {
@@ -350,6 +351,8 @@ function VoiceMatchView({ m }: { m: Match }) {
     ],
     ['firstPerson', W['approval.voice.firstPerson'], m.firstPerson.you, m.firstPerson.draft, m.firstPerson.ok],
   ]
+  // 一人称は、どちらかが「なし」なら出さない（使っていないのに合っていると読める。6.3.2 (9)）
+  const shown = rows.filter(([key, , you, draft]) => key !== 'firstPerson' || (you !== NONE && draft !== NONE))
   return (
     <section aria-labelledby="h-voice" className="facts">
       <h3 id="h-voice" className="small strong">
@@ -369,7 +372,7 @@ function VoiceMatchView({ m }: { m: Match }) {
           </tr>
         </thead>
         <tbody>
-          {rows.map(([key, label, you, draft, ok]) => (
+          {shown.map(([key, label, you, draft, ok]) => (
             <tr key={key}>
               <th scope="row">{label}</th>
               <td>{you}</td>

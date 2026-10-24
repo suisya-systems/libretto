@@ -1958,7 +1958,7 @@ S1 で作らないもの: 共有リンク `/p/:shareToken` と `share.revoke` �
 
 決めたこと:
 - `Review.voiceMatch?: { endings: { main, you, draft, ok }, sentenceLength: { you, draft, ok }, firstPerson: { you, draft, ok }, readAlike: boolean | null }`。`you` はカード、`draft` は判定した本文を同じ数え方で数えた値（文末は `main` の形の割合、文の長さは中央値、一人称は本文でいちばん多い一人称か `なし`）。`ok` は (6) の項目の結果（pass → true、fail → false、それ以外 → null）。`readAlike` は (7) の結果（同じ）。ホストが文体の項目を足した組の本文の判定にだけ付ける。
-- `ReviewSummary.voiceMatch` に写し、承認の面の「チェックの結果」の下に「あなたの文体と比べました」の欄（文末・一文の長さ・一人称・過去の文章との読み比べ。あなた / この版 / 合っています・違います・まだです）。文言は ui-wording.md。
+- `ReviewSummary.voiceMatch` に写し（型は変えない）、承認の面の「チェックの結果」の下に「あなたの文体と比べました」の欄。一人称の行は、あなたかこの版のどちらかが `なし` なら画面に出さない（オーナー判断 2026-10-25。撮影で「あなた: 私／この版: なし／合っています」が分かりにくかった）（文末・一文の長さ・一人称・過去の文章との読み比べ。あなた / この版 / 合っています・違います・まだです）。文言は ui-wording.md。
 
 理由: 項目の `measured` は数だけで、一人称の語を持てない（レビューの指摘）。比べる値はカードと本文から直接作る。
 
