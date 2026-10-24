@@ -233,8 +233,10 @@ describe('依頼の確認', () => {
     const row = [...r.el.querySelectorAll('.brief > div')].find(
       (d) => d.querySelector('dt')?.textContent === W['entrance.brief.gather'],
     )
-    expect(row?.querySelector('dd')?.textContent).toBe('今月の公式のお知らせ')
-    expect(r.el.querySelector('.gather-note')?.textContent).toBe(W['entrance.gatherNote'])
+    expect(row?.querySelector('dd')?.firstChild?.textContent).toBe('今月の公式のお知らせ')
+    // 説明は「libretto が集めるもの」の行の中
+    expect(row?.querySelector('.gather-note')?.textContent).toBe(W['entrance.gatherNote'])
+    expect(r.el.querySelectorAll('.gather-note')).toHaveLength(1)
     expect(r.text()).not.toContain(W['entrance.wantedNote'])
     r.done()
   })

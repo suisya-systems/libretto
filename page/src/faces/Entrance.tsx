@@ -175,11 +175,22 @@ function EntranceSet(p: {
     })),
     { value: LEAVE_IT, label: W['entrance.leaveIt'], note: W['entrance.leaveItNote'] },
   ]
-  const rows: [string, string][] = [
+  const rows: [string, ReactNode][] = [
     [W['entrance.brief.docType'], b.docType],
     [W['entrance.brief.subject'], b.subject],
     [W['entrance.brief.wanted'], b.wanted.length ? b.wanted.join('、') : W['entrance.none']],
-    [W['entrance.brief.gather'], b.gather.length ? b.gather.join('、') : W['entrance.none']],
+    [
+      W['entrance.brief.gather'],
+      b.gather.length ? (
+        <>
+          {b.gather.join('、')}
+          {/* 何が起きるかは集めるものの行の直下に（オーナー判断 2026-10-25） */}
+          <span className="wanted-note gather-note">{W['entrance.gatherNote']}</span>
+        </>
+      ) : (
+        W['entrance.none']
+      ),
+    ],
     [W['entrance.brief.audience'], b.audience],
     [W['entrance.brief.destinations'], b.destinations.map(dest).join('、')],
     [W['entrance.brief.shape'], b.shape],
@@ -204,7 +215,6 @@ function EntranceSet(p: {
             ))}
           </dl>
           {b.wanted.length > 0 && <p className="wanted-note">{W['entrance.wantedNote']}</p>}
-          {b.gather.length > 0 && <p className="wanted-note gather-note">{W['entrance.gatherNote']}</p>}
         </section>
 
         {e.assumptions.length > 0 && (

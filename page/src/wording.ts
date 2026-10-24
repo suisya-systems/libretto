@@ -109,7 +109,8 @@ export const W = {
   'entrance.brief.mustNot': 'してはいけないこと',
   'entrance.none': 'なし',
   'entrance.wantedNote': '進めると、次にこれを貼り付けてもらいます。',
-  'entrance.gatherNote': '進めると、libretto がこれをウェブで探します。',
+  'entrance.gatherNote':
+    '「これで進める」を押すと、libretto がウェブで探して資料に加えます。見つからなかったときは、出典の無いところに【要確認】を付けて書きます。',
   'entrance.voice.合わせる': 'あなたの文体に合わせる',
   'entrance.voice.合わせない': '合わせない',
   'entrance.sources.出典付き': '出典を付ける',

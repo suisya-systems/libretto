@@ -982,17 +982,15 @@ input:disabled {
   background: var(--color-turn);
   transform: translateY(-1px);
 }
-/* libretto が集めるものがあるとき: 本人の番ではないので進行中の色（6.3.3 (7)） */
+/* libretto が集めるものの行の直下に出す説明: 本人の番ではないので進行中の色（6.3.3 (7)） */
 .gather-note {
+  margin-top: var(--space-2);
   background: var(--color-moving-bg);
   color: var(--color-moving);
   font-weight: 500;
 }
 .gather-note::before {
   background: var(--color-moving);
-}
-.wanted-note + .wanted-note {
-  margin-top: var(--space-2);
 }
 .card.plain-list .badge {
   margin-left: var(--space-2);
