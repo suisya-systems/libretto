@@ -418,6 +418,111 @@ describe('入口の段取り', () => {
     expect(file(c, 'intake.json', Intake)).toMatchObject({ parentCaseId: b, heard: { audience: '一般の読者' } })
   })
 
+  // 元の案件を transition で直に進める（runner は起こさない）。案件の組は入口の段取りが書いた goodChecks
+  const step = (id: string, type: string, rest: Record<string, unknown> = {}) => {
+    const c = ledger.getCase(id)
+    const by = type === 'entrance.approve' ? '本人' : 'libretto'
+    const r = transition(ledger, {
+      type,
+      caseId: id,
+      by,
+      eventId: uuid(),
+      expectedRevision: c?.revision,
+      ...rest,
+    } as never)
+    expect(r).toMatchObject({ ok: true })
+  }
+  const toChecking = (id: string) => {
+    step(id, 'entrance.approve', { answers: {}, mode: 'おまかせ', setFingerprint: ledger.getCase(id)?.setFingerprint })
+    step(id, 'materials.ready')
+    step(id, 'draft.done', { n: 1, versionFingerprint: 'v1' })
+  }
+  // 落ちた項目と要約の組。told は機械判定の項目に添える行（6.2.9）
+  const review = (fails: [string, string][], extra: Record<string, unknown> = {}) => ({
+    version: 1,
+    series: 1,
+    round: 1,
+    at: '2026-10-25T00:00:00Z',
+    phase: '本文',
+    attempt: 1,
+    results: goodChecks.map((c) => ({
+      id: c.id,
+      verdict: fails.some(([id]) => id === c.id) ? 'fail' : 'pass',
+      by: c.judge.by === 'code' ? 'code' : 'claude',
+    })),
+    pass: false,
+    failedSummaries: goodChecks.flatMap((c) => {
+      const f = fails.find(([id]) => id === c.id)
+      return f ? [c.summary + f[1]] : []
+    }),
+    marks: [],
+    sources: [],
+    ...extra,
+  })
+  const summaryOf = (id: string) => goodChecks.find((c) => c.id === id)?.summary as string
+  const restartFrom = async (id: string) => {
+    const r = await act(id, { type: 'restart_as_new', expectedRevision: ledger.getCase(id)?.revision })
+    const next = (await r.json()).newCaseId as string
+    await waitTurn(next)
+    return {
+      brief: JSON.parse(material(callsOf('下書き役・依頼書').at(-1), '前回の結果') ?? 'null'),
+      checks: JSON.parse(material(callsOf('下書き役・確認項目').at(-1), '前回の結果') ?? 'null'),
+    }
+  }
+
+  it('T31 判定で止まった案件: 止まった理由と要約を前回の結果に。依頼書の下書き役には hidden でない項目だけ（6.2.2 (11)）', async () => {
+    await setup(script(['話し相手', say(done)], ...entranceOk(), ...entranceOk()))
+    const a = await request()
+    await waitTurn(a)
+    toChecking(a)
+    // C01（見せる・添える行あり）と C02（hidden）が落ちた
+    const told = '\n  - 字数は 2,200〜2,800 字にしてください（今は 3,628 字）'
+    writeFileSync(
+      join(caseDir(home, a), 'review-01-a.json'),
+      JSON.stringify(
+        review([
+          ['C01', told],
+          ['C02', ''],
+        ]),
+      ),
+    )
+    step(a, 'review.fail', { n: 1, escalate: '直らない' })
+    const got = await restartFrom(a)
+    expect(got.brief).toEqual({ 止まった理由: '直らない', 落ちた項目: [summaryOf('C01') + told] })
+    expect(got.checks).toEqual({ 止まった理由: '直らない', 落ちた項目: [summaryOf('C01') + told, summaryOf('C02')] })
+  })
+
+  it('T31 形式で止まった案件は一番大きい番号の形式の判定。古い判定のファイルで要約が揃わなければ依頼書の下書き役には渡さない', async () => {
+    await setup(script(['話し相手', say(done)], ...entranceOk(), ...entranceOk()))
+    const a = await request()
+    await waitTurn(a)
+    toChecking(a)
+    step(a, 'review.pass', { n: 1 })
+    const dir = caseDir(home, a)
+    writeFileSync(join(dir, 'review-01-f2.json'), JSON.stringify(review([['C03', '']], { phase: '形式' })))
+    // 10 は 2 より大きい（字の順ではなく数で選ぶ）。unable の要約も持つ古い形（6.2.7 (3) の前）
+    const old = review([['C04', '']], { phase: '形式', attempt: 10 })
+    old.results = old.results.map((r) => (r.id === 'C02' ? { ...r, verdict: 'unable' } : r))
+    old.failedSummaries = [summaryOf('C02'), summaryOf('C04')]
+    writeFileSync(join(dir, 'review-01-f10.json'), JSON.stringify(old))
+    step(a, 'format.failed', { n: 1, escalate: '直らない' })
+    const got = await restartFrom(a)
+    expect(got.brief).toEqual({ 止まった理由: '直らない', 落ちた項目: [] })
+    expect(got.checks.落ちた項目).toEqual([summaryOf('C02'), summaryOf('C04')])
+  })
+
+  it('T31 判定でない止まり方は理由だけ（前に落ちた判定があっても）', async () => {
+    await setup(script(['話し相手', say(done)], ...entranceOk(), ...entranceOk()))
+    const a = await request()
+    await waitTurn(a)
+    toChecking(a)
+    writeFileSync(join(caseDir(home, a), 'review-01-a.json'), JSON.stringify(review([['C01', '']])))
+    expect((await act(a, { type: 'stop.case', expectedRevision: ledger.getCase(a)?.revision })).status).toBe(200)
+    const got = await restartFrom(a)
+    expect(got.brief).toEqual({ 止まった理由: '本人が止めた', 落ちた項目: [] })
+    expect(got.checks).toEqual({ 止まった理由: '本人が止めた', 落ちた項目: [] })
+  })
+
   it('起動時に入口待ちで libretto の番の案件を流し直す', async () => {
     await setup(script(...entranceOk()))
     const id = 'c-boot'

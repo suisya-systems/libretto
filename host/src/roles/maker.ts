@@ -12,7 +12,7 @@ import { charCount, headingCount } from '../checks/text.ts'
 import { caseDir } from '../ledger/db.ts'
 import type { Ledger } from '../ledger/ledger.ts'
 import type { Job, Outcome } from '../model/invoke.ts'
-import { approvedSet, writeAtomic } from './entrance.ts'
+import { approvedSet, currentSet, writeAtomic } from './entrance.ts'
 
 export const MAKER_LIMITS = { maxYen: 400, timeoutMs: 1_800_000 }
 
@@ -82,22 +82,8 @@ export function feedbackOf(home: string, ledger: Ledger, c: CaseRecord): string 
     .filter((e) => e.type === 'transition')
     .at(-1)
   const event = last?.type === 'transition' ? last.event : undefined
-  const dir = caseDir(home, c.caseId)
-  const summaries = (file: string) => {
-    const lines = read(join(dir, file), Review).failedSummaries.map((s) => `- ${s}`)
-    return ['# 直してほしいこと', '', ...lines, ''].join('\n')
-  }
-  if (event === 'review.fail') return summaries(reviewFile(c.version, 'a'))
-  if (event === 'format.failed') {
-    const re = new RegExp(`^review-${nn(c.version)}-f(\\d+)\\.json$`)
-    const k = Math.max(
-      ...readdirSync(dir)
-        .map((f) => Number(re.exec(f)?.[1] ?? Number.NaN))
-        .filter((x) => x >= 1),
-    )
-    if (!Number.isFinite(k)) throw new Error(`no format review for ${c.caseId} v${c.version}`)
-    return summaries(reviewFile(c.version, `f${k}`))
-  }
+  const r = reviewAfter(home, c, event)
+  if (r) return ['# 直してほしいこと', '', ...r.failedSummaries.map((s) => `- ${s}`), ''].join('\n')
   // 「ここを直して」と、「削る」で新しい系列を始めた承認（6.3.1 (9)）
   if (event === 'approval.redo' || event === 'approval.ok') {
     const text = ledger
@@ -108,6 +94,46 @@ export function feedbackOf(home: string, ledger: Ledger, c: CaseRecord): string 
     return ['# 直してほしいこと', '', text, ''].join('\n')
   }
   return undefined
+}
+
+// 判定の遷移（review.fail・format.failed）が読んだ判定のファイル。ほかの遷移は無し
+function reviewAfter(home: string, c: CaseRecord, event: string | undefined): Review | undefined {
+  const dir = caseDir(home, c.caseId)
+  if (event === 'review.fail') return read(join(dir, reviewFile(c.version, 'a')), Review)
+  if (event !== 'format.failed') return undefined
+  const re = new RegExp(`^review-${nn(c.version)}-f(\\d+)\\.json$`)
+  const k = Math.max(
+    ...readdirSync(dir)
+      .map((f) => Number(re.exec(f)?.[1] ?? Number.NaN))
+      .filter((x) => x >= 1),
+  )
+  if (!Number.isFinite(k)) throw new Error(`no format review for ${c.caseId} v${c.version}`)
+  return read(join(dir, reviewFile(c.version, `f${k}`)), Review)
+}
+
+// --- T31 の新しい案件に渡す「前回の結果」（6.2.2 (11)）。元の案件を停止にした遷移が判定なら、その判定の要約。
+// 依頼書の下書き役（出力を作り手が読む）には hidden でない項目の要約だけ、確認項目の下書き役には全部
+export type PreviousResult = { 止まった理由?: string; 落ちた項目: string[] }
+export function previousResult(
+  home: string,
+  ledger: Ledger,
+  parentId: string,
+): { brief: PreviousResult; checks: PreviousResult } | undefined {
+  const c = ledger.getCase(parentId)
+  // 最初に停止にした行（後ろの T31 の行も 停止 → 停止）
+  const stop = ledger.listCaseEvents(parentId).find((e) => e.type === 'transition' && e.to === '停止')
+  if (!c || stop?.type !== 'transition') return undefined
+  const r = reviewAfter(home, c, stop.event)
+  const all = r?.failedSummaries ?? []
+  const failed = r?.results.filter((x) => x.verdict === 'fail') ?? []
+  const byId = new Map((currentSet(home, ledger, parentId)?.checks.checks ?? []).map((x) => [x.id, x]))
+  // 要約と落ちた項目が 1 対 1 で揃うときだけ見せてよい項目を選べる（古い判定のファイルは unable の要約も持つ。6.2.7 (3)）。
+  // 揃わなければ依頼書の下書き役には渡さない
+  const aligned =
+    failed.length === all.length && failed.every((x, i) => all[i]?.split('\n')[0] === byId.get(x.id)?.summary)
+  const shown = aligned ? all.filter((_, i) => byId.get(failed[i]?.id ?? '')?.hidden === false) : []
+  const reason = c.stopReason ? { 止まった理由: c.stopReason } : {}
+  return { brief: { ...reason, 落ちた項目: shown }, checks: { ...reason, 落ちた項目: all } }
 }
 
 // --- 書き終えた版（6.2.3 (3)）。通常の終わりと再起動の合わせの両方がここを通る
