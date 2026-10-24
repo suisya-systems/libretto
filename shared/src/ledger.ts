@@ -249,6 +249,18 @@ export const Intake = z.object({
   conversationRef: z.object({ thread: z.string(), seq: z.number().int() }).optional(),
   heard: IntakeDraft.optional(),
   parentCaseId: z.string().optional(), // T31 で写した元の案件（6.2.2 (1)）
+  // 候補から作った案件の取り込み元（6.4 (5)）。account は読み直すときの照合に使う
+  source: z
+    .object({
+      candidateId: z.string(),
+      threadId: z.string(),
+      account: z.string(),
+      subject: z.string(),
+      from: z.string(),
+      attachments: z.array(z.string()),
+      attachmentsNeeded: z.array(z.string()),
+    })
+    .optional(),
 })
 export type Intake = z.infer<typeof Intake>
 

@@ -1,12 +1,14 @@
 // hono のルート（docs/implementation.md 5.2・5.4・5.7）。経路の順は 5.7 (6): 公開 → /api/* → /cases/:id/page → 静的 → 画面の殻
-import { createHash, randomBytes } from 'node:crypto'
-import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
+import { createHash, randomBytes, randomUUID } from 'node:crypto'
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { serveStatic } from '@hono/node-server/serve-static'
 import {
   ActionResult,
   ApiKeyInput,
   ApiKeyKind,
+  CandidateAction,
+  CandidateActionResult,
   CaseAction,
   type CaseCard,
   CaseState,
@@ -18,6 +20,7 @@ import {
   MaterialsPost,
   type Mode,
 } from '@libretto/shared/api'
+import type { Intake } from '@libretto/shared/ledger'
 import { type Context, Hono } from 'hono'
 import { getCookie, setCookie } from 'hono/cookie'
 import { streamSSE } from 'hono/streaming'
@@ -30,6 +33,10 @@ import { pageVersions } from '../deliver/run.ts'
 import { readGathered } from '../facts/gather.ts'
 import { type Fetch, fetchedSources, materialsDir } from '../facts/inventory.ts'
 import { CLOSED, purge } from '../facts/purge.ts'
+import { readThread } from '../intake/gmail.ts'
+import { createGoogle, type Google } from '../intake/google.ts'
+import { createPoller, RUN_KEY } from '../intake/poller.ts'
+import { caseDir } from '../ledger/db.ts'
 import type { Ledger } from '../ledger/ledger.ts'
 import type { Job, Outcome } from '../model/invoke.ts'
 import { deleteKey, keyStatus, setKey } from '../model/keys.ts'
@@ -68,6 +75,8 @@ export type ServerOptions = {
   cause?: IsolationCause // weak / broken の原因（8.10 (5)）
   probe?: (signal: AbortSignal) => Promise<IsolationRecord | undefined> // 隔離の点検（8.10 (4)）
   fetch?: Fetch // 出典の取り寄せ（テストは偽物。6.3.1 (5)）
+  google?: Google // Google の連携（6.4 (2)）。無ければ設定の無い連携
+  gmailLabel?: string // 取り込みの目印（設定の Issue までは既定の libretto）
 }
 
 export function createServer(o: ServerOptions) {
@@ -113,6 +122,22 @@ export function createServer(o: ServerOptions) {
     log,
   })
 
+  const google = o.google ?? createGoogle({ home, redirectUri: 'http://127.0.0.1/oauth/google/callback', log })
+  const gmailLabel = o.gmailLabel ?? 'libretto'
+  const candidatesChanged = () => hub.emit('candidates.changed', {})
+  const poller = createPoller({
+    home,
+    ledger,
+    google,
+    invoke: o.invoke,
+    runs,
+    label: () => gmailLabel,
+    candidatesChanged,
+    connectionsChanged: () => hub.emit('connections.changed', {}),
+    log,
+    now,
+  })
+
   const entrance = createEntrance({
     home,
     ledger,
@@ -125,6 +150,12 @@ export function createServer(o: ServerOptions) {
     blocked: (caseId) => runner.blocked(caseId),
     onAuthExpired: (caseId) => runner.onAuthExpired(caseId),
     ...(o.fetch && { fetch: o.fetch }),
+    // 連携のアドレスが取り込んだときと同じときだけ読み直す（6.4 (6)）
+    external: async (src, signal) => {
+      if (google.status().email !== src.account) return undefined
+      const r = await readThread(google, src.threadId, src.account, signal)
+      return r.ok ? r.thread.body : undefined
+    },
   })
   // 状態ごとの仕事を起こす（6.2.3 (1)）。入口待ちは entrance に任せる
   const runner = createRunner({
@@ -155,6 +186,12 @@ export function createServer(o: ServerOptions) {
     caseChanged,
     requested: (caseId) => runner.kick(caseId),
     revised: (caseId) => runner.kick(caseId),
+    candidateChanged: () => candidatesChanged(),
+    mailOf: async (candidateId, account, signal) => {
+      if (!account || google.status().email !== account) return undefined
+      const r = await readThread(google, candidateId.replace(/^gmail:/, ''), account, signal)
+      return r.ok ? r.thread.body : undefined
+    },
     // 依頼書と仮定だけ。チェック項目は渡さない（6.2.2 (8)）
     briefOf: (caseId) => {
       const b = currentSet(home, ledger, caseId)?.brief
@@ -227,6 +264,21 @@ export function createServer(o: ServerOptions) {
   })
   // ponytail: /p/:shareToken（共有リンク）は版のあるページの Issue（12）。P1 では外に届かない（5.6）
 
+  // Google の戻り口。Cookie は求めず state で確かめ、連携を始めた起点の設定の面へ返す（6.4 (2)）
+  app.get('/oauth/google/callback', async (c) => {
+    const r = await google.callback({
+      state: c.req.query('state'),
+      code: c.req.query('code'),
+      error: c.req.query('error'),
+    })
+    if (r.result === 'connected') {
+      hub.emit('connections.changed', {})
+      candidatesChanged()
+      void poller.run()
+    }
+    return c.redirect(`${r.origin ?? ''}/settings?google=${r.result}`, 303)
+  })
+
   // 2. /api/*: Origin → Cookie → 各 API → 未知は JSON の 404
   app.use('/api/*', async (c, next) => {
     // GET 以外は JSON・multipart・PUT・DELETE を区別せず完全一致（5.4）
@@ -267,6 +319,7 @@ export function createServer(o: ServerOptions) {
 
   app.get('/api/connections', (c) => {
     const last = readIsolation(home)
+    const { running: _, ...intake } = poller.view()
     const view: ConnectionsView = {
       isolation: {
         level: status.isolation,
@@ -274,9 +327,101 @@ export function createServer(o: ServerOptions) {
         running: !!probing,
         ...(last && { last: { at: last.at, verdict: last.verdict } }),
       },
+      google: { configured: google.configured, ...google.status(), label: gmailLabel, ...intake },
     }
     return c.json(view)
   })
+
+  // 連携する（6.4 (2)）。画面は返した URL へ移る
+  app.post('/api/connections/google/start', (c) => {
+    if (!google.configured) return c.json({ reason: 'not_configured' }, 409)
+    return c.json({ url: google.start(c.req.header('origin') ?? '') })
+  })
+  // 連携を解除（6.4 (2)）。世代を進め、動いている取り込みを止めてから消す
+  app.delete('/api/connections/google', async (c) => {
+    const left = runs.abort(RUN_KEY)
+    try {
+      await google.disconnect()
+    } catch (e) {
+      if (!isStorageError(e)) throw e
+      storage(false)
+      return c.json({ reason: 'storage' }, 503)
+    }
+    await left
+    hub.emit('connections.changed', {})
+    candidatesChanged()
+    return c.body(null, 204)
+  })
+
+  // 今すぐ取り込む（5.2）。終われば SSE candidates.changed
+  app.post('/api/intake/refresh', (c) => {
+    if (stop.isStopped()) return c.json({ reason: 'stopped' }, 409)
+    void poller.run()
+    return c.json({}, 202)
+  })
+
+  // 候補の操作（6.4 (5)）。eventId は持たず、二重送信は candidates.status のガードで弾く（5.3.1）
+  app.post('/api/candidates/:id/actions', async (c) => {
+    const candidateId = c.req.param('id')
+    const parsed = CandidateAction.safeParse(await c.req.json().catch(() => undefined))
+    if (!parsed.success) return c.json({ reason: 'invalid' }, 400)
+    const a = parsed.data
+    if (stop.isStopped()) return c.json({ reason: 'stopped' }, 409)
+    const cand = ledger.getCandidate(candidateId)
+    const card = ledger.getCandidateCard(candidateId)
+    if (!cand) return c.json({ reason: 'not_found' }, 404)
+    const refused = (r: { reason: string }) =>
+      r.reason === 'not_found' ? c.json({ reason: 'not_found' }, 404) : c.json({ reason: 'invalid_transition' }, 409)
+
+    if (a.type === 'proceed') {
+      const caseId = randomUUID()
+      // intake.json はトランザクションの前に新しい案件フォルダへ（4.2 T2）
+      if (cand.status === 'presented' && card) {
+        const w = writing(c, () => writeIntake(caseId, candidateId, card))
+        if (w instanceof Response) return w
+      }
+      const r = writing(c, () =>
+        transition(ledger, { type: 'candidate.proceed', candidateId, caseId, mode: DEFAULTS.gmail }),
+      )
+      if (r instanceof Response) return r
+      if (!r.ok || !r.case) return refused(r.ok ? { reason: 'invalid_transition' } : r)
+      if (!r.replayed) {
+        caseChanged(r.case.caseId)
+        runner.kick(r.case.caseId)
+        candidatesChanged()
+      }
+      return c.json(CandidateActionResult.parse({ caseId: r.case.caseId }))
+    }
+
+    // 見送る。「この人・この場所からは拾わなくてよい」は推測にしか効かないので、ラベルのカードでは受けない（6.4 (5)）
+    if (a.reason === '拾わなくてよい' && cand.origin === '合図') return c.json({ reason: 'invalid' }, 400)
+    const r = writing(c, () => transition(ledger, { type: 'candidate.dismiss', candidateId, reason: a.reason }))
+    if (r instanceof Response) return r
+    if (!r.ok) return refused(r)
+    candidatesChanged()
+    return c.json({})
+  })
+
+  // 候補から作る案件の intake.json（6.4 (5)）
+  function writeIntake(caseId: string, candidateId: string, card: NonNullable<ReturnType<Ledger['getCandidateCard']>>) {
+    const dir = caseDir(home, caseId)
+    mkdirSync(dir, { recursive: true, mode: 0o700 })
+    const intake: Intake = {
+      origin: { kind: '合図', source: 'gmail' },
+      summary: card.summary,
+      materials: [{ id: candidateId, kind: '元データ', title: card.subject, where: card.link }],
+      source: {
+        candidateId,
+        threadId: candidateId.replace(/^gmail:/, ''),
+        account: card.account ?? '',
+        subject: card.subject,
+        from: card.from,
+        attachments: card.attachments ?? [],
+        attachmentsNeeded: card.attachmentsNeeded ?? [],
+      },
+    }
+    writeAtomic(join(dir, 'intake.json'), `${JSON.stringify(intake, null, 2)}\n`)
+  }
   app.post('/api/checks/run', (c) => {
     if (!o.probe) return c.json({ reason: 'not_found' }, 404)
     try {
@@ -294,7 +439,12 @@ export function createServer(o: ServerOptions) {
     runner.retrySignIn()
     return c.json(status)
   })
-  app.get('/api/home', (c) => c.json(homeView(ledger, { ...status })))
+  app.get('/api/home', (c) => {
+    if (!stop.isStopped()) poller.maybe() // 画面を開いたとき（4.5）
+    const { running, lastAt } = poller.view()
+    const connected = google.status().state === 'connected'
+    return c.json(homeView(ledger, { ...status }, { connected, running, ...(lastAt && { lastAt }) }))
+  })
 
   // 一覧（5.2）。完了した依頼（/done）が使う。新しく変わった順
   app.get('/api/cases', (c) => {
@@ -450,7 +600,9 @@ export function createServer(o: ServerOptions) {
   }
 
   // 会話欄（6.2.1）。caseId が無いか空なら lobby。caseId 付きは案件の中で話す（6.2.2 (8)）
-  app.get('/api/conversation', (c) => c.json(conversation.view(c.req.query('caseId') || 'lobby')))
+  app.get('/api/conversation', (c) =>
+    c.json(conversation.view(c.req.query('caseId') || c.req.query('candidateId') || 'lobby')),
+  )
   app.post('/api/conversation/messages', async (c) => {
     const parsed = ConversationPost.safeParse(await c.req.json().catch(() => undefined))
     if (!parsed.success) return c.json({ reason: 'invalid' }, 400)
@@ -591,7 +743,21 @@ export function createServer(o: ServerOptions) {
     }
   })
 
-  return { app, hub, runs, stop, status, issuePairing, conversation, entrance, runner, caseChanged, checkIsolation }
+  return {
+    app,
+    hub,
+    runs,
+    stop,
+    status,
+    issuePairing,
+    conversation,
+    entrance,
+    runner,
+    caseChanged,
+    checkIsolation,
+    poller,
+    google,
+  }
 }
 
 // ダウンロードの名前（6.2.8 (4)）。ASCII の名前と、題を百分率符号化した名前

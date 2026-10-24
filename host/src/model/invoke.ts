@@ -186,8 +186,9 @@ export function createInvoke(deps: Deps) {
     try {
       // 全体を ``` で囲んだ形も JSON として読む（言い直しの 1 回を囲みだけで使わない）
       value = JSON.parse(reply.text.trim().replace(/^```(?:json)?\s*\n([\s\S]*)\n```$/, '$1'))
-    } catch (e) {
-      return { errors: [`JSON として読めません: ${(e as Error).message}`] }
+    } catch {
+      // パーサーの文は出力の一部を含むので書かない（logs/ に他人の文が残らないように。6.4 (3)）
+      return { errors: ['JSON として読めません'] }
     }
     const parsed = out.schema.safeParse(value)
     if (!parsed.success)

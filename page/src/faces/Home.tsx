@@ -1,8 +1,9 @@
-// ホーム（画面案 1。docs/implementation.md 5.8 (3)・6.2.1 (9)）。候補の欄は S5 まで出さない
+// ホーム（画面案 1。docs/implementation.md 5.8 (3)・6.2.1 (9)・6.4 (7)）。候補の欄は連携しているか候補があるときだけ
 import { type CaseCard, HomeView } from '@libretto/shared/api'
 import { Link } from 'wouter'
 import { useLoad } from '../load.ts'
 import { STATE, W, w } from '../wording.ts'
+import { Candidates } from './Candidates.tsx'
 import { Chat } from './Chat.tsx'
 import { ProblemView } from './Pending.tsx'
 
@@ -32,7 +33,10 @@ function Empty({ text }: { text: string }) {
 }
 
 export function Home({ stopped = false }: { stopped?: boolean }) {
-  const home = useLoad('/api/home', HomeView, (s) => s.event === 'case.changed' || s.event === 'notice')
+  // 裏の取り込みで増えた候補と、連携の有無の変化でも取り直す（6.4 (7)）
+  const home = useLoad('/api/home', HomeView, (s) =>
+    ['case.changed', 'notice', 'candidates.changed', 'connections.changed'].includes(s.event),
+  )
   const v = home.data
   if (!v) return home.problem ? <ProblemView problem={home.problem} retry={home.reload} /> : <div aria-busy="true" />
 
@@ -69,6 +73,8 @@ export function Home({ stopped = false }: { stopped?: boolean }) {
       )}
 
       <Chat stopped={stopped} />
+
+      <Candidates v={v} stopped={stopped} reload={home.reload} />
 
       <div className="two">
         <section aria-labelledby="h-auto" className="stack">

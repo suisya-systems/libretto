@@ -11,7 +11,7 @@
     "node": ">=22.12"
   },
   "scripts": {
-    "start": "node --experimental-strip-types --no-warnings host/src/index.ts",
+    "start": "node --env-file-if-exists=.env.local --experimental-strip-types --no-warnings host/src/index.ts",
     "typecheck": "tsc -p tsconfig.json",
     "lint": "biome check",
     "test": "vitest run",

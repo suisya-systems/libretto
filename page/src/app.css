@@ -2599,3 +2599,71 @@ input:disabled {
   color: inherit;
   text-decoration: underline;
 }
+
+/* 依頼の候補（画面 1 の合図カード。6.4 (5)(7)）: 件名の次に「何を頼まれたか」の 1 行が目に入る */
+.cand-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.cand {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-5) var(--space-6);
+  overflow-wrap: anywhere;
+}
+.cand-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+}
+.cand-title {
+  font-size: var(--text-xl);
+  line-height: 1.4;
+}
+.cand-ask {
+  font-size: var(--text-lg);
+  font-weight: 700;
+  line-height: 1.6;
+}
+.cand-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+/* 候補の中の会話: カードの中にカードを重ねず、一段沈めた面にする。相手の吹き出しは面と同じ色になるので白に戻す */
+.cand .chat {
+  margin-top: var(--space-2);
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius);
+  background: var(--color-sunken);
+}
+.cand .chat .msg-libretto .bubble {
+  background: var(--color-surface);
+}
+/* 確かめる窓の中で選ぶもの（見送りの理由） */
+.dialog .radios {
+  margin-top: var(--space-1);
+}
+/* 連携の行: ボタンの横の補足を縦中央に */
+.key-actions {
+  align-items: center;
+}
+@media (max-width: 720px) {
+  .cand {
+    padding: var(--space-4) 18px;
+  }
+  .cand-actions .btn {
+    flex: 1 1 auto;
+  }
+  .cand .chat {
+    padding: var(--space-3) 14px;
+  }
+}

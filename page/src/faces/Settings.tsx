@@ -1,4 +1,4 @@
-// 設定の面（画面 7）。API キーの節（docs/implementation.md 6.1.3 (6)。値は画面のどこにも出さない。設計書 D17）と
+// 設定の面（画面 7）。連携の節（Google。docs/implementation.md 6.4 (7)）、API キーの節（6.1.3 (6)。値は画面のどこにも出さない。設計書 D17）と
 // 動作環境の確認の節（8.10 (6)）
 import { type ApiKeyStatus, ConnectionsView, MaterialRef, Settings as SettingsSchema } from '@libretto/shared/api'
 import { useEffect, useId, useState } from 'react'
@@ -385,6 +385,132 @@ function EnvSection({ v, reload }: { v: Isolation; reload: () => void }) {
   )
 }
 
+type Google = ConnectionsView['google']
+const GOOGLE_STATE: Record<Google['state'] | 'unconfigured', [string, WKey]> = {
+  connected: ['b-done', 'settings.google.connected'],
+  none: ['b-off', 'settings.google.none'],
+  expired: ['b-alert', 'settings.google.expired'],
+  unconfigured: ['b-off', 'settings.google.unconfigured'],
+}
+const RESULTS = ['connected', 'denied', 'failed'] as const
+type Result = (typeof RESULTS)[number]
+
+// 連携の戻り（?google=…）は 1 回だけ出し、URL から消す（6.4 (2)）
+function useResult(): Result | undefined {
+  const [r] = useState(() => {
+    const v = new URLSearchParams(window.location.search).get('google')
+    if (v) window.history.replaceState(null, '', window.location.pathname)
+    return RESULTS.find((x) => x === v)
+  })
+  return r
+}
+
+// 連携の節。Google の行（6.4 (7)）
+function LinkSection({ g, reload }: { g: Google; reload: () => void }) {
+  const result = useResult()
+  const [busy, setBusy] = useState(false)
+  const [failed, setFailed] = useState<WKey>()
+  const [badge, label] = GOOGLE_STATE[g.configured ? g.state : 'unconfigured']
+  const connect = async () => {
+    setBusy(true)
+    setFailed(undefined)
+    try {
+      const res = await fetch('/api/connections/google/start', {
+        method: 'POST',
+        headers: { accept: 'application/json' },
+      })
+      if (res.ok) return window.location.assign(((await res.json()) as { url: string }).url)
+    } catch {}
+    setBusy(false)
+    setFailed('settings.google.startFailed')
+  }
+  const disconnect = async () => {
+    setBusy(true)
+    setFailed(undefined)
+    const ok = await send('DELETE', '/api/connections/google')
+    setBusy(false)
+    if (!ok) setFailed('settings.google.disconnectFailed')
+    reload()
+  }
+  return (
+    <section aria-labelledby="h-link" className="card pad">
+      <h2 id="h-link">{W['settings.linkHeading']}</h2>
+      {result && (
+        <p className={result === 'connected' ? 'muted small' : 'note-alert small'} role="status">
+          {W[`settings.google.result.${result}`]}
+        </p>
+      )}
+      <ul className="key-list">
+        <li className="key-row">
+          <div className="key-head">
+            <div className="grow">
+              <h3 className="key-label">{W['settings.google.label']}</h3>
+              <p className="muted small">{W['settings.google.use']}</p>
+            </div>
+            <span className={`badge ${badge} key-status`}>{W[label]}</span>
+          </div>
+          {!g.configured && <p className="note-warn small">{withCode(W['settings.google.unconfiguredNote'])}</p>}
+          {g.state === 'connected' && g.email && (
+            <p className="muted small key-saved">{w('settings.google.as', { email: g.email })}</p>
+          )}
+          {g.state === 'expired' && (
+            <p className="note-alert small" role="alert">
+              {W['settings.google.expiredNote']}
+            </p>
+          )}
+          {g.configured && <p className="muted small">{w('settings.google.signal', { label: g.label })}</p>}
+          {g.state === 'connected' && g.labelFound === false && (
+            <p className="note-warn small">{w('settings.google.labelMissing', { label: g.label })}</p>
+          )}
+          {g.state === 'connected' && g.problem && (
+            <p className="note-warn small">{W[`settings.google.problem.${g.problem}`]}</p>
+          )}
+          {g.state === 'connected' && g.lastAt && (
+            <p className="muted small">{w('settings.google.lastAt', { at: when(g.lastAt) })}</p>
+          )}
+          {g.configured && (
+            <div className="key-actions">
+              {g.state !== 'connected' && (
+                <>
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    disabled={busy}
+                    aria-busy={busy || undefined}
+                    onClick={() => void connect()}
+                  >
+                    {W['settings.google.connect']}
+                  </button>
+                  <span className="muted small">{W['settings.google.pcNote']}</span>
+                </>
+              )}
+              {/* 切れた連携も解除できる（保存した更新トークンを消す） */}
+              {g.state !== 'none' && (
+                <Confirm
+                  trigger={W['settings.google.disconnect']}
+                  title={W['settings.google.disconnectTitle']}
+                  body={W['settings.google.disconnectBody']}
+                  confirm={W['settings.google.disconnect']}
+                  cancel={W['settings.google.cancel']}
+                  danger
+                  busy={busy}
+                  triggerClass="btn btn-quiet btn-sm"
+                  onConfirm={() => void disconnect()}
+                />
+              )}
+            </div>
+          )}
+          {failed && (
+            <p className="note-alert small" role="alert">
+              {W[failed]}
+            </p>
+          )}
+        </li>
+      </ul>
+    </section>
+  )
+}
+
 export function Settings() {
   const keys = useLoad('/api/settings/keys', Keys, (s) => s.event === 'settings.changed')
   const env = useLoad('/api/connections', ConnectionsView, (s) => s.event === 'connections.changed')
@@ -392,6 +518,7 @@ export function Settings() {
   return (
     <section className="face">
       <h1 className="face-title">{W['nav.settings']}</h1>
+      {env.data && <LinkSection g={env.data.google} reload={env.reload} />}
       {keys.problem && !keys.data ? (
         <ProblemView problem={keys.problem} retry={keys.reload} />
       ) : (
