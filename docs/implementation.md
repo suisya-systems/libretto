@@ -1235,7 +1235,7 @@ S1 で作らないもの: 判定役（検品中の仕事。Issue 11）、仕立�
 
 理由: T7b（自動で入った案件の出し直し）は `series` を進めるが `version` を進めないので、出し直しの前に書き終えた版と、出し直しの後に書く版が同じ名前になる。ファイルが揃っているだけで拾うと、承認し直す前の依頼書で書いた版を新しい版として通してしまう。作業場は作り手が書ける場所なので、照合の記録はその外に置く。
 
-**既知の制限**: ホストが異常終了したとき（電源断以外。`SIGKILL`・メモリ不足など）、作り手のプロセスはグループごと残り（6.1.2 (2) の限界）、書き続けることがある。再起動後の作り手が同じ作業場に書くと、2 つの書き手が同じ版に書きうる。本 Issue では残ったプロセスを止めに行かない。理由: 起動時に分かるのは前回の PID だけで、PID が再利用されていると無関係なプロセスを止めてしまう。混ざった版も判定役と本人の承認を通るので、黙って送られはしない。`srt` で包む Issue 14 で、ホストと一緒に終わらせる手段（`bwrap --die-with-parent` 相当）を確かめて閉じる。
+**既知の制限**: ホストが異常終了したとき（電源断以外。`SIGKILL`・メモリ不足など）、作り手のプロセスはグループごと残り（6.1.2 (2) の限界）、書き続けることがある。再起動後の作り手が同じ作業場に書くと、2 つの書き手が同じ版に書きうる。本 Issue では残ったプロセスを止めに行かない。理由: 起動時に分かるのは前回の PID だけで、PID が再利用されていると無関係なプロセスを止めてしまう。混ざった版も判定役と本人の承認を通るので、黙って送られはしない。`srt` で包む Issue 14 で、ホストと一緒に終わらせる手段（`bwrap --die-with-parent` 相当）を確かめて閉じる。→ Issue 14 で呼び出しごとの見張りを置いて閉じた（8.9 (6)。POSIX。macOS は未確認、Windows は残る）。
 
 **(6) 失敗したとき**
 
@@ -1813,7 +1813,7 @@ CLI に渡す旗（作り手。役割の `access` ごとの道具と `cwd`、材
 | 作業場 `/work` | 全部 | 全部（`draft-*` と `MakerReport` 以外にも書けるが、ホストが取り出すのは `draft-*` だけ） | — |
 | 案件フォルダのほか | — | — | `versions/`、`checks/`、`review-*`、`facts*`、`undecided*`、`jobs/` |
 | ほかの案件・データベース（`libretto.db` と `-wal` / `-shm`）・`.env.local`・`api-keys.json`・ホストのコード | — | — | 全部 |
-| ホーム | ログイン情報だけ | 使い捨ての tmpfs | ほかの全部 |
+| ホーム | ログイン情報だけ | 使い捨ての tmpfs（Linux。8.9 (3)。macOS は未確認） | ほかの全部 |
 | 網 | Claude の API とログインの更新先だけ（`network.allowedDomains`） | — | ほかの宛先は出られない。道具（WebFetch / Bash）も無い |
 
 ### 8.7 出典（2026-10-23 に確認）
@@ -1829,6 +1829,92 @@ CLI に渡す旗（作り手。役割の `access` ごとの道具と `cwd`、材
 ### 8.8 自前の bubblewrap 起動（`srt` が要件を満たさないときの戻り先。第 1 版の内容）
 
 `srt` を使わず Linux だけで動かすなら、`host/src/model/sandbox.ts` が bwrap を直接起こす。旗は**この順**（bwrap は引数の順にマウントするので、ホームを空にする `--tmpfs $HOME` を先に置き、その後でホームの下にある CLI とログイン情報を個別に戻す）: `--ro-bind /usr /usr --ro-bind /etc /etc --ro-bind /lib /lib --ro-bind /lib64 /lib64 --ro-bind /bin /bin`（存在するものだけ）→ `--tmpfs $HOME --tmpfs /tmp` → `--ro-bind <claude の実体のディレクトリ> 同じパス --ro-bind <Node の置き場> 同じパス` → `--ro-bind ~/.claude/.credentials.json 同じパス --file <fd> ~/.claude.json` → `--bind cases/<id>/work /work --chdir /work` → `--dev /dev --proc /proc --unshare-pid --die-with-parent --new-session`。`--unshare-net` は付けない（API に出る必要がある）。WSL2 では `/etc/resolv.conf` の実体を `--ro-bind` し直す。CLI の旗は 8.3 と同じ。
+
+### 8.9 `srt` の起こし方の決め事（Issue 14 の着手前の設計レビューで決めたこと）
+
+8.3・8.5・8.6 と 6.1.2 (7)・6.2.3 (5) だけでは決まらない 9 点を決める。中身は `host/src/model/sandbox.ts` と `claude-cli.ts`。作らないもの: canary・隔離の点検（`POST /api/checks/run`・`isolation.json`）・「接続と合図」の表示（Issue 15）、macOS の実機での確認（Issue 15 で 1 回動かす）。
+
+**(1) 版の固定と起こし方**
+
+決めたこと:
+- `@anthropic-ai/sandbox-runtime` を `host` の依存に**完全一致の版 `0.0.81`**（2026-10-20 公開）で持つ（`^` を付けない。lockfile も固定）。版を上げるときは (9) の実機の確認を流し直す。
+- 起こすのは CLI で、`node <パッケージ>/dist/cli.js --settings <案件ごとの設定> -- <claude の実体> -p …`。位置は `require.resolve` で引くので、PATH に `srt` が無くてよい。**`--` を必ず置く**（無いと srt が後ろの `--version` や claude の `--settings` を自分の旗として読み、claude を起こさずに自分の版を返す。設計レビューで再現した）。
+- ライブラリ（`SandboxManager`）を使わない理由: 設定がプロセスに 1 つの単体で、案件ごとの設定を同時に走らせる形が beta の API の細部に依る。CLI なら 1 呼び出し = 1 プロセス = 1 設定で、6.1.2 (2) の終わりの追い方（プロセスグループ）にそのまま乗る。
+
+**(2) 包むのは作り手だけ**
+
+決めたこと: `access: 'write'`（作り手）の呼び出しだけを `srt` で包む。`none` の役割（話し相手・下書き役・判定役・事実係）は道具が無く何も読めないので包まない（判定役も本文はホストが読んで材料で渡す）。
+
+理由: 8.1 の「場所で隠す」が要るのはファイルを読める道具を持つ作り手だけ。包むと起動に数百ミリ秒と proxy が足されるので、要らない役割には足さない。
+
+**(3) 案件ごとの設定**
+
+決めたこと（`srtSettings()`。純関数）:
+
+| 欄 | 中身 |
+|---|---|
+| `filesystem.denyRead` | ホーム、`LIBRETTO_HOME`、claude の設定の置き場（子に渡す `CLAUDE_CONFIG_DIR`、無ければ `~/.claude`。ホームの外に置かれていても、ほかのセッションの記録を読ませない） |
+| `filesystem.allowRead` | 作業場、claude の実体のファイル（PATH から探して `realpath` したもの）、Node の実体、`srt` の `vendor/`（Linux で sandbox の中から起こす `apply-seccomp` がある）、ログイン情報のファイル（上の設定の置き場の下の `.credentials.json`。あるときだけ）、呼び出しごとの一時ディレクトリ |
+| `filesystem.allowWrite` | 作業場、呼び出しごとの一時ディレクトリ |
+| `network.allowedDomains` | `api.anthropic.com`、`claude.ai`、`platform.claude.com` |
+| `ripgrep` | PATH に `rg` があれば既定のまま。無く、claude が単体の実行ファイル（公式のインストーラの形）なら `{ command: <claude の実体>, argv0: 'rg' }` |
+
+- claude は実体のパスで起こす（`~/.local/bin/claude` は版のディレクトリへの symlink で、sandbox の中の PATH はホームの下を見せない）。
+- Linux の `srt` はディレクトリの `denyRead` を空の書ける tmpfs にする。だからホームは 8.6 の「使い捨ての tmpfs」になり、CLI がホームに書く `~/.claude.json` などはそこに書かれて消える（8.3 の「libretto が作った使い捨ての `.claude.json`」はこれで足り、ホストは作らない）。ログイン情報は読めるだけで、更新（トークンの書き戻し）は残らない。期限が切れていれば `auth_expired`（6.2.3 (7) の待ち）になり、本人のふだんの CLI か包まない役割の呼び出しが更新する。
+- 一時: `srt` は子の `TMPDIR` を、`srt` 自身の環境の `CLAUDE_CODE_TMPDIR`（無ければ `/tmp/claude`）にする。ホストは呼び出しごとに一時ディレクトリを作り、`srt` に `CLAUDE_CODE_TMPDIR` として渡し、終わったら消す。`srt` の環境からは `TMPDIR` を外す（`srt` は Linux で proxy への橋の Unix ソケットを `os.tmpdir()` に作り、長い `TMPDIR` だとソケットのパスの上限 108 バイトに当たって起動に失敗する。実機の確認で見つかった。外せば `/tmp` に作る）。
+- 子に渡す環境変数は 6.1.2 (1) の許可一覧に `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` を足す（許した 3 つの宛先以外へ出ようとして拒否の記録を増やさない）。
+- `srt` は Linux / macOS で拒否のパスを探すのに ripgrep を要る。公式インストーラの claude は `ARGV0=rg` で ripgrep として動く（Claude Code 自身が Bash の `rg` をこの形で出している）ので、ripgrep を別に入れなくても動く。
+
+**(4) CLI に渡す読み取り拒否の規則（強い隔離でも弱い隔離でも）**
+
+決めたこと: 作り手の呼び出しでは、どの隔離でも `--settings <呼び出しごとの一時>/settings.json` に `{ permissions: { deny: [...] } }` を書いて渡す。規則は 8.5 の並びに、8.6 の表にある `undecided*`・`jobs/` と、費用の結果のファイル `calls/` を足したもの。**絶対パス**で書く（Claude Code の規則で絶対パスは `//` で始める。Windows の `C:\a\b` は `//c/a/b` に直す）:
+
+`Read(//<H>/cases/**/checks/**)`、`Read(//<H>/cases/**/review-*)`、`Read(//<H>/cases/**/facts*)`、`Read(//<H>/cases/**/undecided*)`、`Read(//<H>/cases/**/jobs/**)`、`Read(//<H>/cases/**/versions/**)`、`Read(//<H>/libretto.db*)`、`Read(//<H>/.env*)`、`Read(//<H>/api-keys.json)`、`Read(//<H>/calls/**)`、`Read(//<claude の設定の置き場>/**)`（`<H>` = `LIBRETTO_HOME`）
+
+理由: 経路を 1 つにして、弱い隔離の規則が実際に CLI に届く形を、どの OS でもテストで見られるようにする。強い隔離ではそれらのパスが名前空間に無いので害は無い。`--setting-sources ''` は設定の源（ユーザー・プロジェクト・ローカル）を止める旗で、`--settings` の旗で渡した設定は効く（(9) の実機の確認で確かめる）。
+
+**(5) 自己点検（起動時に 1 回。runner の `resume()` より前に終える）**
+
+決めたこと: 2 つを独立に確かめる。
+
+- **claude の版**（全 OS。包まない）: `claude --version` を動かし、頭の `x.y.z` を読む。読めない・2.1.309 未満なら `claudeOk: false` とし、**Claude の呼び出しを全部起こさない**（中身が呼び出しの頭で例外を投げ、`invoke` が `unavailable` を返す。6.1.2 (7)）。
+- **隔離**: 順に見て、最初に当たったもので決める。
+  1. 素の Windows → `weak`（8.5）。
+  2. Linux で `bwrap` か `socat` が無い、ripgrep も単体の claude も無い → `weak`（10.2 の `not_installed`）。
+  3. Linux で `bwrap` を素で起こして名前空間が作れない（Ubuntu 24.04 の AppArmor の既定など）→ `weak`（8.5 の表の 2 行目）。
+  4. 作り手と同じ起こし方（点検用の空の作業場 `<H>/sandbox-probe/work`）で `claude --version` が成功しない → `broken`。
+  5. 同じ起こし方で網に出られない → `broken`。確かめ方は、Node の `node:http` で `srt` が渡す `HTTPS_PROXY` の proxy に `CONNECT api.anthropic.com:443` を送り、`200` が返るか（10 秒で打ち切り）。名前解決は proxy の側（sandbox の外）で行われ、WSL2 の `/etc/resolv.conf` の symlink を含めてここで分かる。Node の `fetch` は proxy の環境変数を見ないので使わない。
+  6. どれでもない → `strong`。
+- 結果 `{ isolation: 'strong' | 'weak' | 'broken', reason, claudeVersion, claudeOk }` をメモリに持ち、起動のログに 1 行出す（bwrap が無いときは 8.5 の導入の文）。`HostStatus` に `isolation` を足して `GET /api/host`・SSE `host.changed` に載せる。
+- `weak` のとき作り手は包まずに起こし、(4) の規則だけが効く。`broken` のとき**作り手を起こさない**: 中身が呼び出しの頭で例外を投げ、作り手の仕事は 6.2.3 (6) のとおり `unavailable` → `fail.system(つながらない)` で案件を止める（新しい経路を作らない）。
+
+理由（`weak` と `broken` を分ける）: 道具が無い・OS が許さないのは本人の環境の事情で、表示付きで動かす（8.5）。道具があるのに `srt` が動かないのは設定の形が変わった（beta）か壊れたかで、黙って弱い隔離に落とすと、強く隠せるはずの環境で隠さずに作り手が動く（10.2 の `srt` の行も「作り手を起こさない」）。理由（版を独立に見る）: 版の下限は隔離と関係なく全 OS の前提（6.1.2 (7)）で、素の Windows でも確かめる。
+
+**(6) ホストが異常終了したときに作り手を残さない**（6.2.3 (5) の既知の制限）
+
+決めたこと: 呼び出しごとに**見張り**を置く。POSIX で子をプロセスグループで起こした直後に、ホストの子として小さな `sh` を起こす。見張りは `INT` / `TERM` / `HUP` を無視し、標準入力（ホストが握るパイプ）を読み、EOF になったらそのグループ全体に `SIGKILL` を送って終わる。ホストが落ちるとパイプが閉じて見張りが動く。通常の終わりでは、グループを片付けた後でホストが見張りを止める。
+
+- グループに入るのは `srt`・`srt` が起こす `sh`・`bwrap`（外側）。`bwrap` は `srt` が `--die-with-parent --unshare-pid` を付けて起こすので、`bwrap` が消えると名前空間の中の claude と道具の子も全部消える。弱い隔離（包まない）でも claude と道具の子が同じグループに入るので同じく効く。
+- 却下した案: `setpriv --pdeathsig KILL` で `srt` をホストと一緒に終わらせる — `srt` は `sh -c` で `bwrap` を起こし、dash は親として残るので、`srt` が消えても `bwrap` の親が生きていて鎖が届かない（設計レビューで確かめた）。起動時に前回の PID を止めに行く案は 6.2.3 (5) の理由（PID の再利用）で採らない。
+- 限界: macOS は同じ仕組み（シグナルとパイプだけ）で動くはずだが未確認。Windows は対象外（6.1.2 (2) の `taskkill /T` の限界のまま）。電源断は何も残らないので対象外。
+
+**(7) 一時の共有（既知の制限）**
+
+`srt` は `/tmp/claude` をいつも書ける場所にする（設定で外せない）。claude の一時ファイルは (3) で呼び出しごとの一時に向くが、`/tmp/claude` そのものは同時に動く作り手の間で見える。作業場の中身をそこへ写す道具は作り手に無い（`Bash` を渡さない）ので、実際に案件をまたいで漏れる経路は無いと判断して残す。
+
+**(8) 版の正本**
+
+`versions/NN/` の写しと manifest は Issue 10 が T12 で作った（6.2.3 (3)）。本 Issue は「作り手から読めない」を (3) の設定のテスト（8.6 の「読めない」列のパスが、どれも `denyRead` の下にあり `allowRead` のどれの下にも無い）と (9) の実機の確認で示す。
+
+**(9) 実機の確認（sandbox の外で 1 本のスクリプト）**
+
+`npm run verify:sandbox`（`host/scripts/sandbox-live.ts`）が、一時の `LIBRETTO_HOME` に案件のフォルダ（作業場・`versions/01`・`checks/`・`review-01-a.json`・ほかの案件）を作って乱数の語を置き、表で出す:
+1. 自己点検の結果（版・隔離）。
+2. 包んだ起こし方で、作業場が読めて書ける、8.6 の「読めない」列のパスが読めない、作業場の外へ書いたものがホストに残らない、ホームの一覧が許した名前だけ（シェルの `cat` / `ls` で。費用 0）。Linux の `srt` は読み取りを拒否したディレクトリ（`LIBRETTO_HOME` を含む）を空の書ける tmpfs にするので、sandbox の中では作業場の外にも書けるように見えるが、書いたものは tmpfs に入って消え、ホストの案件フォルダには届かない。だから「書けない」ではなく「ホストに残らない」で確かめる。
+3. 本物の claude（haiku、上限付き。数円）に Read 道具で作業場の語と外の語を読ませる。包んだ起こし方では作業場の語だけが返る。**対照**として、包まず (4) の規則だけで起こすと外の語は読めず、規則を外すと読める（規則が効いている証拠）。
+4. 中間のホストを `SIGKILL` して、claude と孫が残らない。
+
+CI（ubuntu-latest は 24.04 で userns が制限されている）と、名前空間を作れない開発の sandbox の中では 2〜4 は動かないので、単体テストは偽の `srt` と偽の CLI で回し、本物の `srt` を使うテストは「`srt` が使えるときだけ」動かす（skip の件数と理由は報告に書く）。
 
 ---
 
@@ -2388,8 +2474,8 @@ libretto/
 | （GitHub #48） | S1 | 同じ項目が直らないときは 3 回目を待たずに本人に上げる | 11 の実ホスト確認で見つかった論点の追加の Issue（一覧の番号は持たない）。合格までの距離（`measured.gap`）、`Review.escalate`（直らない / 判定できない）と T17・T21b の条件の広げ、`unable` を作り手に返さない（7.5 を改めた）、承認の面の 1 行と印・停止の reason・履歴の 1 行（6.2.7） | 11 |
 | 12 | S1 | 版のあるページと完了 | `GET /cases/:id/page`、`format=paste`、送付確認待ち → 送付中 → 完了（届け先 page / paste）、成果の面・送付の面（画面 5）、受け入れ確認 (2) のテスト | 11 |
 | 13 | S1 | ループのテストと実モデル検証 1 回目 | `fake` の台本で 1 本通すテスト（不合格→合格、往復上限、費用上限、停止、再開）、`npm run verify:live` と `docs/verification/` の型、P6 の題材で 1 本 | 12 |
-| 14 | S2 | `srt` の作業場と版の正本 | `sandbox.ts`（8.3。`srt` の版を固定、案件ごとの設定の生成、`claude --version` の自己点検）、Linux と macOS の両方で動くこと、WSL2 の網、素の Windows の弱い隔離への落ち方（8.5。絶対パスの拒否規則）、作り手から `versions/NN/`（写しと manifest は Issue 10 が T12 で作る。6.2.3 (3)）が読めないこと、作り手が読める・書けるものの表どおりか、ホストが異常終了したときに作り手のプロセスが残らないこと（6.2.3 (5) の既知の制限）。`srt` が要件を満たさなければ 8.8 の自前 bwrap に切り替えて窓口に報告 | 10 |
-| 15 | S2 | canary と隔離の点検 | `fn: 'canary'` と `fail.system(隔離の失敗)`、`POST /api/checks/run`（絶対パスの読み取り・許したホームの顔ぶれ・対照）、`isolation.json`、「接続と合図」の表示、受け入れ (1)(3) のテスト、`jobs/` の記録（本文は入れない）。**macOS の実機でも 1 回動かして記録に残す**（P4 の決定どおり Linux と同じ強さであることの確認） | 14 |
+| 14 | S2 | `srt` の作業場と版の正本 | `sandbox.ts`（8.3。`srt` の版を固定、案件ごとの設定の生成、`claude --version` の自己点検）、Linux と macOS の両方で動くこと、WSL2 の網、素の Windows の弱い隔離への落ち方（8.5。絶対パスの拒否規則）、作り手から `versions/NN/`（写しと manifest は Issue 10 が T12 で作る。6.2.3 (3)）が読めないこと、作り手が読める・書けるものの表どおりか、ホストが異常終了したときに作り手のプロセスが残らないこと（6.2.3 (5) の既知の制限）。`srt` が要件を満たさなければ 8.8 の自前 bwrap に切り替えて窓口に報告。作るのはホスト側だけ（`HostStatus.isolation` まで。8.9）で、弱い隔離の帯（入口・承認の面）と「接続と合図」の表示は 15 で作る（オーナー判断 2026-10-24） | 10 |
+| 15 | S2 | canary と隔離の点検 | `fn: 'canary'` と `fail.system(隔離の失敗)`、`POST /api/checks/run`（絶対パスの読み取り・許したホームの顔ぶれ・対照）、`isolation.json`、「接続と合図」の表示と、弱い隔離の帯（入口・承認の面。8.5 の文。14 の `HostStatus.isolation` を読む）、受け入れ (1)(3) のテスト、`jobs/` の記録（本文は入れない）。**macOS の実機でも 1 回動かして記録に残す**（P4 の決定どおり Linux と同じ強さであることの確認） | 14 |
 | 16 | S3 | `openai` アダプタと別系統の確認項目、API キーの入れ方 | Responses API、JSON 出力、`family: '別系統'` の記録、鍵が無いときの同系統への落ち方と「少数派」指示、表示。API キーの入れ方: `keys.ts` と `PUT` / `DELETE /api/settings/keys/:kind` は Issue 4 で作ったもの（5.7 (9)）を使い、ここでは `Settings.apiKeys`、設定の面（画面 7）の API キー欄（「設定済み」と末尾 4 文字・入れ直す・削除）、アダプタが `keys.ts` から値を取るところを作る。テスト: `logs/`・`jobs/` にキーの値が出ないこと、作り手と同じ起こし方のセッションから `api-keys.json` が読めないこと（8.3） | 9, 14 |
 | 17 | S3 | `jev` アダプタと命題の判定 | 設定の面の Jev の API キー欄（16 の仕組みを使う）、7.4 の形（Noul は確率だけ）、判定不能の帯 0.35〜0.65 と Claude への回し、`supportsClaim`、項目の点検（5.8.1）、`detectInstructions`、`jevNote`、1 日の上限（`classified` 行）。偽 Jev でテスト。受け入れ (5) の測定手順と帯の見直し | 11, 16 |
 | 18 | S4 | 事実係（棚卸し・取り寄せ・照合） | `inventoryClaims` / `fetchSource` / `compareNumbers`、`facts.json`、`facts-excerpts/` と閉じるときの削除、要確認印と `approval.ok.marks`、承認の面の出典一覧 | 17 |

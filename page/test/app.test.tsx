@@ -9,7 +9,7 @@ import { W } from '../src/wording.ts'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
-const host = { stopped: false, storageOk: true, signIn: false }
+const host = { stopped: false, storageOk: true, signIn: false, isolation: 'strong' as const }
 const empty: HomeView = {
   yourTurn: [],
   notices: [],
@@ -96,7 +96,7 @@ describe('ホーム', () => {
     replies = { '/api/host': json({}, 500), '/api/home': json(empty) }
     const p = await render()
     expect(p.text()).toContain(W['load.failed'])
-    replies['/api/host'] = json({ stopped: true, storageOk: true, signIn: false })
+    replies['/api/host'] = json({ stopped: true, storageOk: true, signIn: false, isolation: 'strong' })
     const retry = [...p.el.querySelectorAll('button')].find((b) => b.textContent === W['load.retry'])
     await act(async () => retry?.click())
     expect(p.text()).toContain(W['band.stopped'])
@@ -106,9 +106,9 @@ describe('ホーム', () => {
 
   it('止まっているときは帯を出し、解除を送れる', async () => {
     replies = {
-      '/api/host': json({ stopped: true, storageOk: false, signIn: false }),
+      '/api/host': json({ stopped: true, storageOk: false, signIn: false, isolation: 'strong' }),
       '/api/home': json(empty),
-      '/api/stop': json({ stopped: false, storageOk: true, signIn: false }),
+      '/api/stop': json({ stopped: false, storageOk: true, signIn: false, isolation: 'strong' }),
     }
     const p = await render()
     expect(p.text()).toContain(W['band.stopped'])

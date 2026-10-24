@@ -172,7 +172,7 @@ describe('GET /api/home・/api/cases/:id', () => {
   it('空のホームが型どおり', async () => {
     const home = HomeView.parse(await (await get('/api/home')).json())
     expect(home.active).toEqual([])
-    expect(home.host).toEqual({ stopped: false, storageOk: true, signIn: false })
+    expect(home.host).toEqual({ stopped: false, storageOk: true, signIn: false, isolation: 'strong' })
   })
   it('案件があれば active と CaseView に出る', async () => {
     request()
@@ -234,7 +234,12 @@ describe('POST /api/cases/:id/actions（5.2・5.3.1）', () => {
     })
     const res = await action('cancel')
     expect(res.status).toBe(503)
-    expect(await (await get('/api/host')).json()).toEqual({ stopped: false, storageOk: false, signIn: false })
+    expect(await (await get('/api/host')).json()).toEqual({
+      stopped: false,
+      storageOk: false,
+      signIn: false,
+      isolation: 'strong',
+    })
     spy.mockRestore()
     expect((await action('cancel')).status).toBe(200)
     expect(server.status.storageOk).toBe(true)
@@ -246,7 +251,7 @@ describe('緊急停止（5.7 (3)）', () => {
   it('POST /api/stop: 新しい実行を断り、実行中を中断し、STOP を書き、全案件を停止', async () => {
     const ac = server.runs.open('c1')
     const res = await send('POST', '/api/stop')
-    expect(await res.json()).toEqual({ stopped: true, storageOk: true, signIn: false })
+    expect(await res.json()).toEqual({ stopped: true, storageOk: true, signIn: false, isolation: 'strong' })
     expect(ac.signal.aborted).toBe(true)
     expect(() => server.runs.open('c1')).toThrow(Stopped)
     expect(existsSync(stopFile(home))).toBe(true)
@@ -257,7 +262,7 @@ describe('緊急停止（5.7 (3)）', () => {
     chmodSync(home, 0o500) // 新しいファイルを作れない。データベースは既存のファイルなので書ける
     const ac = server.runs.open('c1')
     expect((await send('POST', '/api/stop')).status).toBe(503)
-    expect(server.status).toEqual({ stopped: true, storageOk: false, signIn: false })
+    expect(server.status).toEqual({ stopped: true, storageOk: false, signIn: false, isolation: 'strong' })
     expect(ac.signal.aborted).toBe(true)
     expect(() => server.runs.open('c2')).toThrow(Stopped)
     expect(ledger.getCase('c1')?.state).toBe('停止')
@@ -276,7 +281,7 @@ describe('緊急停止（5.7 (3)）', () => {
     })
     const ac = server.runs.open('c1')
     await send('POST', '/api/stop')
-    expect(server.status).toEqual({ stopped: true, storageOk: false, signIn: false })
+    expect(server.status).toEqual({ stopped: true, storageOk: false, signIn: false, isolation: 'strong' })
     expect(ac.signal.aborted).toBe(true)
     spy.mockRestore()
     // 遷移が残っている間は解けない
@@ -318,7 +323,7 @@ describe('緊急停止（5.7 (3)）', () => {
   it('DELETE /api/stop は STOP を消してから解く。案件は再開しない', async () => {
     await send('POST', '/api/stop')
     const res = await send('DELETE', '/api/stop')
-    expect(await res.json()).toEqual({ stopped: false, storageOk: true, signIn: false })
+    expect(await res.json()).toEqual({ stopped: false, storageOk: true, signIn: false, isolation: 'strong' })
     expect(existsSync(stopFile(home))).toBe(false)
     expect(ledger.getCase('c1')?.state).toBe('停止')
     expect(() => server.runs.open('c1')).not.toThrow()
@@ -327,7 +332,7 @@ describe('緊急停止（5.7 (3)）', () => {
     const seen: string[] = []
     server.hub.subscribe((m) => seen.push(`${m.event} ${m.data}`))
     await send('POST', '/api/stop')
-    expect(seen).toContain('host.changed {"stopped":true,"storageOk":true,"signIn":false}')
+    expect(seen).toContain('host.changed {"stopped":true,"storageOk":true,"signIn":false,"isolation":"strong"}')
   })
 })
 
