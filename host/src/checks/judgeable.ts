@@ -38,7 +38,7 @@ type Fn<A> = {
   pass: PassKind[]
   phase: Phase
   host?: true // ホストだけが書く（下書き役は使えない）
-  facts?: true // 版の事実（棚卸し）が要る。ほかの機械判定が全部通ったときだけ流す（6.3.1 (7)）
+  facts?: true // 版の事実（棚卸し）が要る。judge が事実の関数の前に 1 回だけ棚卸しをする（6.3.1 (7)）
   run: (args: A, input: FnInput) => FnResult | Promise<FnResult>
 }
 const fn = <A>(f: Fn<A>) => f as Fn<unknown>

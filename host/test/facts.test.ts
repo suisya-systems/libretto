@@ -411,46 +411,39 @@ describe('判定への組み込み（6.3.1 (7)(8)）', () => {
     ],
   }
 
-  it('ほかの機械判定が落ちたら棚卸しを呼ばず、事実の項目は skipped。印は入る', async () => {
-    const { fake, invoke, facts, signal } = setup([])
+  it('ほかの機械判定が落ちても棚卸しと事実の機械判定は流し、支持（モデル判定）だけ skipped（6.3.1 (7)）', async () => {
+    const body = `短（[調](${URL_A})）`
+    const { fake, invoke, facts, signal } = setup(
+      [{ role: '事実係・抜き出し', nth: 1, reply: say({ claims: [] }) }],
+      body,
+    )
     const out = await judge(
-      { caseId: 'c1', phase: '本文', checks, input: { md: '短い' }, brief, family: '別系統', signal, facts },
+      { caseId: 'c1', phase: '本文', checks, input: { md: body }, brief, family: '別系統', signal, facts },
       invoke,
     )
     if (!out.ok) throw new Error(out.out.detail)
-    expect(fake.calls).toEqual([])
-    expect(out.judged.body.results.map((r) => r.verdict)).toEqual([
-      'fail',
-      'pass',
-      'skipped',
-      'skipped',
-      'skipped',
-      'skipped',
-    ])
-    expect(out.judged.body.marks).toEqual([])
-    expect(out.judged.facts).toBeUndefined()
-    // 棚卸しを流さなかった版でも、本文の出典はまだチェックしていない形で並ぶ
-    const linked = await judge(
+    expect(fake.calls.map((c) => c.role)).toEqual(['事実係・抜き出し'])
+    expect(out.judged.body.results.map((r) => r.verdict)).toEqual(['fail', 'pass', 'pass', 'pass', 'pass', 'skipped'])
+    expect(out.judged.facts).toBeDefined()
+    // どの主張にも付かなかった本文のリンクも、まだチェックしていない形で並ぶ
+    expect(out.judged.body.sources).toEqual([{ ref: URL_A, title: '調', verdict: '未判定', claimIds: [] }])
+  })
+
+  it('事実の項目が無い組でも、承認の面に本文の出典を「まだチェックしていません」で並べる', async () => {
+    const { invoke, signal } = setup([])
+    const out = await judge(
       {
         caseId: 'c1',
         phase: '本文',
-        checks,
-        input: { md: `短い（[調査](${URL_A})）` },
+        checks: [length],
+        input: { md: `${'あ'.repeat(10)}（[調査](${URL_A})）` },
         brief,
         family: '別系統',
         signal,
-        facts,
       },
       invoke,
     )
-    expect(linked.ok && linked.judged.body.sources).toEqual([
-      { ref: URL_A, title: '調査', verdict: '未判定', claimIds: [] },
-    ])
-    const marked = await judge(
-      { caseId: 'c1', phase: '本文', checks, input: { md: `短い${MARK}` }, brief, family: '別系統', signal, facts },
-      invoke,
-    )
-    expect(marked.ok && marked.judged.body.marks.map((m) => m.claimId)).toEqual(['M01'])
+    expect(out.ok && out.judged.body.sources).toEqual([{ ref: URL_A, title: '調査', verdict: '未判定', claimIds: [] }])
   })
 
   it('棚卸し（言い直し 1 回）→ 取り寄せ → 3 関数 → 支持（Jev が無ければ Claude）→ 出典の集計', async () => {

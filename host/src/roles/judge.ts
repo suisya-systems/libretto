@@ -231,17 +231,13 @@ export async function judge(
   let jevUsed = false
   let jevPartial = false
 
-  // 1. 機械判定を全部。事実の関数は、ほかが全部合格したときだけ棚卸しをして流す（6.3.1 (7)）
+  // 1. 機械判定を全部。事実の関数の前に 1 回だけ棚卸しをする（6.3.1 (7)）
   const needsFacts = (c: Check) => c.judge.by === 'code' && !!FNS[c.judge.fn]?.facts
   const plainCode = checks.filter((x) => x.judge.by === 'code' && !needsFacts(x))
   const factCode = checks.filter(needsFacts)
   let facts: Facts | undefined
   for (const c of [...plainCode, ...factCode]) {
     if (needsFacts(c) && !facts) {
-      if ([...results.values()].some((r) => r.verdict !== 'pass')) {
-        results.set(c.id, { id: c.id, verdict: 'skipped', by: 'code' })
-        continue
-      }
       if (!j.facts) throw new Error(`no facts for ${c.id}`)
       const got = await j.facts()
       if (!got.ok) return { ok: false, out: got.out }
@@ -402,7 +398,7 @@ export async function judge(
         // unable は作り手には直せないので返さない（本人にだけ見せる。6.2.7 (3)）
         failedSummaries: ordered.filter((r) => r.verdict === 'fail').map((r) => summaryOf.get(r.id) as string),
         marks: marksOf(j.input.md),
-        sources: facts ? sourceRows(facts.file) : linkRows(j.input.md),
+        sources: sourcesOf(facts?.file, j.input.md),
         ...(j.family === '同系統' && { familyNote: FAMILY_NOTE }),
         // Jev が 1 単位も答えなければ「使っていません」、答えたが失敗した要求があれば「一部は」（7.6 (5)）
         ...(checks.some((c) => c.judge.by === 'jev') &&
@@ -416,6 +412,12 @@ export async function judge(
 }
 
 const isClaimCheck = (c: Check) => c.judge.by === 'jev' && c.judge.scope === 'claim'
+
+// 承認の面の出典: 棚卸しで取り寄せたものと、本文のリンクのうちどの主張にも付かなかったもの（まだチェックしていない）
+function sourcesOf(f: FactsFile | undefined, md: string): Review['sources'] {
+  const rows = f ? sourceRows(f) : []
+  return [...rows, ...linkRows(md).filter((l) => !rows.some((r) => r.ref === l.ref))]
+}
 
 // 出典ごとの判定の集計（6.3.1 (8)）
 export function sourceRows(f: FactsFile): Review['sources'] {
