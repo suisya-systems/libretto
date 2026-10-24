@@ -50,6 +50,10 @@ libretto の画面に出す言葉の正本。設計書（[`docs/design.md`](./de
 | 完成した依頼 | 完了した依頼 | 依頼は「完了」と言う |
 | 全部止める・この依頼を止める | すべて停止・この依頼を中止 | ボタンの言葉として普段そう言う |
 | 作れるものの点検・いま点検する | 動作環境の確認・今すぐ確認 | 設計書の内部の言葉。アプリの画面では普段そう言う |
+| 隔離・作り手から確認項目を隠す仕組み | チェック項目を書く側から隠す仕組み | 「隔離」「サンドボックス」は技術の言葉。何を何から隠すかを言う（作り手は画面では「書く側」） |
+| 隔離が強い・弱い・壊れている（strong / weak / broken） | しっかり隠せています・弱い・動きません | 英語の段階名は出さない。状態をふだんの言い方で言う |
+| 隔離の点検の結果（見えない・見えた・確かめられない） | 書く側からチェック項目は見えませんでした・見えました・確かめられませんでした | 何を確かめて何が分かったかを 1 文で言う |
+| 隔離の失敗（canary を当てた停止） | 書く側にチェック項目が見えたおそれ | 語が出たことは「見えた」の強い証拠だが断定はできないので「おそれ」と言う。「見えました」は対照付きで確かめた点検の結果にだけ使う |
 | 版・第 2 版・前の版 | バージョン・バージョン 2・前のバージョン | 「版」は出版の言葉。文書の改訂は普段「バージョン」と言う |
 | 進み具合 | 進捗 | 普段そう言う |
 | 一覧の列名「いま」 | ステータス | 列名として普段そう言う |
@@ -101,7 +105,7 @@ libretto の画面に出す言葉の正本。設計書（[`docs/design.md`](./de
 | `stopped` | 中止しました |
 | `cancelled` | 取り消しました |
 
-**会話欄に足す 1 行（`SAY` の 7 個）**
+**会話欄に足す 1 行（`SAY` の 8 個）**
 
 | キー | 文 |
 |---|---|
@@ -112,6 +116,7 @@ libretto の画面に出す言葉の正本。設計書（[`docs/design.md`](./de
 | `saveFailed` | 保存できなかったので中止しました |
 | `toolFailed` | 動作環境の不具合で中止しました |
 | `costCap` | 費用の上限に達したので中止しました |
+| `isolationLeaked` | 書く側にチェック項目が見えたおそれがあるので中止しました |
 
 **話し相手の代わりに会話欄に書く 1 行（`host/src/roles/conversation.ts` の `TALK`。実装設計書 6.2.1 (7)）**
 
@@ -316,6 +321,9 @@ libretto の画面に出す言葉の正本。設計書（[`docs/design.md`](./de
 |---|---|
 | `band.signIn` | AI のログインが切れています。PC でログインし直してから「続ける」を押してください |
 | `band.signInResume` | 続ける |
+| `band.isolationWeak` | この環境では、書く側からチェック項目を隠す仕組みが弱いです（チェック項目のファイルは別の場所にありますが、OS の仕切りはありません） |
+| `band.isolationBroken` | 書く側からチェック項目を隠す仕組みが動きません。下書きは始まりません。libretto を再起動してください |
+| `band.isolationLink` | 設定で確かめる |
 | `progress.now` | いま |
 | `progress.round` | {n} 回目のチェック（最大 {max} 回） |
 | `progress.lead` | このページを閉じても進みます。 |
@@ -401,6 +409,7 @@ libretto の画面に出す言葉の正本。設計書（[`docs/design.md`](./de
 | `reason.つながらない` | AI につながりませんでした |
 | `reason.書けなかった` | 下書きを書けませんでした |
 | `reason.判定できなかった` | チェックを終えられませんでした |
+| `reason.隔離の失敗` | 書く側にチェック項目が見えたおそれがありました |
 | `reason.other` | 中止しました |
 
 **承認の面（画面 4。実装設計書 6.2.5 (8)）**
@@ -510,3 +519,22 @@ libretto の画面に出す言葉の正本。設計書（[`docs/design.md`](./de
 | `settings.key.deleted` | 削除しました。 |
 | `settings.key.invalid` | 8 文字以上の半角の英数字と記号で入れてください。空白は入れられません。 |
 | `settings.key.failed` | 保存できませんでした。もう一度お試しください。 |
+| `settings.envHeading` | 動作環境の確認 |
+| `settings.isolation.label` | チェック項目を書く側から隠す仕組み |
+| `settings.isolation.use` | 書く側の AI には、チェック項目のファイルが見えない場所で下書きを書かせます。 |
+| `settings.isolation.strong` | しっかり隠せています |
+| `settings.isolation.weak` | 弱い |
+| `settings.isolation.broken` | 動きません |
+| `settings.isolation.why.windows` | Windows には OS の仕切りがありません。WSL2 で動かすと、しっかり隠せます。 |
+| `settings.isolation.why.tools` | 必要なソフトが入っていません。PC で `apt install bubblewrap socat ripgrep` を実行すると、しっかり隠せます。 |
+| `settings.isolation.why.userns` | OS の設定が仕切りを止めています。PC で `sudo sysctl kernel.apparmor_restrict_unprivileged_userns=0` を実行すると、しっかり隠せます。 |
+| `settings.isolation.why.srt` | 仕切りの道具を起こせませんでした。libretto を再起動してください。直るまで下書きは始まりません。 |
+| `settings.isolation.why.network` | 仕切りの中から AI につながりませんでした。libretto を再起動してください。直るまで下書きは始まりません。 |
+| `settings.probe.hidden` | 書く側からチェック項目は見えませんでした |
+| `settings.probe.visible` | 書く側からチェック項目が見えました。libretto を再起動して、もう一度確認してください |
+| `settings.probe.unknown` | 確かめられませんでした。もう一度「今すぐ確認」を押してください |
+| `settings.probe.never` | まだ確認していません |
+| `settings.probe.running` | 確認しています。1〜2 分かかります |
+| `settings.probe.at` | {at} に確認 |
+| `settings.probe.run` | 今すぐ確認 |
+| `settings.probe.failed` | 確認を始められませんでした。もう一度お試しください。 |
