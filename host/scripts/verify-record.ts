@@ -2,7 +2,7 @@
 // 本文・会話・依頼の題・確認項目の文・本人が「止める」に付けた文は入れない
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { jst, jstMonth, type Ledger } from '../src/ledger/ledger.ts'
+import { jst, jstMonth, type Ledger, NON_CASE_COSTS } from '../src/ledger/ledger.ts'
 
 // 起動ごとの 1 行。検証したときの環境（記録を作り直すときの環境ではない）
 export type Session = {
@@ -17,7 +17,6 @@ export type Session = {
 // <家>/verify.json
 export type Notebook = { startedAt: string; month: string; capYen: number; sessions: Session[] }
 
-const CONVERSATION = '会話'
 // 費用は実額（ドル建ての換算）で小数が長いので、記録には 0.1 円まで
 const yen = (n: number) => n.toFixed(1)
 const MARGIN_MS = 2 * 3_600_000
@@ -82,7 +81,7 @@ export function facts(ledger: Ledger, nb: Notebook, debugDir: string): string {
     .listCases()
     .map((c) => ({ c, events: ledger.listCaseEvents(c.caseId) }))
     .sort((a, b) => (a.events[0]?.at ?? '').localeCompare(b.events[0]?.at ?? ''))
-  const { rows, total, unsettled } = costTable(ledger, [CONVERSATION, ...cases.map((x) => x.c.caseId)])
+  const { rows, total, unsettled } = costTable(ledger, [...NON_CASE_COSTS, ...cases.map((x) => x.c.caseId)]) // 会話・点検（隔離の点検）・推測も
   out.push('', '### 費用', '')
   out.push(`- 上限: ${nb.capYen} 円（この家の全部。始めた月 ${nb.month}）`)
   out.push(`- 使った額: ${yen(total)} 円（精算されていない予約 ${unsettled} 件を予約の額で含む）`)

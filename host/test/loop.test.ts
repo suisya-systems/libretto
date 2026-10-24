@@ -222,8 +222,20 @@ describe('ループ（11.3 (1)）', () => {
       caseCapYen: null,
       monthCapYen: null,
     })
+    // 案件の無い呼び出し（隔離の点検）の費用も数える
+    ledger.reserveCost({
+      callId: 'probe',
+      caseId: '点検',
+      role: '作り手',
+      family: 'claude',
+      model: 'x',
+      holdYen: 10,
+      caseCapYen: null,
+      monthCapYen: null,
+    })
+    ledger.recordCharge({ callId: 'probe', yen: 3 })
     const md = facts(ledger, notebook, join(home, 'debug'))
-    expect(md).toContain('- 使った額: 560.0 円（精算されていない予約 1 件を予約の額で含む）')
+    expect(md).toContain('- 使った額: 563.0 円（精算されていない予約 1 件を予約の額で含む）')
     expect(md).toContain('- 最後の状態: 停止（本人が止めた）')
     expect(md).not.toContain('本人だけが知っている理由')
   })
