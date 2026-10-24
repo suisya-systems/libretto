@@ -259,12 +259,15 @@ export function createGoogle(o: {
         if (moved2) return moved2
         if (res.ok) {
           // 本文の受け取りの途中で切れても、届かなかったとして返す（呼ぶ側の落ち方に乗せる）
+          let json: T
           try {
-            return { ok: true, json: (await res.json()) as T }
+            json = (await res.json()) as T
           } catch (e) {
             if (signal.aborted) throw e
             return { ok: false, why: 'network' }
           }
+          // 受け取りの間に解除・連携し直しがあれば捨てる
+          return stale() ?? { ok: true, json }
         }
         if (res.status === 401) {
           access = undefined

@@ -58,7 +58,17 @@ export async function readThread(
 
 const header = (p: Part | undefined, name: string) =>
   p?.headers?.find((h) => h.name.toLowerCase() === name.toLowerCase())?.value ?? ''
-const decode = (data: string) => Buffer.from(data, 'base64url').toString('utf-8')
+// 部分の Content-Type の charset で読む（ISO-2022-JP・Shift_JIS など）。TextDecoder が知らない名前は UTF-8
+function decode(p: Part, data: string) {
+  const charset = /charset\s*=\s*"?([^";\s]+)/i.exec(header(p, 'Content-Type'))?.[1] ?? 'utf-8'
+  let d: TextDecoder
+  try {
+    d = new TextDecoder(charset)
+  } catch {
+    d = new TextDecoder('utf-8')
+  }
+  return d.decode(Buffer.from(data, 'base64url'))
+}
 const stripHtml = (html: string) =>
   html
     .replace(/<(script|style)[\s\S]*?<\/\1>/gi, '')
@@ -79,8 +89,8 @@ function walk(p: Part, out: { plain: string[]; html: string[]; attachments: stri
     return
   }
   if (p.parts) for (const c of p.parts) walk(c, out)
-  else if (p.body?.data && p.mimeType === 'text/plain') out.plain.push(decode(p.body.data))
-  else if (p.body?.data && p.mimeType === 'text/html') out.html.push(stripHtml(decode(p.body.data)))
+  else if (p.body?.data && p.mimeType === 'text/plain') out.plain.push(decode(p, p.body.data))
+  else if (p.body?.data && p.mimeType === 'text/html') out.html.push(stripHtml(decode(p, p.body.data)))
 }
 
 export function parseFrom(v: string): { name: string; key: string } {

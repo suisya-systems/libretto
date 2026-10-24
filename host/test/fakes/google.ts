@@ -65,6 +65,7 @@ export async function startFakeGoogle() {
     fail: undefined as undefined | { status: number; body?: string; times: number; path?: RegExp },
     revoked: [] as string[],
     refreshDelayMs: 0, // 更新トークンでの更新を遅らせる（解除と重なる場面を作る）
+    bodyDelayMs: 0, // Gmail の応答の本文を、見出しの後に遅らせる（本文の受け取り中の解除を作る）
   }
   const issue = () => {
     const t = `at-${++state.issued}`
@@ -80,7 +81,10 @@ export async function startFakeGoogle() {
     seen.push({ method: req.method ?? '', path: url.pathname + url.search, body, ...(auth && { auth }) })
     const json = (status: number, v: unknown) => {
       res.writeHead(status, { 'content-type': 'application/json' })
-      res.end(JSON.stringify(v))
+      const s = JSON.stringify(v)
+      if (!state.bodyDelayMs || !url.pathname.startsWith('/gmail')) return res.end(s)
+      res.write(s.slice(0, 1))
+      setTimeout(() => res.end(s.slice(1)), state.bodyDelayMs)
     }
     const f = state.fail
     if (f && f.times > 0 && (!f.path || f.path.test(url.pathname))) {

@@ -186,6 +186,24 @@ describe('メールの読み取り（6.4 (3)）', () => {
     expect(t.body).toBe('こんにちは&よろしく')
     expect(parseFrom('a@b.c')).toEqual({ name: 'a@b.c', key: 'a@b.c' })
   })
+  it('部分の charset で読む（ISO-2022-JP・Shift_JIS）。知らない charset は UTF-8', () => {
+    const part = (charset: string, bytes: number[] | Buffer) => ({
+      mimeType: 'text/plain',
+      headers: [{ name: 'Content-Type', value: `text/plain; charset=${charset}` }],
+      body: { data: Buffer.from(bytes).toString('base64url') },
+    })
+    // どちらも「こんにちは」
+    const jis = [0x1b, 0x24, 0x42, 0x24, 0x33, 0x24, 0x73, 0x24, 0x4b, 0x24, 0x41, 0x24, 0x4f, 0x1b, 0x28, 0x42]
+    const sjis = [0x82, 0xb1, 0x82, 0xf1, 0x82, 0xc9, 0x82, 0xbf, 0x82, 0xcd]
+    const body = (p: ReturnType<typeof part>) =>
+      parseThread(
+        { id: 't', messages: [{ id: 'm', payload: { mimeType: 'multipart/mixed', parts: [p] } }] },
+        'me@example.com',
+      ).body
+    expect(body(part('ISO-2022-JP', jis))).toBe('こんにちは')
+    expect(body(part('"Shift_JIS"', sjis))).toBe('こんにちは')
+    expect(body(part('x-unknown', Buffer.from('こんにちは', 'utf-8')))).toBe('こんにちは')
+  })
   it('カードの例は型と受け入れ規則に通り、添付に無い名前と重なった保存先は落ちる', () => {
     expect(CardDraft.parse(CARD_EXAMPLE)).toEqual(CARD_EXAMPLE)
     expect(cardViolations(CARD_EXAMPLE, ['サービス概要.pdf'])).toEqual([])
@@ -279,6 +297,15 @@ describe('連携（6.4 (2)）', () => {
     g.seen.length = 0
     await server.google.get('/gmail/v1/users/me/profile', new AbortController().signal)
     expect(g.seen.find((x) => x.path === '/gmail/v1/users/me/profile')?.auth).toBe(fresh)
+  })
+
+  it('応答の本文を受け取っている間に解除されたら、読んだ結果を使わない', async () => {
+    await setup()
+    g.state.bodyDelayMs = 100
+    const stale = server.google.get('/gmail/v1/users/me/profile', new AbortController().signal)
+    await new Promise((r) => setTimeout(r, 30))
+    expect((await send('DELETE', '/api/connections/google')).status).toBe(204)
+    expect(await stale).toEqual({ ok: false, why: 'not_connected' })
   })
 
   it('設定が無ければ連携を始めない', async () => {
