@@ -1,16 +1,22 @@
-// srt の実機の確認（docs/implementation.md 8.9 (9)）。sandbox の外で `npm run verify:sandbox`（モデルも呼ぶなら `-- --model`）
-// 一時の LIBRETTO_HOME に案件のフォルダを作り、乱数の語を置いて、作り手と同じ起こし方で読めるものを確かめる
+// srt の実機の確認（docs/implementation.md 8.9 (9)・8.10 (7)）。sandbox の外で `npm run verify:sandbox`（モデルも呼ぶなら `-- --model`）
+// 一時の LIBRETTO_HOME に案件のフォルダを作り、乱数の語を置いて、作り手と同じ起こし方で読めるものを確かめる。
+// `--probe` で隔離の点検（POST /api/checks/run の中身）を本物の claude で 1 回流し、`--record` で結果を docs/verification/ に書く。
+// `npm run verify:isolation` = `--model --probe --record`
 import { spawn } from 'node:child_process'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs'
-import { homedir, tmpdir } from 'node:os'
-import { dirname, join, relative, sep } from 'node:path'
+import { homedir, platform, release, tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { checkIsolation, probeDir } from '../src/checks/isolation.ts'
+import { callsDir, initHome } from '../src/ledger/db.ts'
 import { createClaudeCli, resolveClaude } from '../src/model/claude-cli.ts'
-import type { Call } from '../src/model/invoke.ts'
+import { type Call, createInvoke } from '../src/model/invoke.ts'
 import { checkSandbox, createSandbox, onPath } from '../src/model/sandbox.ts'
 
 const withModel = process.argv.includes('--model')
+const withProbe = process.argv.includes('--probe')
+const record = process.argv.includes('--record')
 const tok = () => randomBytes(12).toString('hex')
 const home = realpathSync(mkdtempSync(join(tmpdir(), 'libretto-live-')))
 const caseDir = join(home, 'cases', 'c1')
@@ -75,16 +81,8 @@ if (check.isolation === 'strong') {
   ].join('\n')
   const p = await box.prepare(work, [], process.env, ['/bin/sh', '-c', script])
   const r = await run(p.argv, p.env, work)
-  // ホームの一覧に出てよいのは、allowRead のうちホームの下にあるものの一番上の名前だけ
-  const settings = JSON.parse(readFileSync(p.argv[p.argv.indexOf('--') - 1] ?? '', 'utf8')) as {
-    filesystem: { allowRead: string[] }
-  }
-  const allowed = new Set(
-    settings.filesystem.allowRead
-      .map((a) => relative(homedir(), a))
-      .filter((x) => x && !x.startsWith('..'))
-      .map((x) => x.split(sep)[0]),
-  )
+  // ホームの一覧に出てよいのは、allowRead のうちホームの下にあるものの一番上の名前だけ（8.10 (4) の homeNames と同じ）
+  const allowed = new Set(box.homeNames(work))
   await p.cleanup()
   console.log(r.out)
   const line = (k: string) => r.out.split('\n').find((l) => l.startsWith(`${k}:`)) ?? ''
@@ -198,6 +196,66 @@ if (withModel && check.claudeOk) {
   row('model control: checks readable without rules', c.includes(tokens.checks ?? '-'))
 }
 
+// 4) 隔離の点検（8.10 (4)）を本物の claude（haiku。2 回で数円）で。作り手と同じ起こし方と、checks/ を開け直した対照
+if (withProbe) {
+  const ledger = initHome(home)
+  const invokeWith = (sandbox: ReturnType<typeof createSandbox>) =>
+    createInvoke({
+      ledger,
+      backends: { claude: createClaudeCli({ usdJpy: () => 150, callsDir: callsDir(home), sandbox }) },
+      caps: () => ({ caseCapYen: null, monthCapYen: null }),
+      onCostCap: () => {},
+      callsDir: callsDir(home),
+    })
+  const control = createSandbox({ home, claude, check: () => check, reopen: [join(probeDir(home), 'checks')] })
+  const r = await checkIsolation(
+    {
+      home,
+      check: () => check,
+      invoke: invokeWith(box),
+      control: invokeWith(control),
+      homeNames: (w) => box.homeNames(w),
+    },
+    new AbortController().signal,
+  )
+  console.log(`probe: ${JSON.stringify(r)}`)
+  row('probe: session ended normally', !!r?.session)
+  row('probe: reached the work folder', !!r?.reached)
+  row('probe: checks token not visible', !!r?.hidden)
+  row('probe: home shows only allowed entries', !!r?.homeOk, (r?.extraHome ?? []).join(' '))
+  row('probe: control sees the token (detection works)', !!r?.control)
+  row('probe: verdict hidden', r?.verdict === 'hidden', r?.verdict ?? '')
+  ledger.close()
+}
+
 const failed = rows.filter(([, ok]) => !ok)
 console.log(`\n${rows.length - failed.length}/${rows.length} passed. LIBRETTO_HOME=${home}`)
+
+// 結果の表を docs/verification/ に書く（8.10 (7)）。手で直さず、流した結果をそのまま残す
+if (record) {
+  const day = new Date().toISOString().slice(0, 10)
+  const out = fileURLToPath(new URL(`../../docs/verification/isolation-${platform()}-${day}.md`, import.meta.url))
+  const md = [
+    `# 隔離の確認（${platform()}・${day}）`,
+    '',
+    `- OS: ${platform()} ${release()}（${process.arch}）`,
+    `- Node: ${process.version}`,
+    `- claude: ${check.claudeVersion ?? 'unknown'}`,
+    `- 隔離の水準: ${check.isolation}${check.reason ? `（${check.reason}）` : ''}`,
+    `- 流したもの: \`host/scripts/sandbox-live.ts ${process.argv.slice(2).join(' ')}\``,
+    `- 結果: ${rows.length - failed.length}/${rows.length} passed`,
+    '',
+    '| 確かめたこと | 結果 | 補足 |',
+    '|---|---|---|',
+    // 公開のリポジトリに置くので、手元の絶対パス（ユーザー名を含む）は伏せる
+    ...rows.map(
+      ([name, ok, note]) =>
+        `| ${name} | ${ok ? 'PASS' : 'FAIL'} | ${note.replaceAll(home, '<LIBRETTO_HOME>').replaceAll(homedir(), '~').replaceAll('|', '\\|')} |`,
+    ),
+    '',
+  ].join('\n')
+  mkdirSync(dirname(out), { recursive: true })
+  writeFileSync(out, md)
+  console.log(`recorded: ${out}`)
+}
 process.exit(failed.length ? 1 : 0)
