@@ -34,6 +34,7 @@ export type State = {
   // チェック項目を隠す仕組みの水準・原因・前回の確認（8.10。既定は strong・確認なし）
   isolation?: { level: HostStatus['isolation']; cause?: IsolationCause; last?: IsolationRecord }
   fetch?: Fetch // 出典の取り寄せの偽物（網に出ない。6.3.1 (5)）
+  voiceSamples?: { title: string; url: string }[] // 会話の前に「あなたの文体の見本」を登録しておく（6.3.2 (10)）
 }
 
 const probed = (verdict: IsolationRecord['verdict']): IsolationRecord => ({
@@ -232,6 +233,84 @@ const fakeSurvey: Fetch = async (url) => ({
   fingerprint: 'shoot',
 })
 
+// 文体を合わせる依頼（6.3.2）。見本はです・ますで「私」の文章。声の項目を 1 つ足した組で、本文の C07 も通る
+const VOICE_URL = 'https://example.com/my-note'
+const VOICE_DOC = [
+  '# 私の書き方',
+  '私は記事を書くとき、話し合いで決まったことを最初の段落に書くようにしています。読む人が冒頭の数行で結論をつかめると、そのあとの説明も落ち着いて読めるからです。理由はそのあとで、具体的な場面を一つ挙げながら短く説明します。',
+  '書き終えたら、初めてその話題に触れる人の立場で最初から読み直します。社内でしか通じない言葉があれば、ふだんの言い方に置き換えて書き直します。数字や固有名詞には、どこで確かめたかが分かるように出典を添えます。',
+  '記事の終わりには、読んだ人が次に試せることを一つだけ書きます。読んだ人が明日から少しでも動けるようにしたいと考えているからです。まずは小さく試して、うまくいったら少しずつ広げていきます。',
+].join('\n\n')
+const voiceChecks = [
+  ...goodChecks,
+  {
+    id: 'C07',
+    category: '声',
+    title: '文末がです・ます調でそろっている',
+    judge: { by: 'code', fn: 'sentenceEndingRatio', args: { endings: ['です', 'ます', 'でした', 'ました'] } },
+    pass: { kind: 'ratio', min: 0.8 },
+    phase: '本文',
+    summary: '文末の調子がそろっていません',
+    hidden: false,
+    selfReport: '依頼に書いてある',
+  },
+]
+const voiceEntrance: Row[] = [
+  ['話し相手', say(done)],
+  ['下書き役・依頼書', say({ ...briefDraft, brief: { ...briefDraft.brief, voice: '合わせる' } })],
+  ['下書き役・確認項目', say({ checks: voiceChecks })],
+  ['事実係・分類', say({ items: [...classified.items, { checkId: 'C07', verdict: '決まる' }] })],
+]
+// 読み比べの項目の id: 下書き役の 7 件・canary・文体の 3 項目の次
+const READ_ALIKE_ID = 'C12'
+const voiceRows: Row[] = [
+  ...voiceEntrance,
+  [
+    '事実係・描写',
+    say({
+      portrait: [
+        '結論を先に書き、理由を短く添える。',
+        'です・ます調で、ふだんの言葉を選ぶ。',
+        '終わりに次の一歩を置く。',
+      ],
+    }),
+  ],
+  [
+    '作り手',
+    {
+      text: '書きました',
+      write: { 'draft-01.md': body(2), 'draft-01.html': renderHtml(body(2)), 'draft-01.done': 'done' },
+    },
+  ],
+  [
+    '判定役・文章',
+    say({
+      results: [
+        { id: 'C02', units: [{ index: 0, yes: true }], reason: '冒頭で決まったことが分かります。' },
+        { id: 'C05', units: [{ index: 0, yes: true }], reason: 'ふだんの言い回しで書かれています。' },
+        {
+          id: 'C06',
+          units: paragraphUnits(body(2)).map((_, index) => ({ index, yes: true })),
+          reason: 'どの段落も、読み手が次にすることにつながっています。',
+        },
+        { id: READ_ALIKE_ID, units: [{ index: 0, yes: true }], reason: '結論を先に置く運びが見本と同じです。' },
+      ],
+    }),
+  ],
+]
+const fakeVoice: Fetch = async (url) => ({
+  ok: true,
+  url,
+  title: '私の書き方',
+  paragraphs: VOICE_DOC.split('\n\n'),
+  fingerprint: 'voice',
+  md: VOICE_DOC,
+})
+const VOICE_SAMPLES = [
+  { title: '私の書き方', url: VOICE_URL },
+  { title: '週報の書き方を変えた話', url: 'https://example.com/weekly-report' },
+]
+
 const clean: Row[] = [...entrance(), draft(1), verdicts(1, false), draft(2), verdicts(2, true)]
 const hang: Row = ['作り手', { fail: 'hang' }]
 // mark の項目数・件数と合わせる（Approval.tsx は本文と形式の判定を足して出す）
@@ -405,6 +484,41 @@ export const STATES: Record<string, State> = {
       v.review.failed.length === 0,
     mark: W['approval.marksHeading'],
     selector: '.doc-body',
+  },
+  // 入口: 文体の見本から文体を読み取った。過去の文章で確かめた項目に印（6.3.2 (2)(5)）
+  'entrance-voice': {
+    script: voiceEntrance,
+    voiceSamples: VOICE_SAMPLES,
+    fetch: fakeVoice,
+    sameFirst390: true, // 違いはチェック項目の欄の 1 行と印だけ
+    expect: (v) => v.state === '入口待ち' && v.entrance?.checks.voice?.card === true,
+    mark: w('entrance.voice.made', { n: 2 }),
+  },
+  // 入口: 文体を合わせる依頼なのに、見本が無い（6.3.2 (2)）
+  'entrance-novoice': {
+    script: voiceEntrance,
+    sameFirst390: true,
+    expect: (v) => v.state === '入口待ち' && v.entrance?.checks.voice?.card === false,
+    mark: W['entrance.voice.none'],
+  },
+  // 承認: 文体カードと比べた結果（6.3.2 (9)）
+  'approval-voice': {
+    script: voiceRows,
+    voiceSamples: VOICE_SAMPLES,
+    fetch: fakeVoice,
+    drive: toApproval,
+    expect: (v) => v.state === '承認待ち' && !!v.review?.voiceMatch && v.review.failed.length === 0,
+    mark: W['approval.voiceHeading'],
+    selector: '.voice-match',
+  },
+  // 設定: あなたの文体の見本を 2 件登録した（6.3.2 (10)）
+  'settings-voice': {
+    script: entrance(),
+    voiceSamples: VOICE_SAMPLES,
+    expect: (v) => v.state === '入口待ち',
+    mark: W['settings.voiceHeading'],
+    selector: '.voice-row',
+    path: () => '/settings',
   },
   // 送付の確認: 仕立てと保存先の形のチェックが済み、本人の番（仕立ては機械だけで、整えている間は撮れない）
   deliver: {

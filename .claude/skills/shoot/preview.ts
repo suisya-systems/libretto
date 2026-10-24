@@ -14,6 +14,7 @@ import { createFake, type ScriptEntry } from '../../../host/src/model/fake.ts'
 import { createInvoke } from '../../../host/src/model/invoke.ts'
 import { setKey } from '../../../host/src/model/keys.ts'
 import { createServer } from '../../../host/src/server/app.ts'
+import { saveVoiceSamples } from '../../../host/src/settings.ts'
 import { W } from '../../../page/src/wording.ts'
 import { type Ctx, SHOOT_KEY, STATES } from './states.ts'
 
@@ -48,6 +49,7 @@ const home = mkdtempSync(join(tmpdir(), `libretto-shoot-${name}-`))
 const ledger = initHome(home)
 if (def.openaiKey) setKey(home, 'openai', SHOOT_KEY)
 if (def.jevKey) setKey(home, 'jev', SHOOT_KEY)
+if (def.voiceSamples) saveVoiceSamples(home, { samples: def.voiceSamples })
 const fake = createFake(script)
 const invoke = createInvoke({
   ledger,
