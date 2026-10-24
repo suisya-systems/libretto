@@ -2,9 +2,11 @@
 // どの状態も、会話で依頼を 1 つ出して入口待ち（本人の番）に着いたところから始まる（preview.ts）
 import type { CaseAction, CaseView, HostStatus, IsolationCause } from '@libretto/shared/api'
 import { MARK } from '@libretto/shared/checks'
+import { transition } from '../../../host/src/case/transition.ts'
 import type { IsolationRecord } from '../../../host/src/checks/isolation.ts'
 import { paragraphUnits, plain, renderHtml } from '../../../host/src/checks/text.ts'
 import { type Fetch, sentencesOf } from '../../../host/src/facts/inventory.ts'
+import type { CardContent, Ledger } from '../../../host/src/ledger/ledger.ts'
 import type { ScriptEntry } from '../../../host/src/model/fake.ts'
 import { briefDraft, classified, goodChecks } from '../../../host/test/fixtures/entrance.ts'
 import { W, w } from '../../../page/src/wording.ts'
@@ -14,6 +16,7 @@ type Omit2<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never
 
 export type Ctx = {
   caseId: string
+  ledger: Ledger // 画面の操作では作れないもの（候補）を入れる
   view: () => Promise<CaseView>
   // 今の revision と新しい eventId を付けて送る。2xx でなければ投げる
   act: (a: Omit2<CaseAction, 'eventId' | 'expectedRevision'>) => Promise<void>
@@ -35,7 +38,38 @@ export type State = {
   isolation?: { level: HostStatus['isolation']; cause?: IsolationCause; last?: IsolationRecord }
   fetch?: Fetch // 出典の取り寄せの偽物（網に出ない。6.3.1 (5)）
   voiceSamples?: { title: string; url: string }[] // 会話の前に「あなたの文体の見本」を登録しておく（6.3.2 (10)）
+  google?: true // Google と連携済みにする（偽の設定と google.json。Google へはつながない。6.4 (7)）
 }
+
+const at = (h: number) => `2026-10-24T${String(h).padStart(2, '0')}:05:00.000+09:00`
+const CANDIDATES: [string, CardContent][] = [
+  [
+    'gmail:c1',
+    {
+      subject: '来週の定例で使う新サービスの紹介資料',
+      from: '山田 花子',
+      receivedAt: at(10),
+      link: 'https://mail.google.com/',
+      summary: '来週の定例で映す、新サービスの紹介スライドをまとめる',
+      proposal: { docType: 'スライド', destination: [{ kind: 'page', shared: false }] },
+      attachmentsNeeded: ['サービス概要.pdf'],
+      attachments: ['サービス概要.pdf', 'ロゴ.png'],
+    },
+  ],
+  [
+    'gmail:c2',
+    {
+      subject: 'お客さま向けのお知らせ文のお願い',
+      from: '佐藤 一郎',
+      receivedAt: at(9),
+      link: 'https://mail.google.com/',
+      summary: '料金の改定をお客さまに知らせる文を、貼り付け用にまとめる',
+      proposal: { docType: 'メモ', destination: [{ kind: 'paste' }] },
+      attachmentsNeeded: [],
+      attachments: [],
+    },
+  ],
+]
 
 const probed = (verdict: IsolationRecord['verdict']): IsolationRecord => ({
   at: '2026-10-24T05:03:00.000Z',
@@ -338,6 +372,40 @@ export const STATES: Record<string, State> = {
     sameFirst390: true, // 違いはチェック項目の欄の 1 行だけで、390 の 1 画面目には入らない
     expect: (v) => v.state === '入口待ち' && v.entrance?.checks.family === '別系統',
     mark: W['entrance.otherFamily'],
+  },
+  // ホーム: ラベルを付けたメールの依頼の候補（6.4 (7)）。Google は連携済みにして、候補は台帳に直接入れる
+  'home-candidates': {
+    script: entrance(),
+    google: true,
+    drive: async (ctx) => {
+      for (const [id, card] of CANDIDATES) {
+        const r = transition(ctx.ledger, {
+          type: 'candidate.presented',
+          candidate: {
+            candidateId: id,
+            source: 'gmail',
+            origin: '合図',
+            aiInstructionFlag: id === 'gmail:c2',
+            senderKey: id,
+          },
+          card,
+        })
+        if (!r.ok) throw new Error(`candidate ${id}: ${r.reason}`)
+      }
+    },
+    expect: (v) => v.state === '入口待ち',
+    mark: W['home.candHeading'],
+    selector: '.cand',
+    path: () => '/',
+  },
+  // 設定: Google と連携済み（6.4 (7)）
+  'settings-google': {
+    script: entrance(),
+    google: true,
+    expect: (v) => v.state === '入口待ち',
+    mark: W['settings.google.connected'],
+    path: () => '/settings',
+    sameFirst390: true,
   },
   // 設定: API キーが未設定
   'settings-unset': {
