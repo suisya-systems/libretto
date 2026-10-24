@@ -51,7 +51,7 @@ export const SAY = {
   saveFailed: '保存できなかったので中止しました',
   toolFailed: '動作環境の不具合で中止しました',
   costCap: '費用の上限に達したので中止しました',
-  isolationLeaked: '書く側にチェック項目が見えたおそれがあるので中止しました',
+  isolationLeaked: 'ライターにチェック項目が見えたおそれがあるので中止しました',
 } as const
 
 const LIMIT_SAY = { 往復上限: SAY.roundLimit, 直らない: SAY.stuck, 判定できない: SAY.unjudgeable } as const
