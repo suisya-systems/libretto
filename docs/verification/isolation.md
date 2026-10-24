@@ -27,4 +27,4 @@ npm run verify:isolation
 | OS | 日付 | 結果 | ファイル |
 |---|---|---|---|
 | macOS | まだ流していない（実機が手元に無い。オーナーに依頼） | — | — |
-| Linux / WSL2 | まだ流していない | — | — |
+| Linux / WSL2（WSL2・Node 22.17・claude 2.1.310） | 2026-10-24 | 30/30 PASS（隔離の水準 strong、点検 hidden・対照で語が見える） | [isolation-linux-2026-10-24.md](./isolation-linux-2026-10-24.md) |
