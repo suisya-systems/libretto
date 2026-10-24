@@ -27,6 +27,7 @@ export type State = {
   selector?: string // mark に加えて、あるまで撮らない要素（本文など）
   path?: (caseId: string) => string // 開く画面。既定は案件の面
   openaiKey?: true // 会話の前に OpenAI の API キーを入れておく（別系統で書く・設定済みの面）
+  jevKey?: true // 会話の前に Jev の API キーを入れておく（項目の点検と判定に Jev を使う）
   sameFirst390?: true // 390 の 1 画面目が他の状態と同じでよい（違いが下の方にだけある）。重複の検査から外す
   // チェック項目を隠す仕組みの水準・原因・前回の確認（8.10。既定は strong・確認なし）
   isolation?: { level: HostStatus['isolation']; cause?: IsolationCause; last?: IsolationRecord }
@@ -95,8 +96,8 @@ const draft = (k: number): Row => [
     },
   },
 ]
-// 判定役の Claude の答え（C02・C05 は本文全体、C06 は段落ごと）
-const verdicts = (k: number, ok: boolean): Row => [
+// 判定役の Claude の答え（C02・C05 は本文全体、C06 は段落ごと）。jev なら C06 は Jev が決めるので聞かれない
+const verdicts = (k: number, ok: boolean, jev = false): Row => [
   '判定役・文章',
   say({
     results: [
@@ -108,14 +109,37 @@ const verdicts = (k: number, ok: boolean): Row => [
           : '話し合いの流れに沿って書かれていて、何が決まったのかが本文の後半まで出てきません。',
       },
       { id: 'C05', units: [{ index: 0, yes: true }], reason: 'ふだんの言い回しで書かれています。' },
-      {
-        id: 'C06',
-        units: paragraphUnits(body(k)).map((_, index) => ({ index, yes: true })),
-        reason: 'どの段落も、読み手が次にすることにつながっています。',
-      },
+      ...(jev
+        ? []
+        : [
+            {
+              id: 'C06',
+              units: paragraphUnits(body(k)).map((_, index) => ({ index, yes: true })),
+              reason: 'どの段落も、読み手が次にすることにつながっています。',
+            },
+          ]),
     ],
   }),
 ]
+// Jev の答え。送られた qid に関係なく全部を並べる（使われるのは送られた分だけ）
+// 項目の点検（同系統で書いたとき。項目ごとに 1 要求）と、判定の C06（段落ごとに 1 要求）
+const inspected: Row[] = goodChecks.map(() => [
+  '事実係・命題',
+  say({
+    answers: Object.fromEntries(
+      goodChecks.flatMap((c) => [
+        [`${c.id}:derivable`, 0.8],
+        [`${c.id}:positive`, 0.9],
+        [`${c.id}:shapeOnly`, 0.1],
+      ]),
+    ),
+  }),
+])
+const jevJudged = (k: number): Row[] => {
+  const n = paragraphUnits(body(k)).length
+  const answers = Object.fromEntries(Array.from({ length: n }, (_, i) => [`C06:${i}`, 0.9]))
+  return Array.from({ length: n }, (): Row => ['判定役・命題', say({ answers })])
+}
 
 // おすすめのまま、確認しながら進める
 const approve = async (ctx: Ctx) => {
@@ -177,7 +201,7 @@ export const STATES: Record<string, State> = {
   'settings-unset': {
     script: entrance(),
     expect: (v) => v.state === '入口待ち',
-    mark: W['settings.key.unsetNote'],
+    mark: W['settings.openai.unsetNote'],
     path: () => '/settings',
   },
   // 設定: API キーが設定済み
@@ -254,6 +278,25 @@ export const STATES: Record<string, State> = {
     drive: toApproval,
     expect: allPassed,
     mark: W['band.isolationBroken'],
+    selector: '.doc-body',
+  },
+  // 承認: Jev の鍵があり、段落ごとの項目を判定専用の AI が確かめた（注記の 1 行。7.6 (6)）
+  'approval-jev': {
+    script: [
+      ...entrance(),
+      ...inspected,
+      draft(1),
+      ...jevJudged(1),
+      verdicts(1, false, true),
+      draft(2),
+      ...jevJudged(2),
+      verdicts(2, true, true),
+    ],
+    jevKey: true,
+    sameFirst390: true, // 違いはチェックの結果の注記の 1 行だけで、390 の 1 画面目には入らない
+    drive: toApproval,
+    expect: (v) => allPassed(v) && !!v.review?.jev,
+    mark: w('approval.judgeModel', { units: paragraphUnits(body(2)).length }),
     selector: '.doc-body',
   },
   // 送付の確認: 仕立てと保存先の形のチェックが済み、本人の番（仕立ては機械だけで、整えている間は撮れない）

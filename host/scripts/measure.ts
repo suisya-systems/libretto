@@ -1,0 +1,139 @@
+// 受け入れ (5) と判定不能の帯の見直しの測定（docs/implementation.md 7.6 (11)）。案件フォルダを読むだけで、何も書かず、モデルを呼ばない
+//   npm run measure -- codex <別系統で書いた案件 id> <同系統で書いた案件 id>
+//   npm run measure -- band
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { Review } from '@libretto/shared/checks'
+import { ChecksFile } from '@libretto/shared/ledger'
+import { caseDir, resolveHome } from '../src/ledger/db.ts'
+
+const read = <T>(path: string, schema: { parse: (v: unknown) => T }) =>
+  schema.parse(JSON.parse(readFileSync(path, 'utf-8')))
+
+// --- 受け入れ (5): 別系統と同系統の確認項目と、第 1 版の本文の判定
+
+export type CodexRow = {
+  family: '別系統' | '同系統'
+  checks: number
+  notWritten: number // 「依頼に書いていない」項目（canary を除く）
+  firstDraft?: Record<'pass' | 'fail' | 'unable' | 'skipped', number>
+}
+
+// 今の組（番号の一番大きい checks*.json）
+export function codexRow(dir: string): CodexRow {
+  const names = readdirSync(join(dir, 'checks')).filter((f) => /^checks(\.v\d+)?\.json$/.test(f))
+  const k = (f: string) => Number(/\.v(\d+)\./.exec(f)?.[1] ?? 1)
+  const latest = names.sort((a, b) => k(a) - k(b)).at(-1)
+  if (!latest) throw new Error(`no checks in ${dir}`)
+  const set = read(join(dir, 'checks', latest), ChecksFile)
+  const drafted = set.checks.filter((c) => !c.canary && c.phase === '本文')
+  const path = join(dir, 'review-01-a.json')
+  const r = existsSync(path) ? read(path, Review) : undefined
+  const count = (v: string) => r?.results.filter((x) => x.verdict === v).length ?? 0
+  return {
+    family: set.family,
+    checks: drafted.length,
+    notWritten: drafted.filter((c) => c.selfReport === '書いていない').length,
+    ...(r && {
+      firstDraft: { pass: count('pass'), fail: count('fail'), unable: count('unable'), skipped: count('skipped') },
+    }),
+  }
+}
+
+// 比べられないときは理由を返す（系統が想定と違う・第 1 版をまだ判定していない・確かめていない項目がある）
+export function codexVerdict(a: CodexRow, b: CodexRow): string | undefined {
+  if (a.family !== '別系統' || b.family !== '同系統') return `系統が違います（A=${a.family}, B=${b.family}）`
+  if (!a.firstDraft || !b.firstDraft) return '第 1 版の判定がまだありません'
+  if (a.firstDraft.skipped || b.firstDraft.skipped)
+    return '第 1 版で機械判定が落ち、まだ確かめていない項目があります。依頼を変えて出し直してください'
+  return undefined
+}
+
+// --- 帯の見直し: Jev の単位の分布と、Claude に回した単位の一致
+
+export type BandUnit = {
+  caseId: string
+  version: number
+  checkId: string
+  index: number
+  noul: number
+  claude: boolean
+  yes: boolean | null
+}
+
+export function bandUnits(home: string): BandUnit[] {
+  const root = join(home, 'cases')
+  if (!existsSync(root)) return []
+  return readdirSync(root).flatMap((caseId) =>
+    readdirSync(join(root, caseId))
+      .filter((f) => /^review-\d+-(a|f\d+)\.json$/.test(f))
+      .flatMap((f) => {
+        const r = read(join(root, caseId, f), Review)
+        return r.results.flatMap((x) =>
+          (x.units ?? []).flatMap((u) =>
+            u.noul === undefined
+              ? []
+              : [
+                  {
+                    caseId,
+                    version: r.version,
+                    checkId: x.id,
+                    index: u.index,
+                    noul: u.noul,
+                    claude: !!u.claude,
+                    yes: u.yes,
+                  },
+                ],
+          ),
+        )
+      }),
+  )
+}
+
+export function bandReport(units: readonly BandUnit[]) {
+  const bins = Array.from(
+    { length: 20 },
+    (_, i) => units.filter((u) => Math.min(19, Math.floor(u.noul * 20)) === i).length,
+  )
+  // Claude が決めた単位だけで比べる（null は数えない）
+  const decided = units.filter((u) => u.claude && u.yes !== null)
+  const agree = decided.filter((u) => u.noul > 0.5 === u.yes).length
+  const edges = units.filter((u) => (u.noul >= 0.25 && u.noul <= 0.35) || (u.noul >= 0.65 && u.noul <= 0.75))
+  return { total: units.length, bins, decided: decided.length, agree, edges }
+}
+
+function main(argv: string[]) {
+  const home = resolveHome()
+  if (argv[0] === 'codex' && argv[1] && argv[2]) {
+    const [a, b] = [codexRow(caseDir(home, argv[1])), codexRow(caseDir(home, argv[2]))]
+    for (const [name, r] of [
+      ['A', a],
+      ['B', b],
+    ] as const)
+      console.log(
+        `${name}: ${r.family} / items ${r.checks} / not in request ${r.notWritten} / first draft ${JSON.stringify(r.firstDraft ?? null)}`,
+      )
+    const why = codexVerdict(a, b)
+    console.log(
+      why
+        ? `inconclusive: ${why}`
+        : `diff: not in request ${a.notWritten - b.notWritten}, failed ${(a.firstDraft?.fail ?? 0) - (b.firstDraft?.fail ?? 0)}`,
+    )
+    return
+  }
+  if (argv[0] === 'band') {
+    const r = bandReport(bandUnits(home))
+    console.log(`units ${r.total}`)
+    for (const [i, n] of r.bins.entries()) console.log(`${(i / 20).toFixed(2)}-${((i + 1) / 20).toFixed(2)} ${n}`)
+    console.log(`in band, decided by the other reader: ${r.decided}, agree with the 0.5 side: ${r.agree}`)
+    console.log('edge units (open the draft and mark whether the answer is right):')
+    for (const u of r.edges)
+      console.log(`  ${u.caseId} v${u.version} ${u.checkId} #${u.index} noul=${u.noul.toFixed(3)}`)
+    return
+  }
+  console.log('usage: npm run measure -- codex <case A> <case B> | band')
+  process.exitCode = 2
+}
+
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) main(process.argv.slice(2))

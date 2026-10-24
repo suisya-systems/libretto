@@ -425,12 +425,12 @@ describe('judge() の段取り（7.3）', () => {
   })
 
   it('Claude の出力の受け入れ規則と、指示の例', () => {
-    const asked = [{ id: 'C02', ask: 'q', scope: 'section', units: 2 }]
+    const asked = [{ id: 'C02', ask: 'q', scope: 'section', units: [0, 1] }]
     expect(replyViolations(JUDGE_EXAMPLE, asked)).toEqual([])
     expect(JudgeReply.safeParse(JUDGE_EXAMPLE).success).toBe(true)
     expect(JUDGE_INSTRUCTION).toContain(JSON.stringify(JUDGE_EXAMPLE))
     const one = { id: 'C02', units: [{ index: 0, yes: true }], reason: 'r' }
-    expect(replyViolations({ results: [one] }, asked).join()).toContain('index 0〜1')
+    expect(replyViolations({ results: [one] }, asked).join()).toContain('index 0・1')
     expect(replyViolations({ results: [] }, asked).join()).toContain('ちょうど 1 つ')
     expect(
       replyViolations(

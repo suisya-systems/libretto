@@ -23,9 +23,11 @@ export const MODEL_BY_ROLE: Record<Role, { family: Family; model: string }> = {
   隔離の点検: { family: 'claude', model: 'claude-haiku-5-5' },
 }
 
-// 別系統が使えないときの受け皿（設計書 5.8.1）。呼ぶ側が Job.fallback で選ぶ（6.2.2 (3)）。鍵の有無で選ぶのは Issue 16
+// 別系統・Jev が使えないときの受け皿（設計書 5.8.1）。呼ぶ側が Job.fallback で選ぶ（6.2.2 (3)・7.6 (8)）
 export const FALLBACK: Partial<Record<Role, { family: Family; model: string }>> = {
   '下書き役・確認項目': { family: 'claude', model: 'claude-opus-5-5' },
+  // supportsClaim の帯の中・Jev が使えないとき（7.6 (8)）
+  '事実係・命題': { family: 'claude', model: 'claude-opus-5-5' },
 }
 
 // 表に無い役割は既定に落とさず例外（6.1）

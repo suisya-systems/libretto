@@ -272,6 +272,9 @@ export const ChecksFile = z.object({
   checks: z.array(Check),
   family: z.enum(['別系統', '同系統']),
   fallback: FamilyFallback.optional(), // 同系統のときだけ（6.1.3 (5)）
+  // Jev の項目の点検（同系統のときだけ。7.6 (7)）。shapeOnly は入口の面で書く側にも伝わる側に出す項目
+  inspected: z.literal(true).optional(),
+  shapeOnly: z.array(z.string()).optional(),
   approvedFingerprint: z.string().optional(),
 })
 export type ChecksFile = z.infer<typeof ChecksFile>

@@ -7,7 +7,9 @@ import { causeOf, checkIsolation, probeDir } from './checks/isolation.ts'
 import { callsDir, caseDir, initHome, resolveHome } from './ledger/db.ts'
 import { createClaudeCli, resolveClaude } from './model/claude-cli.ts'
 import { createInvoke, type Job } from './model/invoke.ts'
+import { createJev } from './model/jev.ts'
 import { readKey } from './model/keys.ts'
+import { JEV_DAILY_LIMIT } from './model/noul.ts'
 import { createOpenai } from './model/openai.ts'
 import { settleOrphans } from './model/orphans.ts'
 import { checkSandbox, createSandbox, MIN_CLAUDE, type Sandbox } from './model/sandbox.ts'
@@ -65,8 +67,10 @@ const invokeWith = (box: Sandbox) =>
           sandboxCheck.claudeOk ? undefined : `claude ${sandboxCheck.claudeVersion ?? 'unknown'} < ${MIN_CLAUDE}`,
       }),
       openai: createOpenai({ key: () => readKey(home, 'openai'), usdJpy }),
+      jev: createJev({ key: () => readKey(home, 'jev'), usdJpy }),
     },
     caps: () => ({ caseCapYen: 1500, monthCapYen: null }),
+    dailyLimits: { jev: JEV_DAILY_LIMIT },
     // 費用上限で案件を止める（6.1.1 (1)）。revision は確かめない。止めたら画面に知らせる（6.2.2 (1)）
     onCostCap: (n) => {
       const r = transition(ledger, { type: 'cost.cap', by: '費用', ...n })

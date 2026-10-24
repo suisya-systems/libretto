@@ -1,5 +1,6 @@
 // 承認の面（画面 4。docs/implementation.md 6.2.5 (8)）。承認待ち kind=完成稿。本文・前の版との違い・チェックの結果を 1 画面に
 import { type CaseView, DraftDiff, type HostStatus } from '@libretto/shared/api'
+import { JEV_PARTIAL } from '@libretto/shared/checks'
 import { useEffect, useState } from 'react'
 import { Link } from 'wouter'
 import type { z } from 'zod'
@@ -219,10 +220,25 @@ export function ApprovalFace({
                 </ul>
               </>
             )}
-            {(c.review?.familyNote || c.review?.jevNote) && (
+            {(c.review?.familyNote || c.review?.jevNote || c.review?.jev) && (
               <ul className="notes muted small">
                 {c.review?.familyNote && <li>{W['approval.sameFamily']}</li>}
-                {c.review?.jevNote && <li>{W['approval.noJudgeModel']}</li>}
+                {c.review?.jev && (
+                  <li>
+                    {w('approval.judgeModel', { units: c.review.jev.units })}
+                    {c.review.jev.unsure > 0 && (
+                      <>
+                        {'。'}
+                        {w('approval.judgeModelUnsure', { unsure: c.review.jev.unsure })}
+                      </>
+                    )}
+                  </li>
+                )}
+                {c.review?.jevNote && (
+                  <li>
+                    {W[c.review.jevNote === JEV_PARTIAL ? 'approval.judgeModelPartial' : 'approval.noJudgeModel']}
+                  </li>
+                )}
               </ul>
             )}
           </div>

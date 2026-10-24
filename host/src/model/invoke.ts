@@ -34,7 +34,8 @@ export type Outcome =
   | ({ ok: false; kind: 'unavailable'; why?: Why; detail: string } & Meta)
   | ({ ok: false; kind: 'budget'; scope: CapScope; detail: string } & Meta)
 
-export type Why = 'auth_expired' | 'rate_limited'
+// limit は 1 日の呼び出しの上限で送らなかった（invoke だけが付ける。7.6 (4)）
+export type Why = 'auth_expired' | 'rate_limited' | 'limit'
 
 // 中身（claude-cli / openai / jev / fake）が返す生の結果。costYen は null = 不明、0 = 実額 0（6.1.1 (3)）
 export type Call = Pick<Job, 'role' | 'caseId' | 'instruction' | 'materials' | 'access'> & {
@@ -93,6 +94,9 @@ type Deps = {
   settleMs?: number // 止めた後に中身の決着（子孫の終了まで）を待つ上限（6.1.2 (2)）
   retryWaitMs?: number // 混雑の再試行の前に待つ時間（6.1.2 (3)）
   jobsDir?: (caseId: string) => string // 役割に渡した Job の記録の置き場（8.4・8.10 (3)）
+  // 系統ごとの混雑の再試行の回数と待ち時間。既定は 1 回・retryWaitMs、jev は 2 回・1 秒（7.6 (2)）
+  retry?: Partial<Record<Family, { times: number; waitMs: number }>>
+  dailyLimits?: Partial<Record<Family, number>> // 系統ごとの 1 日の呼び出しの上限（7.6 (4)）
 }
 
 const sha = (v: string | Buffer) => createHash('sha256').update(v).digest('hex')
@@ -139,6 +143,8 @@ export function createInvoke(deps: Deps) {
   const newCallId = deps.newCallId ?? randomUUID
   const settleMs = deps.settleMs ?? 10_000
   const retryWaitMs = deps.retryWaitMs ?? 60_000
+  const retryOf = (f: Family) =>
+    deps.retry?.[f] ?? (f === 'jev' ? { times: 2, waitMs: 1_000 } : { times: 1, waitMs: retryWaitMs })
 
   // 中身の例外・停止・時間切れを結果に写す。例外は投げない
   async function run(backend: Backend, call: Omit<Call, 'signal'>, job: Job): Promise<Ended> {
@@ -197,7 +203,9 @@ export function createInvoke(deps: Deps) {
     const { maxYen } = job.limits
     let costYen = 0
     let materials = job.materials
-    let retried = false
+    let retried = 0
+    const retry = retryOf(family)
+    const daily = deps.dailyLimits?.[family]
     // 中身の files は呼び出しごとの差分（6.1.2 (6)）。言い直しで足りない分だけ書けば揃うよう、この invoke の中で合わせる
     const written = new Set<string>()
     // 書けなければ例外のまま上へ（保存の帯。8.10 (3)）
@@ -223,8 +231,14 @@ export function createInvoke(deps: Deps) {
         model,
         holdYen: maxYen,
         ...deps.caps(),
+        ...(daily !== undefined && { daily }),
       })
-      if (!reserved.ok) return capped(reserved.scope, callId)
+      // 1 日の上限は案件を止めず、送らなかったことだけを返す（呼ぶ側が受け皿に回す。7.6 (4)）
+      if (!reserved.ok) {
+        if (reserved.scope === '1日')
+          return { ok: false, kind: 'unavailable', why: 'limit', detail: DETAIL.unavailable, costYen, family, model }
+        return capped(reserved.scope, callId)
+      }
 
       const call = {
         callId,
@@ -254,10 +268,10 @@ export function createInvoke(deps: Deps) {
 
       if ('fail' in ended) {
         if (ended.fail === 'budget') return capped('呼び出し', callId)
-        if ('why' in ended && ended.why === 'rate_limited' && !retried) {
-          retried = true
+        if ('why' in ended && ended.why === 'rate_limited' && retried < retry.times) {
+          retried++
           attempt--
-          await sleep(retryWaitMs, job.signal)
+          await sleep(retry.waitMs, job.signal)
           continue
         }
         const why = 'why' in ended && ended.why ? { why: ended.why } : {}

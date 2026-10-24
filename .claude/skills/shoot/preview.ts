@@ -47,10 +47,11 @@ const script: ScriptEntry[] = def.script.map(([role, reply]) => {
 const home = mkdtempSync(join(tmpdir(), `libretto-shoot-${name}-`))
 const ledger = initHome(home)
 if (def.openaiKey) setKey(home, 'openai', SHOOT_KEY)
+if (def.jevKey) setKey(home, 'jev', SHOOT_KEY)
 const fake = createFake(script)
 const invoke = createInvoke({
   ledger,
-  backends: { claude: fake.backend, openai: fake.backend },
+  backends: { claude: fake.backend, openai: fake.backend, jev: fake.backend },
   caps: () => ({ caseCapYen: 1500, monthCapYen: null }),
   onCostCap: () => {},
   log: () => {},
