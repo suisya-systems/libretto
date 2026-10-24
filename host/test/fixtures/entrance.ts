@@ -87,6 +87,7 @@ export const briefDraft = {
   brief: {
     subject: 'ブレストで決まった 3 つの方針と、その理由',
     wanted: [],
+    gather: [],
     audience: '一般の読者。前提知識なし',
     shape: '2,500 字前後、見出し 4〜5',
     voice: '合わせない',

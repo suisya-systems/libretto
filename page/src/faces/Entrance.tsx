@@ -179,6 +179,7 @@ function EntranceSet(p: {
     [W['entrance.brief.docType'], b.docType],
     [W['entrance.brief.subject'], b.subject],
     [W['entrance.brief.wanted'], b.wanted.length ? b.wanted.join('、') : W['entrance.none']],
+    [W['entrance.brief.gather'], b.gather.length ? b.gather.join('、') : W['entrance.none']],
     [W['entrance.brief.audience'], b.audience],
     [W['entrance.brief.destinations'], b.destinations.map(dest).join('、')],
     [W['entrance.brief.shape'], b.shape],
@@ -203,6 +204,7 @@ function EntranceSet(p: {
             ))}
           </dl>
           {b.wanted.length > 0 && <p className="wanted-note">{W['entrance.wantedNote']}</p>}
+          {b.gather.length > 0 && <p className="wanted-note gather-note">{W['entrance.gatherNote']}</p>}
         </section>
 
         {e.assumptions.length > 0 && (

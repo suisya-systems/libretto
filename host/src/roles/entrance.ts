@@ -46,10 +46,11 @@ const answerText = (i: Undecided, a: Answer) =>
 // --- 下書き役の出力の型（6.2.2 (2)(3)）
 
 // docType・destinations・materials はホストが案件の行と intake から入れる。
-// wanted は出力では必須（書き落としを [] と読むと素通りする。6.2.4 (1)）
+// wanted・gather は出力では必須（書き落としを [] と読むと素通りする。6.2.4 (1)・6.3.3 (1)）
 export const BriefDraft = z.object({
   brief: Brief.omit({ docType: true, destinations: true, materials: true }).extend({
     wanted: Brief.shape.wanted.unwrap(),
+    gather: Brief.shape.gather.unwrap(),
   }),
   assumptions: z.array(z.object({ id: z.string().min(1), text: z.string().min(1), why: z.string().min(1) })),
 })
@@ -59,6 +60,10 @@ export type ChecksDraft = z.infer<typeof ChecksDraft>
 
 // 待つものを仮定に書いた形（2026-10-24 の実ホストで出た崩れ方。6.2.4 (1)）
 const PENDING_MATERIAL = /本人(?:から|に|の)[^。]{0,20}?(?:もら|受け取|預か|渡し|提供)/
+// ウェブで集めるものを仮定に書いた形（2026-10-25 の実モデル検証の A2。6.3.3 (1)）
+const GATHER_VERB = /集め|調べ|探し/
+const GATHER_PLACE = /公式|公開|ウェブ|ネット|サイト|お知らせ|更新履歴/
+const HAS_URL = /https?:\/\//
 
 export function briefViolations(d: BriefDraft): string[] {
   const v: string[] = []
@@ -66,6 +71,13 @@ export function briefViolations(d: BriefDraft): string[] {
     v.push('assumptions の id は重ならないようにしてください')
   const b = d.brief
   if (new Set(b.wanted).size !== b.wanted.length) v.push('wanted に同じものを 2 回書かないでください')
+  if (new Set(b.gather).size !== b.gather.length) v.push('gather に同じものを 2 回書かないでください')
+  if (b.gather.length && b.sources !== '出典付き')
+    v.push('ウェブで集めた資料を使う依頼は sources を "出典付き" にしてください')
+  if (b.sources === '出典付き' && !b.gather.length && !b.wanted.length && !HAS_URL.test(b.subject))
+    v.push(
+      '出典付きの依頼なのに、資料をどこからも受け取りません。ウェブで集める公開の情報は gather に、本人に渡してほしいものは wanted に書いてください',
+    )
   const texts = [
     b.subject,
     b.audience,
@@ -73,6 +85,7 @@ export function briefViolations(d: BriefDraft): string[] {
     b.deadline ?? '',
     ...b.mustNot,
     ...b.wanted,
+    ...b.gather,
     ...d.assumptions.flatMap((a) => [a.text, a.why]),
   ]
   for (const s of texts)
@@ -82,6 +95,10 @@ export function briefViolations(d: BriefDraft): string[] {
       const m = PENDING_MATERIAL.exec(a.text)
       if (m) v.push(`仮定 ${a.id} の「${m[0]}」: 本人に渡してほしいものは wanted に書き、仮定から外してください`)
     }
+  if (!b.gather.length)
+    for (const a of d.assumptions)
+      if (GATHER_VERB.test(a.text) && GATHER_PLACE.test(a.text))
+        v.push(`仮定 ${a.id}「${a.text}」: ウェブで集めるものは gather に書き、仮定から外してください`)
   return v
 }
 
@@ -101,6 +118,7 @@ export const BRIEF_EXAMPLE: BriefDraft = {
   brief: {
     subject: '先週のブレストで決まった 3 つの方針と、その理由',
     wanted: ['ブレストのメモか記録'],
+    gather: [],
     audience: '社内の他部署の人。ブレストには出ていない',
     shape: '2,000 字前後、見出し 3〜4',
     voice: '合わせない',
@@ -108,6 +126,20 @@ export const BRIEF_EXAMPLE: BriefDraft = {
     mustNot: [],
   },
   assumptions: [{ id: 'A1', text: '文末はです・ます', why: '社内向けの読み物なので' }],
+}
+// 出典付きでウェブから集める依頼の例（6.3.3 (1)）
+export const BRIEF_GATHER_EXAMPLE: BriefDraft = {
+  brief: {
+    subject: '今月の東京の新しい美術展を 3 つ紹介する',
+    wanted: [],
+    gather: ['今月東京で始まる美術展の公式の案内'],
+    audience: '美術に興味のある一般の人',
+    shape: '1,500 字前後、見出し 3',
+    voice: '合わせない',
+    sources: '出典付き',
+    mustNot: [],
+  },
+  assumptions: [{ id: 'A1', text: '会期と場所を必ず入れる', why: '読んだ人が行けるように' }],
 }
 
 const BRIEF_INSTRUCTION = `あなたは libretto の「下書き役（依頼書）」です。本人が会話で頼んだ文書づくりの依頼を読み、作る人に渡す依頼書と、聞かずに決めた点（仮定）の一覧を書きます。
@@ -117,6 +149,7 @@ const BRIEF_INSTRUCTION = `あなたは libretto の「下書き役（依頼書�
 依頼書の欄:
 - subject: 書く内容。何について書くか（題材）と、入れる中身（本人が言ったこと）を 1〜3 文で。「本人の指示」で題材や中身が変わったら、それに合わせて書き直す
 - wanted: 本人に渡してほしいもの。本文の中身を依頼の文だけでは書けず、本人しか持っていないもの（メモ・記録・数字・過去の文章など）が要るなら、それを 1 件ずつ短い名詞句で書く（例「ブレストのメモか記録」）。依頼の文だけで書けるなら []。待つものを assumptions に「本人からもらう」と書かない
+- gather: libretto がウェブで集めるもの。本文の中身に、公開されていて誰でもウェブで読める情報（公式のお知らせ・更新履歴・公開の統計など）が要るなら、それを 1 件ずつ書く（3 件まで）。1 件は、それだけ読んで探せる公開の情報の名前にする（例「この一週間の Claude Code の公式の更新履歴」）。社内の名前・数・人の名前は入れない。社内のメール・ドライブ・Slack にあるものや本人しか持っていないものは wanted に書く。gather があるときは sources を "${Brief.shape.sources.options[0]}" にする。集める先を assumptions に書かない
 - audience: 誰が読むか（どんな人で、何を知っているか）
 - shape: 分量と形（例「2,500 字前後、見出し 4〜5」）。本人が言っていなければ、文書の種類と読む人に合う形を決め、仮定に入れる
 - voice: 本人の文体に合わせるなら "${Brief.shape.voice.options[0]}"、そうでなければ "${Brief.shape.voice.options[1]}"
@@ -130,7 +163,9 @@ assumptions には、本人が言っていないのにあなたが決めた点�
 
 出力は次の形の JSON だけにしてください（形だけの例。中身は依頼に合わせて書く）。
 ${JSON.stringify(BRIEF_EXAMPLE)}
-voice は ${list(Brief.shape.voice.options)}、sources は ${list(Brief.shape.sources.options)} のどれかをそのまま書く。wanted と mustNot は無ければ []。deadline は本人が言っていなければ欄ごと書かない（null にしない）。`
+ウェブで集める依頼の例:
+${JSON.stringify(BRIEF_GATHER_EXAMPLE)}
+voice は ${list(Brief.shape.voice.options)}、sources は ${list(Brief.shape.sources.options)} のどれかをそのまま書く。wanted・gather・mustNot は無ければ []。deadline は本人が言っていなければ欄ごと書かない（null にしない）。`
 
 // 指示に書く列挙と例は型（zod）と判定できるものの表から作る。例は型と 7.2 に通ることをテストで確かめる（6.2.2 (3)・6.2.5 (1)）
 const fnLines = DRAFTER_FNS.map((f) => {

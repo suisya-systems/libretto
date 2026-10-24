@@ -126,6 +126,15 @@ describe('claude-cli: 起こし方（6.1.2 (1)(4)）', () => {
     await expect(backend()(call({ mode: 'ok' }, { access: 'read' }))).rejects.toThrow(/needs workdir/)
   })
 
+  it('search の道具は WebSearch だけ（WebFetch は渡さない）。空の一時ディレクトリで起こす（6.3.3 (2)）', async () => {
+    await backend()(call({ mode: 'ok', record: join(dir, 'record.json') }, { access: 'search', workdir: dir }))
+    const rec = record()
+    expect(rec.argv[rec.argv.indexOf('--tools') + 1]).toBe('WebSearch')
+    // 呼び出しの後に消える一時ディレクトリ（作業場ではない）
+    expect(rec.cwd).not.toBe(dir)
+    expect(existsSync(rec.cwd)).toBe(false)
+  })
+
   it('ファイルの材料は read / write で作業場の中にあるときだけ', () => {
     const file = join(dir, 'p.png')
     const m = [{ name: '画像', file, mime: 'image/png' }]

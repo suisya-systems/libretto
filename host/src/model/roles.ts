@@ -19,6 +19,8 @@ export const MODEL_BY_ROLE: Record<Role, { family: Family; model: string }> = {
   '事実係・分類': { family: 'claude', model: 'claude-haiku-5-5' },
   '事実係・命題': { family: 'jev', model: 'jev' },
   '事実係・描写': { family: 'claude', model: 'claude-sonnet-5-5' },
+  // 道具は WebSearch だけ。取り寄せはホストの fetchSource（6.3.3 (2)）
+  '事実係・集め': { family: 'claude', model: 'claude-sonnet-5-5' },
   // 起動のたびに 2 回動かすので安いモデル。隔離を作るのは起こし方で、モデルは関係しない（8.10 (4)）
   隔離の点検: { family: 'claude', model: 'claude-haiku-5-5' },
 }

@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import type { CaseState } from '@libretto/shared/api'
 import type { CaseRecord } from '@libretto/shared/ledger'
 import { deliver, tailor } from '../deliver/run.ts'
+import { gatherSources } from '../facts/gather.ts'
 import { type Fetch, fetchCached, materialsDir } from '../facts/inventory.ts'
 import type { Ledger } from '../ledger/ledger.ts'
 import type { Job, Outcome } from '../model/invoke.ts'
@@ -50,12 +51,20 @@ export function createRunner(d: Deps) {
     return moved
   }
 
-  // 材料待ち → 出典の取り寄せ → 作業場（承認した組の brief.md と資料の写し）→ T11（6.2.3 (2)・6.3.1 (5)）
+  // 材料待ち → 集めるもの → 出典の取り寄せ → 作業場（承認した組の brief.md と資料の写し）→ T11（6.2.3 (2)・6.3.1 (5)・6.3.3）
   async function assemble(c: CaseRecord, signal: AbortSignal): Promise<boolean> {
     const set = approvedSet(home, ledger, c.caseId)
     if (!set) throw new Error(`no approved brief for ${c.caseId}`)
     const src = materialsDir(home, c.caseId)
     mkdirSync(src, { recursive: true, mode: 0o700 })
+    // 依頼書の「集めるもの」をウェブで探す。null は止めた・ログインし直し待ち・費用の上限（6.3.3 (5)）
+    const gathered = await gatherSources(
+      { home, invoke: d.invoke, onAuthExpired, ...(d.now && { now: d.now }), ...(d.fetch && { fetch: d.fetch }) },
+      c.caseId,
+      set.brief.gather,
+      signal,
+    )
+    if (gathered === null || signal.aborted) return false
     // 本人の資料と依頼書に出てくる URL を取り寄せ、資料の正本に足す（作り手は網に出られない）
     const pasted = readdirSync(src)
       .filter((f) => f.startsWith('pasted-'))
@@ -65,7 +74,8 @@ export function createRunner(d: Deps) {
       ...set.brief.materials.map((m) => m.where),
       ...pasted.map((f) => readFileSync(join(src, f), 'utf-8')),
     ].join('\n')
-    const urls = [...new Set(text.match(URL_IN_TEXT) ?? [])].slice(0, MAX_SOURCES)
+    // 本人の URL（5 件まで）の後に集めたもの（5 件まで）
+    const urls = [...new Set([...new Set(text.match(URL_IN_TEXT) ?? [])].slice(0, MAX_SOURCES).concat(gathered))]
     const got = await fetchCached(home, c.caseId, urls, signal, d.fetch)
     if (signal.aborted) return false
     let k = 0
@@ -81,7 +91,8 @@ export function createRunner(d: Deps) {
     // 作業場の materials/ は写し。照合は正本だけを読む（作り手は作業場に書ける）
     const work = workDir(home, c.caseId)
     mkdirSync(join(work, 'materials'), { recursive: true, mode: 0o700 })
-    for (const f of readdirSync(src)) copyFileSync(join(src, f), join(work, 'materials', f))
+    // gathered.json（集め役の出力）は写さない。作り手が読むのは資料の本文だけ（6.3.3 (6)）
+    for (const f of readdirSync(src)) if (f.endsWith('.md')) copyFileSync(join(src, f), join(work, 'materials', f))
     writeAtomic(join(work, 'brief.md'), renderBrief(set.brief))
     if (signal.aborted) return false
     return emit(

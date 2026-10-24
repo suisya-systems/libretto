@@ -40,6 +40,7 @@ const entrance: NonNullable<CaseView['entrance']> = {
     docType: '記事',
     subject: 'ブレストで決まった 3 つの方針と、その理由',
     wanted: [],
+    gather: [],
     audience: '一般の読者',
     destinations: [{ kind: 'paste' }, { kind: 'page', shared: false }],
     shape: '2,500 字前後',
@@ -221,6 +222,20 @@ describe('依頼の確認', () => {
     )
     expect(row?.querySelector('dd')?.textContent).toBe('ブレストのメモ、当日の写真の説明')
     expect(r.text()).toContain(W['entrance.wantedNote'])
+    r.done()
+  })
+
+  it('libretto が集めるものがあれば依頼書の表に出し、進めるとウェブで探すことを書く（6.3.3 (7)）', async () => {
+    const r = await render({
+      ...base,
+      entrance: { ...entrance, brief: { ...entrance.brief, gather: ['今月の公式のお知らせ'], sources: '出典付き' } },
+    })
+    const row = [...r.el.querySelectorAll('.brief > div')].find(
+      (d) => d.querySelector('dt')?.textContent === W['entrance.brief.gather'],
+    )
+    expect(row?.querySelector('dd')?.textContent).toBe('今月の公式のお知らせ')
+    expect(r.el.querySelector('.gather-note')?.textContent).toBe(W['entrance.gatherNote'])
+    expect(r.text()).not.toContain(W['entrance.wantedNote'])
     r.done()
   })
 

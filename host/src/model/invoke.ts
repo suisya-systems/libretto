@@ -14,7 +14,7 @@ export type Job = {
   instruction: string
   materials: Material[]
   workdir?: string
-  access: 'none' | 'read' | 'write'
+  access: 'none' | 'read' | 'write' | 'search' // search は WebSearch だけ（6.3.3 (2)）
   output:
     | { kind: 'text' }
     | { kind: 'json'; schema: z.ZodType; accept?: (value: unknown) => string[] }

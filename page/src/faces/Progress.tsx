@@ -185,15 +185,25 @@ export function ProgressFace({ c, reload, stopped }: { c: CaseView; reload: () =
 
       <Versions c={c} />
 
-      {c.materials.length > 0 && (
+      {(c.materials.length > 0 || c.gatherFailed) && (
         <section aria-labelledby="h-materials" className="stack">
           <h2 id="h-materials">{W['progress.materialsHeading']}</h2>
           <ul className="card plain-list">
             {c.materials.map((m) => (
               <li key={m.id}>
-                <span className="strong">{m.title}</span> <span className="muted small">{m.kind}</span>
+                {/^https?:\/\//.test(m.where) ? (
+                  <a href={m.where} target="_blank" rel="noopener noreferrer" className="strong source-title">
+                    {m.title}
+                    <span className="muted small">（{W['approval.sourceOpens']}）</span>
+                  </a>
+                ) : (
+                  <span className="strong">{m.title}</span>
+                )}{' '}
+                <span className="muted small">{m.kind}</span>
+                {m.gathered && <span className="badge b-off badge-sm">{W['progress.materialGathered']}</span>}
               </li>
             ))}
+            {c.gatherFailed && <li className="muted">{W['progress.gatherFailed']}</li>}
           </ul>
         </section>
       )}

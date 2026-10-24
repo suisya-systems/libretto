@@ -111,6 +111,36 @@ describe('進行の面', () => {
     r.done()
   })
 
+  it('資料: 出典はリンクで、集めたものに印。集められなかったときは 1 行（6.3.3 (7)）', async () => {
+    const r = await render({
+      ...base,
+      materials: [
+        {
+          id: 'S01',
+          kind: '出典',
+          title: 'お知らせ',
+          where: 'https://example.com/a',
+          status: '取り寄せ済み',
+          gathered: true,
+        },
+        { id: 'S02', kind: '出典', title: '週報', where: 'https://example.com/b', status: '取り寄せ済み' },
+      ],
+    })
+    const links = [...r.el.querySelectorAll('#h-materials ~ ul a')] as HTMLAnchorElement[]
+    expect(links.map((a) => [a.href, a.target, a.rel])).toEqual([
+      ['https://example.com/a', '_blank', 'noopener noreferrer'],
+      ['https://example.com/b', '_blank', 'noopener noreferrer'],
+    ])
+    expect(r.el.querySelectorAll('#h-materials ~ ul .badge')).toHaveLength(1)
+    expect(r.text()).toContain(W['progress.materialGathered'])
+    expect(r.text()).not.toContain(W['progress.gatherFailed'])
+    r.done()
+    const f = await render({ ...base, materials: [], gatherFailed: true })
+    expect(f.el.querySelector('#h-materials')).not.toBeNull()
+    expect(f.text()).toContain(W['progress.gatherFailed'])
+    f.done()
+  })
+
   it('検品中: n 回目のチェックと、前の版の判定。今の版だけ「チェック中」', async () => {
     const r = await render({
       ...base,
@@ -212,6 +242,7 @@ describe('進行の面', () => {
           docType: '記事',
           subject: 'ブレストで決まった 3 つの方針',
           wanted: ['ブレストのメモか記録'],
+          gather: [],
           audience: '一般の読者',
           destinations: [{ kind: 'page', shared: false }],
           shape: '2,000 字前後',

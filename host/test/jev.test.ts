@@ -325,6 +325,7 @@ describe('判定の Jev（7.6 (5)）', () => {
     docType: '記事',
     subject: 's',
     wanted: [],
+    gather: [],
     audience: '社内の他部署の人',
     destinations: [{ kind: 'page', shared: false }],
     shape: '短く',

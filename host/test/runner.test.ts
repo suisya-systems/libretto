@@ -432,6 +432,70 @@ describe('runner と作り手', () => {
   })
 })
 
+describe('事実係が公開の情報を集める（6.3.3）', () => {
+  const gathering = {
+    ...briefDraft,
+    brief: { ...briefDraft.brief, sources: '出典付き', gather: ['今月の公式のお知らせ'] },
+  }
+  const rows: [Role, ScriptReply][] = upToEntrance.map(([role, reply]) =>
+    role === '下書き役・依頼書' ? [role, say(gathering)] : [role, reply],
+  )
+  // 出典付きは判定の頭で棚卸しを呼ぶ。止めておき、検品中に留める
+  const hold: [Role, ScriptReply] = ['事実係・抜き出し', { fail: 'hang' }]
+
+  it('集めた URL を取り寄せて資料の正本に足し、印を付ける。集め役には「集めるもの」と今日だけを渡す', async () => {
+    const found = {
+      sources: [
+        { url: 'https://example.com/news', why: '公式のお知らせ' },
+        { url: 'https://example.com/gone', why: '公式の更新履歴' },
+      ],
+    }
+    await setup(script(...rows, ['事実係・集め', say(found)], ['作り手', draft(1)], hold))
+    const id = await approved()
+    await waitState(id, '検品中')
+    const call = fake.calls.find((c) => c.role === '事実係・集め')
+    expect(call?.access).toBe('search')
+    expect(call?.materials.map((m) => m.name)).toEqual(['集めるもの', '今日'])
+    expect(JSON.stringify(call?.materials)).toContain('今月の公式のお知らせ')
+    expect(JSON.stringify(call?.materials)).not.toContain(briefDraft.brief.subject)
+    expect(fetched).toEqual(['https://example.com/news', 'https://example.com/gone'])
+    const src = join(caseDir(home, id), 'materials')
+    expect(readdirSync(src)).toEqual(['gathered.json', 'source-01.md'])
+    // 作り手には資料の本文だけ。出典はリンクを付ける約束
+    expect(readdirSync(work(id, 'materials'))).toEqual(['source-01.md'])
+    expect(makerCalls()[0]?.instruction).toContain('ウェブから取り寄せた出典')
+    const v = await caseView(id)
+    expect(v.materials).toEqual([
+      {
+        id: 'S01',
+        kind: '出典',
+        title: '週報',
+        where: 'https://example.com/news',
+        status: '取り寄せ済み',
+        gathered: true,
+      },
+    ])
+    expect(v.gatherFailed).toBeUndefined()
+    expect(fake.unused()).toEqual([])
+  })
+
+  it('見つからなければ止めずに進み、集められなかったと出す', async () => {
+    await setup(script(...rows, ['事実係・集め', say({ sources: [] })], ['作り手', draft(1)], hold))
+    const id = await approved()
+    await waitState(id, '検品中')
+    const v = await caseView(id)
+    expect(v.gatherFailed).toBe(true)
+    expect(v.materials).toEqual([])
+  })
+
+  it('集めるものが無い依頼は集め役を呼ばない', async () => {
+    await setup(script(...upToEntrance, ['作り手', draft(1)]))
+    const id = await approved()
+    await waitState(id, '検品中')
+    expect(fake.calls.some((c) => c.role === '事実係・集め')).toBe(false)
+  })
+})
+
 describe('材料待ち（6.2.4）', () => {
   const wanting = { ...briefDraft, brief: { ...briefDraft.brief, wanted: ['ブレストのメモか記録'] } }
   const withWanted: [Role, ScriptReply][] = upToEntrance.map(([role, reply]) =>

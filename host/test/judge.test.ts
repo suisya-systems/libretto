@@ -339,6 +339,7 @@ describe('judge() の段取り（7.3）', () => {
     docType: '記事',
     subject: 's',
     wanted: [],
+    gather: [],
     audience: '一般の読者',
     destinations: [{ kind: 'page', shared: false }],
     shape: '短く',
