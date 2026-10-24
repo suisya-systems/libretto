@@ -55,6 +55,17 @@ describe('measure', () => {
     const c = codexRow(put(h, 'c', '同系統', ['fail', 'skipped']))
     expect(codexVerdict(a, c)).toContain('まだ確かめていない')
     expect(codexVerdict(a, codexRow(put(h, 'd', '同系統')))).toContain('まだありません')
+    // 入口に戻って作り直した組があっても、第 1 版を判定した（最初に承認した）組で数える
+    const dir = put(h, 'e', '別系統', ['pass', 'fail'])
+    writeFileSync(
+      join(dir, 'checks', 'checks.json'),
+      JSON.stringify({ checks: goodChecks, family: '別系統', approvedFingerprint: 'f1' }),
+    )
+    writeFileSync(
+      join(dir, 'checks', 'checks.v2.json'),
+      JSON.stringify({ checks: goodChecks.slice(0, 2), family: '同系統' }),
+    )
+    expect(codexRow(dir)).toMatchObject({ family: '別系統', checks: 6 })
   })
 
   it('band: 分布と、Claude が決めた単位だけの一致と、縁の単位', () => {

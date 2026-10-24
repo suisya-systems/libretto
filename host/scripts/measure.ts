@@ -20,13 +20,16 @@ export type CodexRow = {
   firstDraft?: Record<'pass' | 'fail' | 'unable' | 'skipped', number>
 }
 
-// 今の組（番号の一番大きい checks*.json）
+// 第 1 版を判定した組 = 最初に承認した組（承認の指紋を持つ checks*.json のうち番号の一番小さいもの）。
+// 新しい組を選ぶと、入口に戻って作り直した項目と第 1 版の判定を取り合わせてしまう
 export function codexRow(dir: string): CodexRow {
-  const names = readdirSync(join(dir, 'checks')).filter((f) => /^checks(\.v\d+)?\.json$/.test(f))
   const k = (f: string) => Number(/\.v(\d+)\./.exec(f)?.[1] ?? 1)
-  const latest = names.sort((a, b) => k(a) - k(b)).at(-1)
-  if (!latest) throw new Error(`no checks in ${dir}`)
-  const set = read(join(dir, 'checks', latest), ChecksFile)
+  const sets = readdirSync(join(dir, 'checks'))
+    .filter((f) => /^checks(\.v\d+)?\.json$/.test(f))
+    .sort((a, b) => k(a) - k(b))
+    .map((f) => read(join(dir, 'checks', f), ChecksFile))
+  const set = sets.find((s) => s.approvedFingerprint) ?? sets.at(-1)
+  if (!set) throw new Error(`no checks in ${dir}`)
   const drafted = set.checks.filter((c) => !c.canary && c.phase === '本文')
   const path = join(dir, 'review-01-a.json')
   const r = existsSync(path) ? read(path, Review) : undefined
