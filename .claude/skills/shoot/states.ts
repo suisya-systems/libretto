@@ -219,6 +219,7 @@ export const STATES: Record<string, State> = {
     expect: (v) => v.state === '入口待ち',
     mark: W['settings.probe.unknown'],
     path: () => '/settings',
+    sameFirst390: true, // Jev の API キーの行が増え、動作環境の欄は 390 の 1 画面目より下にある（違いはそこだけ）
   },
   // 設定: しっかり隠せているはずが、前回の確認で見えた
   'settings-visible': {
@@ -227,6 +228,7 @@ export const STATES: Record<string, State> = {
     expect: (v) => v.state === '入口待ち',
     mark: W['settings.probe.visible'],
     path: () => '/settings',
+    sameFirst390: true, // Jev の API キーの行が増え、動作環境の欄は 390 の 1 画面目より下にある（違いはそこだけ）
   },
   // 入口: 隠す仕組みが弱い（素の Windows）帯
   'entrance-weak': {
