@@ -130,12 +130,12 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-async function render(c: CaseView, stopped = false) {
+async function render(c: CaseView, stopped = false, isolation?: 'strong' | 'weak' | 'broken') {
   const el = document.createElement('div')
   document.body.append(el)
   const root = createRoot(el)
   const reload = vi.fn()
-  await act(async () => root.render(<EntranceFace c={c} reload={reload} stopped={stopped} />))
+  await act(async () => root.render(<EntranceFace c={c} reload={reload} stopped={stopped} isolation={isolation} />))
   const button = (label: string) =>
     [...el.querySelectorAll('button')].find((b) => b.textContent?.trim() === label) as HTMLButtonElement | undefined
   return {
@@ -354,5 +354,17 @@ describe('依頼の確認', () => {
     await r.click(r.button(W['entrance.talk']))
     expect(r.text()).toContain(W['talk.label'])
     r.done()
+  })
+})
+
+describe('チェック項目を隠す仕組みの帯（8.10 (6)）', () => {
+  it('弱いときは帯と設定への道を出し、しっかり隠せているときは出さない', async () => {
+    const weak = await render({ ...base, turn: 'libretto' }, false, 'weak')
+    expect(weak.text()).toContain(W['band.isolationWeak'])
+    expect(weak.el.querySelector('.band-warn a')?.getAttribute('href')).toBe('/settings')
+    weak.done()
+    const strong = await render({ ...base, turn: 'libretto' }, false, 'strong')
+    expect(strong.el.querySelector('.band-warn, .band-stopped')).toBeNull()
+    strong.done()
   })
 })

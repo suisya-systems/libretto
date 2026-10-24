@@ -1,7 +1,8 @@
-// 設定の面（画面 7）。今は API キーの節だけ（docs/implementation.md 6.1.3 (6)）。値は画面のどこにも出さない（設計書 D17）
-import { type ApiKeyStatus, Settings as SettingsSchema } from '@libretto/shared/api'
+// 設定の面（画面 7）。API キーの節（docs/implementation.md 6.1.3 (6)。値は画面のどこにも出さない。設計書 D17）と
+// 動作環境の確認の節（8.10 (6)）
+import { type ApiKeyStatus, ConnectionsView, Settings as SettingsSchema } from '@libretto/shared/api'
 import { useId, useState } from 'react'
-import { useLoad } from '../load.ts'
+import { send, useLoad } from '../load.ts'
 import { Confirm } from '../parts/Dialog.tsx'
 import { W, type WKey, w } from '../wording.ts'
 import { ProblemView } from './Pending.tsx'
@@ -159,8 +160,96 @@ function KeyRow({
   )
 }
 
+type Isolation = ConnectionsView['isolation']
+const LEVEL: Record<Isolation['level'], [string, WKey]> = {
+  strong: ['b-done', 'settings.isolation.strong'],
+  weak: ['b-you', 'settings.isolation.weak'],
+  broken: ['b-alert', 'settings.isolation.broken'],
+}
+const VERDICT: Record<NonNullable<Isolation['last']>['verdict'], WKey> = {
+  hidden: 'settings.probe.hidden',
+  visible: 'settings.probe.visible',
+  unknown: 'settings.probe.unknown',
+}
+const pad = (n: number) => String(n).padStart(2, '0')
+const when = (at: string) => {
+  const d = new Date(at)
+  return `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+// 文の中の `…` を <code> に（導入のコマンド）
+const withCode = (s: string) => s.split(/`([^`]+)`/).map((part, i) => (i % 2 ? <code key={part}>{part}</code> : part))
+
+// 動作環境の確認（8.10 (6)）。結果は裏で届くので、connections.changed で取り直す
+function EnvSection({ v, reload }: { v: Isolation; reload: () => void }) {
+  const [busy, setBusy] = useState(false)
+  const [failed, setFailed] = useState(false)
+  const [badge, label] = LEVEL[v.level]
+  const running = v.running || busy
+  const run = async () => {
+    setBusy(true)
+    setFailed(false)
+    const ok = await send('POST', '/api/checks/run')
+    setBusy(false)
+    setFailed(!ok)
+    reload()
+  }
+  const status = v.running
+    ? W['settings.probe.running']
+    : v.last
+      ? W[VERDICT[v.last.verdict]]
+      : W['settings.probe.never']
+  return (
+    <section aria-labelledby="h-env" className="card pad">
+      <h2 id="h-env">{W['settings.envHeading']}</h2>
+      <ul className="key-list">
+        <li className="key-row">
+          <div className="key-head">
+            <div className="grow">
+              <h3 className="key-label">{W['settings.isolation.label']}</h3>
+              <p className="muted small">{W['settings.isolation.use']}</p>
+            </div>
+            <span className={`badge ${badge} key-status`}>{W[label]}</span>
+          </div>
+          {v.level !== 'strong' && v.cause && (
+            <p
+              className={v.level === 'broken' ? 'note-alert small' : 'note-warn small'}
+              role={v.level === 'broken' ? 'alert' : undefined}
+            >
+              {withCode(W[`settings.isolation.why.${v.cause}`])}
+            </p>
+          )}
+          <p
+            className={!v.running && v.last?.verdict === 'visible' ? 'note-alert small' : 'muted small key-saved'}
+            role="status"
+          >
+            {status}
+            {!v.running && v.last && `（${w('settings.probe.at', { at: when(v.last.at) })}）`}
+          </p>
+          <div className="key-actions">
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              disabled={running}
+              aria-busy={running || undefined}
+              onClick={() => void run()}
+            >
+              {W['settings.probe.run']}
+            </button>
+          </div>
+          {failed && (
+            <p className="note-alert small" role="alert">
+              {W['settings.probe.failed']}
+            </p>
+          )}
+        </li>
+      </ul>
+    </section>
+  )
+}
+
 export function Settings() {
   const keys = useLoad('/api/settings/keys', Keys, (s) => s.event === 'settings.changed')
+  const env = useLoad('/api/connections', ConnectionsView, (s) => s.event === 'connections.changed')
   return (
     <section className="face">
       <h1 className="face-title">{W['nav.settings']}</h1>
@@ -181,6 +270,7 @@ export function Settings() {
           </section>
         )
       )}
+      {env.data && <EnvSection v={env.data.isolation} reload={env.reload} />}
     </section>
   )
 }

@@ -8,6 +8,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { serve } from '@hono/node-server'
 import { CaseView } from '@libretto/shared/api'
+import { writeIsolation } from '../../../host/src/checks/isolation.ts'
 import { initHome } from '../../../host/src/ledger/db.ts'
 import { createFake, type ScriptEntry } from '../../../host/src/model/fake.ts'
 import { createInvoke } from '../../../host/src/model/invoke.ts'
@@ -62,7 +63,10 @@ const server = createServer({
   origins: [origin],
   staticDir: fileURLToPath(new URL('../../../page/dist', import.meta.url)),
   log: (l) => console.error(l),
+  ...(def.isolation && { isolation: def.isolation.level }),
+  ...(def.isolation?.cause && { cause: def.isolation.cause }),
 })
+if (def.isolation?.last) writeIsolation(home, def.isolation.last)
 let http: ReturnType<typeof serve> | undefined
 const shutdown = async (code: number) => {
   await server.runs.abortAll()

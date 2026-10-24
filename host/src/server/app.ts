@@ -10,9 +10,11 @@ import {
   CaseAction,
   type CaseCard,
   CaseState,
+  type ConnectionsView,
   ConversationPost,
   DraftDiff,
   type HostStatus,
+  type IsolationCause,
   MaterialsPost,
   type Mode,
 } from '@libretto/shared/api'
@@ -22,6 +24,7 @@ import { streamSSE } from 'hono/streaming'
 import { z } from 'zod'
 import { createRunner } from '../case/runner.ts'
 import { transition } from '../case/transition.ts'
+import { type IsolationRecord, readIsolation, writeIsolation } from '../checks/isolation.ts'
 import { diff, renderHtml } from '../checks/text.ts'
 import { pageVersions } from '../deliver/run.ts'
 import type { Ledger } from '../ledger/ledger.ts'
@@ -32,7 +35,7 @@ import { createConversation } from '../roles/conversation.ts'
 import { createEntrance, currentSet, entranceView, writeApproval, writeAtomic } from '../roles/entrance.ts'
 import { OUTPUT_FILES, reviewsOf } from '../roles/judge.ts'
 import { draftNames, pastedCount, pastedName, versionDir, versionsOf, workDir } from '../roles/maker.ts'
-import { createRuns } from '../runs.ts'
+import { createRuns, Stopped } from '../runs.ts'
 import { createHub, type SseMessage } from './sse.ts'
 import { createStop, isStorageError } from './stop.ts'
 import { caseView, DEFAULTS, homeView, toCard } from './views.ts'
@@ -58,6 +61,8 @@ export type ServerOptions = {
   runsWaitMs?: number
   token?: () => string // canary の語（テストで固定する）
   isolation?: Isolation // 起動時の自己点検の結果（8.9 (5)）
+  cause?: IsolationCause // weak / broken の原因（8.10 (5)）
+  probe?: (signal: AbortSignal) => Promise<IsolationRecord | undefined> // 隔離の点検（8.10 (4)）
 }
 
 export function createServer(o: ServerOptions) {
@@ -211,6 +216,58 @@ export function createServer(o: ServerOptions) {
       return c.json({ reason: 'origin' }, 403)
     if (!paired(c)) return c.json({ reason: 'not_paired' }, 401)
     await next()
+  })
+
+  // 隔離の点検（8.10 (4)）。同時に 1 本。runs で包み、すべて停止で切る（切れたら isolation.json を書かない）
+  let probing: Promise<void> | undefined
+  function checkIsolation(): Promise<void> | undefined {
+    const probe = o.probe
+    if (!probe) return undefined
+    if (probing) return probing
+    const ac = runs.open('点検')
+    probing = (async () => {
+      try {
+        const r = await probe(ac.signal)
+        if (r && !ac.signal.aborted) {
+          writeIsolation(home, r)
+          storage(true)
+        }
+      } catch (e) {
+        // 書けない（容量・台帳）は保存の帯に出す。ほかは log だけ（5.7 (8)）
+        if (isStorageError(e)) storage(false)
+        log(`isolation check: ${e instanceof Error ? e.stack : String(e)}`)
+      } finally {
+        runs.close('点検', ac)
+        probing = undefined
+        hub.emit('connections.changed', {})
+      }
+    })()
+    runs.watch('点検', probing)
+    hub.emit('connections.changed', {})
+    return probing
+  }
+
+  app.get('/api/connections', (c) => {
+    const last = readIsolation(home)
+    const view: ConnectionsView = {
+      isolation: {
+        level: status.isolation,
+        ...(o.cause && { cause: o.cause }),
+        running: !!probing,
+        ...(last && { last: { at: last.at, verdict: last.verdict } }),
+      },
+    }
+    return c.json(view)
+  })
+  app.post('/api/checks/run', (c) => {
+    if (!o.probe) return c.json({ reason: 'not_found' }, 404)
+    try {
+      void checkIsolation()
+    } catch (e) {
+      if (e instanceof Stopped) return c.json({ reason: 'stopped' }, 409)
+      throw e
+    }
+    return c.json({}, 202)
   })
 
   app.get('/api/host', (c) => c.json(status))
@@ -497,7 +554,7 @@ export function createServer(o: ServerOptions) {
     }
   })
 
-  return { app, hub, runs, stop, status, issuePairing, conversation, entrance, runner, caseChanged }
+  return { app, hub, runs, stop, status, issuePairing, conversation, entrance, runner, caseChanged, checkIsolation }
 }
 
 // ダウンロードの名前（6.2.8 (4)）。ASCII の名前と、題を百分率符号化した名前

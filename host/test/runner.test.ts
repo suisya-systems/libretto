@@ -6,7 +6,7 @@ import { CaseCard, CaseView, DraftDiff, HomeView } from '@libretto/shared/api'
 import { Review } from '@libretto/shared/checks'
 import { VersionManifest } from '@libretto/shared/ledger'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { transition } from '../src/case/transition.ts'
+import { SAY, transition } from '../src/case/transition.ts'
 import { charCount, headingCount, renderHtml } from '../src/checks/text.ts'
 import { caseDir, initHome } from '../src/ledger/db.ts'
 import type { Ledger } from '../src/ledger/ledger.ts'
@@ -933,5 +933,78 @@ describe('送付と完了（6.2.8）', () => {
     const id = await toConfirm()
     expect((await act(id, { type: 'delivery.decline' })).status).toBe(200)
     expect(ledger.getCase(id)).toMatchObject({ state: '承認待ち', approvalKind: '完成稿' })
+  })
+})
+
+describe('canary（8.10 (1)）', () => {
+  const leaked = async (id: string) => {
+    await waitState(id, '停止')
+    expect(ledger.getCase(id)?.stopReason).toBe('隔離の失敗')
+    expect(JSON.stringify(ledger.lastMessage(id))).toContain(SAY.isolationLeaked)
+  }
+  it('本文に語があれば写さずに fail.system(隔離の失敗)。会話欄は見えたおそれを言う', async () => {
+    await setup(script(...upToEntrance, ['作り手', draft(1, `${BODY}\n${TOKEN}\n`)]))
+    const id = await approved()
+    await leaked(id)
+    expect(existsSync(join(caseDir(home, id), 'versions'))).toBe(false)
+  })
+
+  it('言い直しの前の回の返答にだけ語があっても止める', async () => {
+    const first: ScriptReply = { text: `書きました ${TOKEN}`, write: { 'draft-01.md': BODY } }
+    await setup(script(...upToEntrance, ['作り手', first], ['作り手', draft(1)]))
+    const id = await approved()
+    await leaked(id)
+    expect(makerCalls()).toHaveLength(2)
+  })
+
+  it('作業場のほかのファイルに語があれば、書けなかったより先に隔離の失敗', async () => {
+    const bad: ScriptReply = { text: '書きました', write: { 'draft-01.md': BODY, 'notes/memo.md': TOKEN } }
+    await setup(script(...upToEntrance, ['作り手', bad], ['作り手', bad]))
+    const id = await approved()
+    await leaked(id)
+  })
+
+  it('再起動の合わせの道でも、作業場に語があれば写さない', async () => {
+    await setup(script(...upToEntrance, ['作り手', { fail: 'hang' }]))
+    const id = await approved()
+    await vi.waitFor(() => expect(makerCalls()).toHaveLength(1))
+    for (const [name, text] of Object.entries(
+      (draft(1, `${BODY}${TOKEN}\n`) as { write: Record<string, string> }).write,
+    ))
+      writeFileSync(work(id, name), text)
+    ledger.close()
+    await setup([], hangJudge, true)
+    server.runner.resume()
+    await leaked(id)
+    expect(makerCalls()).toEqual([])
+  })
+
+  it('判定役: 版の正本に語があれば、使い回せる判定があっても判定せずに止める', async () => {
+    await setup(script(...upToEntrance, ['作り手', draft(1)]))
+    const id = await approved()
+    await vi.waitFor(() => expect(hung).toEqual([id]))
+    await server.runs.abort(id)
+    await idle()
+    const c = ledger.getCase(id)
+    if (!c) throw new Error('no case')
+    const review: Review = {
+      version: 1,
+      series: c.series,
+      round: c.round + 1,
+      at: new Date().toISOString(),
+      phase: '本文',
+      attempt: 1,
+      results: [{ id: 'C01', verdict: 'pass', by: 'code' }],
+      pass: true,
+      failedSummaries: [],
+      marks: [],
+      sources: [],
+    }
+    writeFileSync(join(caseDir(home, id), 'review-01-a.json'), JSON.stringify(review))
+    writeFileSync(join(caseDir(home, id), 'versions/01/draft-01.html'), `<p>${TOKEN}</p>`)
+    ledger.close()
+    await setup([], hangJudge, true)
+    server.runner.resume()
+    await leaked(id)
   })
 })

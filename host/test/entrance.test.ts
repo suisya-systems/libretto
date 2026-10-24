@@ -1,5 +1,6 @@
 // 入口の段取りと入口の面の API（docs/implementation.md 6.2.2・4.2 T5〜T9・T6b）。fake の台本で HTTP を叩く
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { CaseView, ConversationView } from '@libretto/shared/api'
@@ -69,6 +70,7 @@ async function setup(entries: ScriptEntry[], wrap: (b: Backend) => Backend = (b)
     onCostCap: () => {},
     log: () => {},
     retryWaitMs: 0,
+    jobsDir: (id) => join(caseDir(home, id), 'jobs'),
   })
   server = createServer({
     home,
@@ -614,5 +616,60 @@ describe('別系統の確認項目（6.1.3 (5)）', () => {
     expect(callsOf('下書き役・確認項目').map((c) => c.family)).toEqual(['openai'])
     expect(fake.unused()).toEqual([])
     expect(ledger.getCase(id)?.state).toBe('入口待ち')
+  })
+})
+
+describe('受け入れ (3): 確認項目の下書き役に依頼書の本文が渡っていない（8.4・8.10 (3)）', () => {
+  it('1 回目・言い直し・同系統への落ち方のどれにも依頼書の語が無く、jobs/ の記録は名前・大きさ・sha256 だけ', async () => {
+    const SECRET = ['依頼書だけの語ア', '依頼書だけの語イ', '依頼書だけの語ウ', '仮定だけの語エ']
+    const brief = {
+      brief: {
+        ...briefDraft.brief,
+        subject: `${briefDraft.brief.subject}${SECRET[0]}`,
+        audience: `${briefDraft.brief.audience}${SECRET[1]}`,
+        mustNot: [...briefDraft.brief.mustNot, SECRET[2] as string],
+      },
+      assumptions: [{ id: 'A1', text: `文末はです・ます${SECRET[3]}`, why: 'note の読者に合わせる' }],
+    }
+    await setup(
+      script(
+        ['話し相手', say(done)],
+        ['下書き役・依頼書', say(brief)],
+        ['下書き役・確認項目', { text: '{broken' }],
+        ['下書き役・確認項目', { fail: 'unavailable' }],
+        ['下書き役・確認項目', say({ checks: goodChecks })],
+        ['事実係・分類', say(classified)],
+      ),
+      undefined,
+      true,
+    )
+    const id = await request()
+    await waitTurn(id)
+    // 渡った入力（中身が受け取ったもの）に依頼書・仮定の語が無い
+    const calls = callsOf('下書き役・確認項目')
+    expect(calls).toHaveLength(3)
+    for (const c of calls) for (const s of SECRET) expect(JSON.stringify([c.instruction, c.materials])).not.toContain(s)
+    // 語は依頼書の本文に入っている（置き方が効いている）
+    expect(readFileSync(join(caseDir(home, id), 'brief.json'), 'utf-8')).toContain(SECRET[0])
+
+    // jobs/: 確認項目の下書き役は Job ごとに 1 件（別系統の 1 回目と言い直しで 1 件、同系統で 1 件）
+    const dir = join(caseDir(home, id), 'jobs')
+    const names = readdirSync(dir)
+      .filter((f) => f.startsWith('下書き役・確認項目-'))
+      .sort()
+    expect(names).toEqual(['下書き役・確認項目-1.json', '下書き役・確認項目-2.json'])
+    const sha = (s: string) => createHash('sha256').update(s).digest('hex')
+    for (const [i, name] of names.entries()) {
+      const rec = JSON.parse(readFileSync(join(dir, name), 'utf-8'))
+      const sent = calls[i === 0 ? 0 : 2] as (typeof calls)[number]
+      expect(rec.instruction).toBe(sent.instruction)
+      for (const s of SECRET) expect(JSON.stringify(rec)).not.toContain(s)
+      // 材料は許した顔ぶれだけで、本文は入らず、sha256 は渡したものと一致する
+      expect(rec.materials.map((m: { name: string }) => m.name)).toEqual(['依頼', '依頼書の形'])
+      for (const m of rec.materials) {
+        const text = (sent.materials.find((x) => x.name === m.name) as { text: string }).text
+        expect(m).toEqual({ name: m.name, chars: text.length, sha256: sha(text) })
+      }
+    }
   })
 })

@@ -82,12 +82,12 @@ beforeEach(() => {
 })
 afterEach(() => vi.unstubAllGlobals())
 
-async function render(c: CaseView, stopped = false) {
+async function render(c: CaseView, stopped = false, isolation?: 'strong' | 'weak' | 'broken') {
   const el = document.createElement('div')
   document.body.append(el)
   const root = createRoot(el)
   const reload = vi.fn()
-  await act(async () => root.render(<ApprovalFace c={c} reload={reload} stopped={stopped} />))
+  await act(async () => root.render(<ApprovalFace c={c} reload={reload} stopped={stopped} isolation={isolation} />))
   const button = (label: string) =>
     [...el.querySelectorAll('button')].find((b) => b.textContent?.trim() === label) as HTMLButtonElement | undefined
   return {
@@ -256,6 +256,17 @@ describe('承認の面', () => {
     })
     expect(r.text()).toContain(w('approval.remaining', { n: 1 }))
     expect(r.text()).toContain(w('approval.skipped', { n: 11 }))
+    r.done()
+  })
+})
+
+describe('チェック項目を隠す仕組みの帯（8.10 (6)）', () => {
+  it('動かないときは下書きが始まらないことを警告の帯で出す', async () => {
+    const r = await render({ ...base, version: 1, versions: [version(1, '合格')] }, false, 'broken')
+    const band = r.el.querySelector('.band-stopped[role="alert"]')
+    expect(band?.textContent).toContain(W['band.isolationBroken'])
+    expect(band?.textContent).toContain(W['band.isolationLink'])
+    expect(r.text()).not.toContain(W['band.isolationWeak'])
     r.done()
   })
 })

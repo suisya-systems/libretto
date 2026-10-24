@@ -1,9 +1,10 @@
 // 承認の面（画面 4。docs/implementation.md 6.2.5 (8)）。承認待ち kind=完成稿。本文・前の版との違い・チェックの結果を 1 画面に
-import { type CaseView, DraftDiff } from '@libretto/shared/api'
+import { type CaseView, DraftDiff, type HostStatus } from '@libretto/shared/api'
 import { useEffect, useState } from 'react'
 import { Link } from 'wouter'
 import type { z } from 'zod'
 import { useCaseAction } from '../action.ts'
+import { IsolationBand } from '../parts/IsolationBand.tsx'
 import { W, w } from '../wording.ts'
 import { CaseHeader, History, Versions } from './Progress.tsx'
 
@@ -36,7 +37,17 @@ function useDraft(caseId: string, n: number) {
   return { html, changes, failed }
 }
 
-export function ApprovalFace({ c, reload, stopped }: { c: CaseView; reload: () => void; stopped: boolean }) {
+export function ApprovalFace({
+  c,
+  reload,
+  stopped,
+  isolation,
+}: {
+  c: CaseView
+  reload: () => void
+  stopped: boolean
+  isolation?: HostStatus['isolation'] | undefined
+}) {
   const action = useCaseAction(c.id, reload)
   const latest = c.versions.at(-1)
   const n = latest?.n ?? c.version
@@ -79,6 +90,7 @@ export function ApprovalFace({ c, reload, stopped }: { c: CaseView; reload: () =
       </Link>
       <CaseHeader c={c} />
 
+      <IsolationBand level={isolation} />
       {action.notice && (
         <p className="band band-stopped" role="alert">
           <strong>{action.notice === 'moved' ? W['action.moved'] : W['band.sendFailed']}</strong>

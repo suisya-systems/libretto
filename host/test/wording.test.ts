@@ -17,8 +17,8 @@ describe('ui-wording.md のホストが作る文', () => {
     expect(Object.keys(STEP)).toHaveLength(16)
     expect(table('**いまの 1 行')).toEqual(STEP)
   })
-  it('SAY の 7 個', () => {
-    expect(Object.keys(SAY)).toHaveLength(7)
+  it('SAY の 8 個', () => {
+    expect(Object.keys(SAY)).toHaveLength(8)
     expect(table('**会話欄に足す 1 行')).toEqual(SAY)
   })
   it('TALK の 6 個', () => {

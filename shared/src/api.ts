@@ -325,14 +325,28 @@ export const Notice = z.object({
 export type Notice = z.infer<typeof Notice>
 
 // 止めたのは本人、保存できないのはホスト。別の欄（5.7 (8)）。signIn は Claude のログインし直し待ち（6.2.3 (7)）
-// isolation は作り手の隔離（8.9 (5)）。表示は Issue 15
+// isolation は作り手の隔離（8.9 (5)）。入口・承認の帯と設定の面が読む（8.10 (6)）
+export const Isolation = z.enum(['strong', 'weak', 'broken'])
 export const HostStatus = z.object({
   stopped: z.boolean(),
   storageOk: z.boolean(),
   signIn: z.boolean(),
-  isolation: z.enum(['strong', 'weak', 'broken']),
+  isolation: Isolation,
 })
 export type HostStatus = z.infer<typeof HostStatus>
+
+// GET /api/connections。この Issue で使う欄だけ（接続の欄は S5 以降。8.10 (5)）
+export const IsolationCause = z.enum(['windows', 'tools', 'userns', 'srt', 'network'])
+export type IsolationCause = z.infer<typeof IsolationCause>
+export const ConnectionsView = z.object({
+  isolation: z.object({
+    level: Isolation,
+    cause: IsolationCause.optional(),
+    running: z.boolean(),
+    last: z.object({ at: z.string(), verdict: z.enum(['hidden', 'visible', 'unknown']) }).optional(),
+  }),
+})
+export type ConnectionsView = z.infer<typeof ConnectionsView>
 
 export const CandidateCard = z.object({
   id: z.string(),

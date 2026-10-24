@@ -221,7 +221,7 @@ export const FNS: Partial<Record<CodeFn, Fn<unknown>>> = {
     phase: '本文',
     run: (_, { md }) => ({ units: paragraphs(md).map((b) => markerCheck(b.lines.join('\n')).hits.length === 0) }),
   }),
-  // canary を当てたときの fail.system は Issue 15。S1 はほかの機械判定と同じに数える
+  // 語が版にあれば、判定の前に作り手と判定役が fail.system(隔離の失敗) で止める（8.10 (1)）。ここは数えるだけ
   canary: fn({
     args: CodeArgs.canary,
     example: { token: '0123456789abcdef' },

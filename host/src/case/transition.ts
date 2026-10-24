@@ -51,6 +51,7 @@ export const SAY = {
   saveFailed: '保存できなかったので中止しました',
   toolFailed: '動作環境の不具合で中止しました',
   costCap: '費用の上限に達したので中止しました',
+  isolationLeaked: 'ライターにチェック項目が見えたおそれがあるので中止しました',
 } as const
 
 const LIMIT_SAY = { 往復上限: SAY.roundLimit, 直らない: SAY.stuck, 判定できない: SAY.unjudgeable } as const
@@ -543,7 +544,8 @@ function decide(ledger: Ledger, c: CaseRecord, ev: CaseInput, ctx: Ctx): Plan | 
         const a = is('送付中') && currentSend(ledger, c.caseId).get(ev.attemptId)
         if (!a || (a.status !== '送付中' && a.status !== '不明')) return 'stale'
       }
-      return stop(ev.reason, say(SAY.toolFailed))
+      // canary を当てた停止だけは、見えたおそれを言う（8.10 (2)）
+      return stop(ev.reason, say(ev.reason === '隔離の失敗' ? SAY.isolationLeaked : SAY.toolFailed))
     case 'cost.cap': // T29。revision は確かめない（4.6 (7)）
       if (!is(...ACTIVE)) return 'invalid_transition'
       return stop('費用上限', say(SAY.costCap))
