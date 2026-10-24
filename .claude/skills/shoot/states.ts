@@ -26,6 +26,7 @@ export type State = {
   selector?: string // mark に加えて、あるまで撮らない要素（本文など）
   path?: (caseId: string) => string // 開く画面。既定は案件の面
   openaiKey?: true // 会話の前に OpenAI の API キーを入れておく（別系統で書く・設定済みの面）
+  sameFirst390?: true // 390 の 1 画面目が他の状態と同じでよい（違いが下の方にだけある）。重複の検査から外す
 }
 
 export const SHOOT_KEY = 'sk-shoot-0000000000001a2b' // 撮影用の偽の API キー（送らない。fake が答える）
@@ -153,6 +154,7 @@ export const STATES: Record<string, State> = {
   'entrance-other': {
     script: entrance(),
     openaiKey: true,
+    sameFirst390: true, // 違いはチェック項目の欄の 1 行だけで、390 の 1 画面目には入らない
     expect: (v) => v.state === '入口待ち' && v.entrance?.checks.family === '別系統',
     mark: W['entrance.otherFamily'],
   },

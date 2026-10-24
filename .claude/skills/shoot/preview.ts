@@ -21,6 +21,15 @@ if (name === '--list') {
   console.log(Object.keys(STATES).join('\n'))
   process.exit(0)
 }
+if (name === '--same-first-390') {
+  console.log(
+    Object.entries(STATES)
+      .filter(([, s]) => s.sameFirst390)
+      .map(([k]) => k)
+      .join('\n'),
+  )
+  process.exit(0)
+}
 const def = STATES[name]
 if (!def || !port) {
   console.error(`usage: preview.ts <${Object.keys(STATES).join('|')}> <port>`)
