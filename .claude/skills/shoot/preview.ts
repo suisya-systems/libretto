@@ -5,6 +5,7 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { serve } from '@hono/node-server'
 import { CaseView } from '@libretto/shared/api'
 import { initHome } from '../../../host/src/ledger/db.ts'
@@ -48,7 +49,7 @@ const server = createServer({
   ledger,
   invoke,
   origins: [origin],
-  staticDir: new URL('../../../page/dist', import.meta.url).pathname,
+  staticDir: fileURLToPath(new URL('../../../page/dist', import.meta.url)),
   log: (l) => console.error(l),
 })
 let http: ReturnType<typeof serve> | undefined
