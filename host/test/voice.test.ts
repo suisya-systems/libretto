@@ -59,6 +59,18 @@ describe('文体カードの数値（6.3.2 (3)）', () => {
     expect(p).toMatchObject({ main: 'だ・である', firstPerson: '僕', paragraphs: { headings: 'なし' } })
   })
 
+  it('一人称・読者の呼び方は段落だけで、50 文に 1 回以上のときだけ', () => {
+    const many = Array.from({ length: 60 }, (_, i) => `今日は ${i} 番目の話を書きます。`).join('')
+    // 見出し・箇条書きの「あなた」「私」は数えない（ページのおすすめ欄など）
+    const chrome = `# あなたへのおすすめ\n\n- 私の記事\n\n${many}`
+    expect(extractVoice([chrome])).toMatchObject({ readerAddress: 'なし', firstPerson: 'なし' })
+    // 60 文に 1 回は 50 文に 1 回より少ない
+    expect(extractVoice([`${many}あなたも試せます。`])).toMatchObject({ readerAddress: 'なし' })
+    expect(extractVoice([`${many}あなたも試せます。あなたなら分かります。`])).toMatchObject({ readerAddress: 'あなた' })
+    // 短い文章でも 1 回あれば数える
+    expect(extractVoice([POLITE]).firstPerson).toBe('私')
+  })
+
   it('使える文書は文が 5 つ以上', () => {
     expect(usable(PLAIN)).toBe(true)
     expect(usable('# 見出しだけ')).toBe(false)

@@ -40,13 +40,16 @@ function counts(text: string, terms: readonly string[]): Map<string, number> {
   for (const x of text.matchAll(anyOf(terms))) m.set(x[0], (m.get(x[0]) ?? 0) + 1)
   return m
 }
-// いちばん多い語（同数は表の順）。0 回なら 'なし'
-const most = (m: Map<string, number>) => {
+// いちばん多い語（同数は表の順）。min 回に届かなければ 'なし'
+const most = (m: Map<string, number>, min = 1) => {
   let best = 'なし'
   let n = 0
   for (const [k, v] of m) if (v > n) [best, n] = [k, v]
-  return best
+  return n >= min ? best : 'なし'
 }
+// カードの一人称・読者の呼び方は、段落（見出し・箇条書き・ページの周りの見出しを除く）で、
+// 50 文に 1 回以上のときだけ（6.3.2 (3)。実ホストで note のおすすめ欄の見出しの「あなた」を拾った）
+export const PER_SENTENCES = 50
 export const firstPersonOf = (md: string) => most(counts(md, FIRST_PERSON))
 // allowed 以外の一人称の回数（allowed で始まる語は許す）。allowed が 'なし' なら全部
 export function otherFirstPerson(md: string, allowed: string): number {
@@ -144,8 +147,8 @@ export function extractVoice(docs: readonly string[]): VoiceNumbers {
     endings: Object.fromEntries(ENDINGS.map((k) => [k, round(endings[k])])) as Record<Ending, number>,
     main,
     sentenceLength: { median: median(lens), p90: p90(lens) },
-    firstPerson: firstPersonOf(md),
-    readerAddress: most(counts(md, READER)),
+    firstPerson: most(counts(all, FIRST_PERSON), Math.max(1, ss.length / PER_SENTENCES)),
+    readerAddress: most(counts(all, READER), Math.max(1, ss.length / PER_SENTENCES)),
     punctuation: {
       commasPerSentence: ss.length ? round((md.match(/[、，]/gu) ?? []).length / ss.length, 2) : 0,
       marks: {
