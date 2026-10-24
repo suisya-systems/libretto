@@ -3,6 +3,7 @@ import {
   type Answer,
   type CaseView,
   type DeliveryTarget,
+  type HostStatus,
   LEAVE_IT,
   type Mode,
   type Undecided,
@@ -12,6 +13,7 @@ import { Link } from 'wouter'
 import { useCaseAction } from '../action.ts'
 import { Choose, ChooseMany, Fold } from '../parts/Choice.tsx'
 import { Confirm } from '../parts/Dialog.tsx'
+import { IsolationBand } from '../parts/IsolationBand.tsx'
 import { STATE, W, w } from '../wording.ts'
 import { Chat } from './Chat.tsx'
 import { tone } from './Home.tsx'
@@ -26,7 +28,17 @@ function dest(t: DeliveryTarget) {
   return W[`dest.${t.kind}`]
 }
 
-export function EntranceFace({ c, reload, stopped }: { c: CaseView; reload: () => void; stopped: boolean }) {
+export function EntranceFace({
+  c,
+  reload,
+  stopped,
+  isolation,
+}: {
+  c: CaseView
+  reload: () => void
+  stopped: boolean
+  isolation?: HostStatus['isolation'] | undefined
+}) {
   const action = useCaseAction(c.id, reload)
   const e = c.entrance
   const mine = c.turn === '本人'
@@ -62,6 +74,7 @@ export function EntranceFace({ c, reload, stopped }: { c: CaseView; reload: () =
         )}
       </header>
 
+      <IsolationBand level={isolation} />
       {action.notice && (
         <p className="band band-stopped" role="alert">
           <strong>{action.notice === 'moved' ? W['action.moved'] : W['band.sendFailed']}</strong>

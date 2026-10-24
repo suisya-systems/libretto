@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 // 設定の面の API キーの節（画面 7。docs/implementation.md 6.1.3 (6)・設計書 D17）
-import type { ApiKeyStatus } from '@libretto/shared/api'
+import type { ApiKeyStatus, ConnectionsView } from '@libretto/shared/api'
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -13,16 +13,24 @@ const KEY = 'sk-test-abcdefgh12345678'
 const unset: ApiKeyStatus = { kind: 'openai', set: false }
 const set: ApiKeyStatus = { kind: 'openai', set: true, last4: '5678', savedAt: '2026-10-24T17:00:00+09:00' }
 let keys: ApiKeyStatus
+let conn: ConnectionsView
 let respond: (method: string) => Response
 const sent: { method: string; path: string; body?: unknown }[] = []
 
 beforeEach(() => {
   sent.length = 0
   keys = unset
+  conn = { isolation: { level: 'strong', running: false } }
   respond = () => new Response('{}')
   vi.stubGlobal('fetch', async (path: string, init: RequestInit = {}) => {
     if (path === '/api/settings/keys')
       return new Response(JSON.stringify({ openai: keys, jev: { kind: 'jev', set: false } }))
+    if (path === '/api/connections') return new Response(JSON.stringify(conn))
+    if (path === '/api/checks/run' && init.method) {
+      sent.push({ method: init.method, path })
+      conn = { isolation: { ...conn.isolation, running: true } }
+      return new Response('{}', { status: 202 })
+    }
     if (path === '/api/settings/keys/openai' && init.method) {
       sent.push({ method: init.method, path, ...(init.body && { body: JSON.parse(String(init.body)) }) })
       return respond(init.method)
@@ -117,6 +125,60 @@ describe('API キーの節', () => {
     expect(sent.map((s) => s.method)).toEqual(['DELETE'])
     expect(r.text()).toContain(W['settings.key.deleted'])
     expect(r.text()).toContain(W['settings.key.unset'])
+    r.done()
+  })
+})
+
+describe('動作環境の確認（8.10 (6)）', () => {
+  it('しっかり隠せていて、まだ確認していない', async () => {
+    const r = await render()
+    expect(r.text()).toContain(W['settings.envHeading'])
+    expect(r.text()).toContain(W['settings.isolation.strong'])
+    expect(r.text()).toContain(W['settings.probe.never'])
+    expect(r.el.querySelector('#h-env')?.parentElement?.querySelector('.note-warn, .note-alert')).toBeNull()
+    r.done()
+  })
+
+  it('弱い: 原因の文を出し、コマンドは code で出す。前回の結果と日時', async () => {
+    conn = {
+      isolation: {
+        level: 'weak',
+        cause: 'tools',
+        running: false,
+        last: { at: '2026-10-24T05:03:00Z', verdict: 'unknown' },
+      },
+    }
+    const r = await render()
+    expect(r.text()).toContain(W['settings.isolation.weak'])
+    expect(r.el.querySelector('.note-warn code')?.textContent).toBe('apt install bubblewrap socat ripgrep')
+    expect(r.text()).toContain(W['settings.probe.unknown'])
+    expect(r.text()).toMatch(/2026\/10\/24 \d{2}:03 に確認/)
+    r.done()
+  })
+
+  it('見えた結果は警告で出す。動かないときは原因を警告で出す', async () => {
+    conn = {
+      isolation: {
+        level: 'broken',
+        cause: 'network',
+        running: false,
+        last: { at: '2026-10-24T05:03:00Z', verdict: 'visible' },
+      },
+    }
+    const r = await render()
+    expect(r.text()).toContain(W['settings.isolation.broken'])
+    expect(r.el.querySelector('.note-alert[role="alert"]')?.textContent).toBe(W['settings.isolation.why.network'])
+    expect(r.text()).toContain(W['settings.probe.visible'])
+    expect(r.el.querySelector('.note-alert[role="status"]')?.textContent).toContain(W['settings.probe.visible'])
+    r.done()
+  })
+
+  it('今すぐ確認: POST して、確認している間は押せない', async () => {
+    const r = await render()
+    await r.click(r.button(W['settings.probe.run']))
+    expect(sent).toEqual([{ method: 'POST', path: '/api/checks/run' }])
+    await vi.waitFor(() => expect(r.text()).toContain(W['settings.probe.running']))
+    expect(r.button(W['settings.probe.run'])?.disabled).toBe(true)
     r.done()
   })
 })

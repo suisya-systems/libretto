@@ -128,8 +128,12 @@ export function App() {
         <Switch>
           <Route path="/">{() => <Home stopped={stopped} />}</Route>
           {/* 送付の確認は案件の面が状態で出す。/deliver は同じ面の別名（6.2.8 (6)） */}
-          <Route path="/cases/:id/deliver">{(p) => <Case key={p.id} id={p.id} stopped={stopped} />}</Route>
-          <Route path="/cases/:id">{(p) => <Case key={p.id} id={p.id} stopped={stopped} />}</Route>
+          <Route path="/cases/:id/deliver">
+            {(p) => <Case key={p.id} id={p.id} stopped={stopped} isolation={host.data?.isolation} />}
+          </Route>
+          <Route path="/cases/:id">
+            {(p) => <Case key={p.id} id={p.id} stopped={stopped} isolation={host.data?.isolation} />}
+          </Route>
           <Route path="/done">{() => <Done />}</Route>
           <Route path="/settings" component={Settings} />
           <Route component={NotFound} />

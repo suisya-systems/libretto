@@ -2394,3 +2394,19 @@ input:disabled {
     flex: 1 1 auto;
   }
 }
+
+/* 帯: チェック項目を隠す仕組みが弱い（止まってはいない）。note-warn と同じ番の色（8.10 (6)） */
+.band-warn {
+  background: var(--color-turn-bg);
+  color: var(--color-turn);
+  border: 1.5px solid color-mix(in srgb, var(--color-turn) 35%, transparent);
+}
+.band-warn .band-dot {
+  background: var(--color-turn);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-turn) 22%, transparent);
+}
+.band > a {
+  margin-left: auto;
+  color: inherit;
+  text-decoration: underline;
+}
