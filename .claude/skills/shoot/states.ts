@@ -1,6 +1,7 @@
 // 撮る状態の定義。状態を足すときはここに 1 つ足す（preview.ts と shoot.sh は触らない）
 // どの状態も、会話で依頼を 1 つ出して入口待ち（本人の番）に着いたところから始まる（preview.ts）
-import type { CaseAction, CaseView } from '@libretto/shared/api'
+import type { CaseAction, CaseView, HostStatus, IsolationCause } from '@libretto/shared/api'
+import type { IsolationRecord } from '../../../host/src/checks/isolation.ts'
 import { paragraphUnits, renderHtml } from '../../../host/src/checks/text.ts'
 import type { ScriptEntry } from '../../../host/src/model/fake.ts'
 import { briefDraft, classified, goodChecks } from '../../../host/test/fixtures/entrance.ts'
@@ -27,7 +28,21 @@ export type State = {
   path?: (caseId: string) => string // 開く画面。既定は案件の面
   openaiKey?: true // 会話の前に OpenAI の API キーを入れておく（別系統で書く・設定済みの面）
   sameFirst390?: true // 390 の 1 画面目が他の状態と同じでよい（違いが下の方にだけある）。重複の検査から外す
+  // チェック項目を隠す仕組みの水準・原因・前回の確認（8.10。既定は strong・確認なし）
+  isolation?: { level: HostStatus['isolation']; cause?: IsolationCause; last?: IsolationRecord }
 }
+
+const probed = (verdict: IsolationRecord['verdict']): IsolationRecord => ({
+  at: '2026-10-24T05:03:00.000Z',
+  level: 'strong',
+  verdict,
+  session: true,
+  reached: true,
+  hidden: verdict !== 'visible',
+  homeOk: true,
+  control: verdict === 'hidden',
+  extraHome: [],
+})
 
 export const SHOOT_KEY = 'sk-shoot-0000000000001a2b' // 撮影用の偽の API キー（送らない。fake が答える）
 const say = (v: unknown) => ({ text: JSON.stringify(v) })
@@ -173,6 +188,29 @@ export const STATES: Record<string, State> = {
     mark: w('settings.key.set', { last4: SHOOT_KEY.slice(-4) }),
     path: () => '/settings',
   },
+  // 設定: 隠す仕組みが弱い（必要なソフトが無い）。前回は確かめられなかった
+  'settings-weak': {
+    script: entrance(),
+    isolation: { level: 'weak', cause: 'tools', last: { ...probed('unknown'), level: 'weak' } },
+    expect: (v) => v.state === '入口待ち',
+    mark: W['settings.probe.unknown'],
+    path: () => '/settings',
+  },
+  // 設定: しっかり隠せているはずが、前回の確認で見えた
+  'settings-visible': {
+    script: entrance(),
+    isolation: { level: 'strong', last: probed('visible') },
+    expect: (v) => v.state === '入口待ち',
+    mark: W['settings.probe.visible'],
+    path: () => '/settings',
+  },
+  // 入口: 隠す仕組みが弱い（素の Windows）帯
+  'entrance-weak': {
+    script: entrance(),
+    isolation: { level: 'weak', cause: 'windows' },
+    expect: (v) => v.state === '入口待ち' && v.turn === '本人' && !!v.entrance,
+    mark: W['band.isolationWeak'],
+  },
   // 進行: 渡してほしいものを待っている（本人の番）
   materials: {
     script: entrance({ ...briefDraft, brief: { ...briefDraft.brief, wanted: ['ブレストのメモ'] } }),
@@ -207,6 +245,15 @@ export const STATES: Record<string, State> = {
     drive: toApproval,
     expect: (v) => v.state === '承認待ち' && v.approvalKind === '完成稿' && verdictOf(v).failed === 1,
     mark: w('approval.remaining', { n: 1 }),
+    selector: '.doc-body',
+  },
+  // 承認: 隠す仕組みが動かない帯（全部通った版）
+  'approval-broken': {
+    script: clean,
+    isolation: { level: 'broken', cause: 'network' },
+    drive: toApproval,
+    expect: allPassed,
+    mark: W['band.isolationBroken'],
     selector: '.doc-body',
   },
   // 送付の確認: 仕立てと保存先の形のチェックが済み、本人の番（仕立ては機械だけで、整えている間は撮れない）

@@ -198,23 +198,31 @@ if (withModel && check.claudeOk) {
 
 // 4) 隔離の点検（8.10 (4)）を本物の claude（haiku。2 回で数円）で。作り手と同じ起こし方と、checks/ を開け直した対照
 if (withProbe) {
-  const ledger = initHome(home)
+  // 上の段は libretto.db などに乱数の語を書いたので、点検は新しい家で（本物のホストと同じく initHome から）
+  const probeHome = realpathSync(mkdtempSync(join(tmpdir(), 'libretto-probe-')))
+  const ledger = initHome(probeHome)
   const invokeWith = (sandbox: ReturnType<typeof createSandbox>) =>
     createInvoke({
       ledger,
-      backends: { claude: createClaudeCli({ usdJpy: () => 150, callsDir: callsDir(home), sandbox }) },
+      backends: { claude: createClaudeCli({ usdJpy: () => 150, callsDir: callsDir(probeHome), sandbox }) },
       caps: () => ({ caseCapYen: null, monthCapYen: null }),
       onCostCap: () => {},
-      callsDir: callsDir(home),
+      callsDir: callsDir(probeHome),
     })
-  const control = createSandbox({ home, claude, check: () => check, reopen: [join(probeDir(home), 'checks')] })
+  const main = createSandbox({ home: probeHome, claude, check: () => check })
+  const control = createSandbox({
+    home: probeHome,
+    claude,
+    check: () => check,
+    reopen: [join(probeDir(probeHome), 'checks')],
+  })
   const r = await checkIsolation(
     {
-      home,
+      home: probeHome,
       check: () => check,
-      invoke: invokeWith(box),
+      invoke: invokeWith(main),
       control: invokeWith(control),
-      homeNames: (w) => box.homeNames(w),
+      homeNames: (w) => main.homeNames(w),
     },
     new AbortController().signal,
   )
