@@ -435,6 +435,7 @@ describe('判定への組み込み（6.3.1 (7)(8)）', () => {
     docType: '記事',
     subject: 's',
     wanted: [],
+    gather: [],
     audience: 'a',
     destinations: [{ kind: 'page', shared: false }],
     shape: '短く',
