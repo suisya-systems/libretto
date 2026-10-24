@@ -48,6 +48,14 @@ export function resolveHome(env: NodeJS.ProcessEnv = process.env): string {
   return home
 }
 
+// 全体上限の検証用の上書き（11.3 (2)）。無ければ null（P3: 本人が設定の面で入れる）
+export function monthCapFromEnv(env: NodeJS.ProcessEnv = process.env): number | null {
+  const v = env.LIBRETTO_MONTH_CAP_YEN
+  if (v === undefined || v === '') return null
+  if (!/^[1-9]\d*$/.test(v)) throw new Error(`LIBRETTO_MONTH_CAP_YEN must be a positive integer: ${v}`)
+  return Number(v)
+}
+
 // 呼び出しの結果のファイルの置き場（9.4 (7)）
 export const callsDir = (home: string) => join(home, 'calls')
 // 案件フォルダ（9.3）

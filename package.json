@@ -16,6 +16,7 @@
     "lint": "biome check",
     "test": "vitest run",
     "verify": "npm run typecheck && npm run lint && npm run test",
+    "verify:live": "npm run build && node --experimental-strip-types --no-warnings host/scripts/verify-live.ts",
     "verify:sandbox": "node --experimental-strip-types --no-warnings host/scripts/sandbox-live.ts",
     "verify:isolation": "node --experimental-strip-types --no-warnings host/scripts/sandbox-live.ts --model --probe --record",
     "measure": "node --experimental-strip-types --no-warnings host/scripts/measure.ts",

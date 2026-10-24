@@ -4,12 +4,16 @@ import { dirname, join } from 'node:path'
 import type { Backend, Call, Reply, Why } from './invoke.ts'
 import type { Role } from './roles.ts'
 
-// text は壊れた JSON でもよい。costYen を省けば 0（fake は費用が掛からない）。hang は signal が切れるまで返らない。
+// text は壊れた JSON でもよい。json は JSON.stringify して text として返す（台本の JSON に二重に書かない。11.3 (1)）。
+// costYen を省けば 0（fake は費用が掛からない）。hang は signal が切れるまで返らない（write を置いてから。書きかけ）。
 // write は作り手の fake が作業場（workdir）に書くファイル。書いた名前を files として返す（6.2.3 (9)）
+type Written = { costYen?: number | null; files?: string[]; write?: Record<string, string> }
 export type ScriptReply =
-  | { text: string; costYen?: number | null; files?: string[]; write?: Record<string, string> }
+  | ({ text: string } & Written)
+  | ({ json: unknown } & Written)
   | { fail: 'unavailable'; why?: Why }
-  | { fail: 'budget' | 'hang' }
+  | { fail: 'budget' }
+  | { fail: 'hang'; write?: Record<string, string> }
 export type ScriptEntry = { role: Role; nth: number; reply: ScriptReply }
 
 // nth は役割ごとの実際の呼び出しの何回目か（1 から。言い直しも 1 回）。数えるのはこの fake 1 つの中
@@ -26,14 +30,17 @@ export function createFake(script: readonly ScriptEntry[]) {
     if (!entry) throw new Error(`fake: no script for ${call.role} #${nth}`)
     used.add(entry)
     const r = entry.reply
-    if (!('fail' in r)) {
+    if ('write' in r) {
       for (const [name, text] of Object.entries(r.write ?? {})) {
         if (!call.workdir) throw new Error('fake: write needs workdir')
         mkdirSync(dirname(join(call.workdir, name)), { recursive: true })
         writeFileSync(join(call.workdir, name), text, 'utf-8')
       }
+    }
+    if (!('fail' in r)) {
       const files = r.files ?? (r.write && Object.keys(r.write))
-      return { text: r.text, costYen: r.costYen === undefined ? 0 : r.costYen, ...(files && { files }) }
+      const text = 'text' in r ? r.text : JSON.stringify(r.json)
+      return { text, costYen: r.costYen === undefined ? 0 : r.costYen, ...(files && { files }) }
     }
     if (r.fail === 'unavailable') return { fail: r.fail, ...('why' in r && r.why && { why: r.why }), costYen: null }
     if (r.fail === 'budget') return { fail: r.fail, costYen: null }
