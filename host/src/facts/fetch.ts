@@ -65,7 +65,7 @@ export function htmlText(html: string): { title: string; paragraphs: string[] } 
     .replace(/\s+/g, ' ')
     .trim()
   const body = html
-    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/<!--[\s\S]*?(?:-->|$)/g, '') // 先頭 2 MB で切れた閉じていない注釈も捨てる
     .replace(DROP, '')
     .replace(DROP_OPEN, '')
     .replace(BLOCK, '\n\n')
