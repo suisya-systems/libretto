@@ -42,6 +42,10 @@ export const CodeFn = z.enum([
   'docsRoundTrip',
   'sheetsRoundTrip',
   'canary',
+  // 文体カードとの距離（docs/implementation.md 6.3.2 (6)）
+  'voiceEndings',
+  'voiceSentenceLength',
+  'voiceFirstPerson',
 ])
 export type CodeFn = z.infer<typeof CodeFn>
 
@@ -75,6 +79,9 @@ export const CodeArgs = {
   claimsInventoried: z.object({}),
   sourcesReachable: z.object({}),
   numbersMatch: z.object({}),
+  voiceEndings: z.object({}),
+  voiceSentenceLength: z.object({}),
+  voiceFirstPerson: z.object({}),
 } satisfies Partial<Record<CodeFn, z.ZodType>>
 
 export const JevScope = z.enum(['document', 'section', 'paragraph', 'claim'])
@@ -167,7 +174,16 @@ export const JEV_PARTIAL = '一部は判定専用モデルにつながらず、�
 export const Escalate = z.object({ why: z.enum(['直らない', '判定できない']), checkIds: z.array(CheckId).min(1) })
 export type Escalate = z.infer<typeof Escalate>
 
-// voiceMatch は Issue 19 で足す（5.3.3）
+// 文体カードとの比べ（docs/implementation.md 6.3.2 (9)）。you = カード、draft = 本文、ok = 項目の結果（null = 未判定）
+const Ok = z.boolean().nullable()
+export const VoiceMatch = z.object({
+  endings: z.object({ main: z.string(), you: z.number(), draft: z.number(), ok: Ok }),
+  sentenceLength: z.object({ you: z.number(), draft: z.number(), ok: Ok }),
+  firstPerson: z.object({ you: z.string(), draft: z.string(), ok: Ok }),
+  readAlike: Ok,
+})
+export type VoiceMatch = z.infer<typeof VoiceMatch>
+
 export const Review = z
   .object({
     version: z.number().int().min(1),
@@ -185,6 +201,7 @@ export const Review = z
     jevNote: z.string().optional(),
     jevBand: z.tuple([z.number(), z.number()]).optional(), // Jev を使った判定の帯（7.6 (5)）
     escalate: Escalate.optional(),
+    voiceMatch: VoiceMatch.optional(),
   })
   .refine((r) => r.pass === r.results.every((x) => x.verdict === 'pass'), {
     message: 'pass は results が全部 pass のときだけ真',

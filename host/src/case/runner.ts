@@ -1,15 +1,17 @@
 // runner（docs/implementation.md 4.1・4.4・6.2.3 (1)(2)(7)）。状態 × turn=libretto を見て仕事を 1 本起こす。
 // 遷移は transition だけが書く。ここは起動・続き・再起動・ログインし直し待ちを持つ
-import { copyFileSync, mkdirSync, readdirSync, readFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import type { CaseState } from '@libretto/shared/api'
-import type { CaseRecord } from '@libretto/shared/ledger'
+import type { CaseRecord, VoiceCard } from '@libretto/shared/ledger'
 import { deliver, tailor } from '../deliver/run.ts'
 import { gatherSources } from '../facts/gather.ts'
 import { type Fetch, fetchCached, materialsDir } from '../facts/inventory.ts'
+import { type Portrait, portraitJob, renderVoice, sha256Hex } from '../facts/voice.ts'
+import { caseDir } from '../ledger/db.ts'
 import type { Ledger } from '../ledger/ledger.ts'
 import type { Job, Outcome } from '../model/invoke.ts'
-import { approvedSet, renderBrief, writeAtomic } from '../roles/entrance.ts'
+import { approvedSet, renderBrief, voiceSamplesPath, writeAtomic } from '../roles/entrance.ts'
 import { judgeBody, judgeFormat } from '../roles/judge.ts'
 import { make, nn, workDir } from '../roles/maker.ts'
 import type { Runs } from '../runs.ts'
@@ -19,6 +21,15 @@ import { transition } from './transition.ts'
 // 取り寄せる URL（6.3.1 (5)）。閉じ括弧・句読点で切る
 const URL_IN_TEXT = /https?:\/\/[^\s<>"'()[\]（）」』、。]+/g
 const MAX_SOURCES = 5
+const sameUrl = (u: string) => {
+  try {
+    const x = new URL(u)
+    x.hash = '' // 同じページの中の場所違いも同じ見本
+    return x.href
+  } catch {
+    return u
+  }
+}
 
 const WORKING: readonly CaseState[] = ['入口待ち', '材料待ち', '下書き中', '検品中', '送付確認待ち', '送付中']
 
@@ -71,13 +82,22 @@ export function createRunner(d: Deps) {
       .sort()
     const text = [
       set.brief.subject,
-      ...set.brief.materials.map((m) => m.where),
+      ...set.brief.materials.filter((m) => m.kind !== '声の見本').map((m) => m.where),
       ...pasted.map((f) => readFileSync(join(src, f), 'utf-8')),
     ].join('\n')
-    // 本人の URL（5 件まで）の後に集めたもの（5 件まで）
-    const urls = [...new Set([...new Set(text.match(URL_IN_TEXT) ?? [])].slice(0, MAX_SOURCES).concat(gathered))]
+    // 本人の URL（5 件まで）の後に集めたもの（5 件まで）。文体の見本は出典として取り寄せない
+    // （作り手に見せない本人の段落が作業場に届く。6.3.2 (8)）
+    const voiceUrls = new Set(set.checks.voice?.docs.map((x) => sameUrl(x.url)))
+    const urls = [
+      ...new Set([...new Set(text.match(URL_IN_TEXT) ?? [])].slice(0, MAX_SOURCES).concat(gathered)),
+    ].filter((u) => !voiceUrls.has(sameUrl(u)))
     const got = await fetchCached(home, c.caseId, urls, signal, d.fetch)
     if (signal.aborted) return false
+    // 取り寄せた出典は組み立てのたびに書き直す（前の組で取った出典が、今の組の見本になっていても残さない）
+    const work = workDir(home, c.caseId)
+    for (const dir of [src, join(work, 'materials')])
+      if (existsSync(dir))
+        for (const f of readdirSync(dir)) if (/^source-\d+\.md$/.test(f)) rmSync(join(dir, f), { force: true })
     let k = 0
     for (const url of urls) {
       const f = got.get(url)
@@ -89,11 +109,29 @@ export function createRunner(d: Deps) {
       )
     }
     // 作業場の materials/ は写し。照合は正本だけを読む（作り手は作業場に書ける）
-    const work = workDir(home, c.caseId)
     mkdirSync(join(work, 'materials'), { recursive: true, mode: 0o700 })
     // gathered.json（集め役の出力）は写さない。作り手が読むのは資料の本文だけ（6.3.3 (6)）
     for (const f of readdirSync(src)) if (f.endsWith('.md')) copyFileSync(join(src, f), join(work, 'materials', f))
     writeAtomic(join(work, 'brief.md'), renderBrief(set.brief))
+    // 文体カード（6.3.2 (8)）。承認した組にカードが無ければ前の組のカードを作業場に残さない
+    const card = set.checks.voice?.card
+    if (card) {
+      const sp = voiceSamplesPath(home, c.caseId)
+      const raw = existsSync(sp) ? readFileSync(sp, 'utf-8') : undefined
+      const samples = raw && sha256Hex(raw) === set.checks.voice?.samplesFingerprint ? raw : undefined
+      const out = await d.invoke(portraitJob(c.caseId, card, samples, signal))
+      if (!out.ok && (out.kind === 'stopped' || out.kind === 'budget')) return false
+      if (signal.aborted) return false
+      const portrait = out.ok ? (out.json as Portrait).portrait : undefined
+      const voice: VoiceCard = {
+        ...card,
+        ...(portrait && { portrait }),
+        sources: (set.checks.voice?.docs ?? []).filter((x) => x.usable).map(({ title, url }) => ({ title, url })),
+      }
+      writeAtomic(join(caseDir(home, c.caseId), 'voice.json'), `${JSON.stringify(voice, null, 2)}\n`)
+      writeAtomic(join(caseDir(home, c.caseId), 'voice.md'), renderVoice(voice))
+      writeAtomic(join(work, 'voice.md'), renderVoice(voice))
+    } else rmSync(join(work, 'voice.md'), { force: true })
     if (signal.aborted) return false
     return emit(
       c.caseId,

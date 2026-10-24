@@ -316,6 +316,14 @@ function EntranceSet(p: {
               </>
             )}
           </p>
+          {e.checks.voice &&
+            (e.checks.voice.card ? (
+              <p className="muted small">{w('entrance.voice.made', { n: e.checks.voice.docs })}</p>
+            ) : (
+              <p className="note-warn small">
+                {W['entrance.voice.none']} <Link href="/settings">{W['entrance.voice.link']}</Link>
+              </p>
+            ))}
           <ul className="cats">
             {cats.map(([k, n]) => (
               <li key={k} className="badge b-off">
@@ -345,6 +353,11 @@ function EntranceSet(p: {
                         </span>
                       )}
                       {x.minority && <span className="badge b-you badge-sm">{W['entrance.minority']}</span>}
+                      {x.own && (
+                        <span className={`badge badge-sm ${x.own === 'fail' ? 'b-alert' : 'b-done'}`}>
+                          {W[`entrance.own.${x.own}`]}
+                        </span>
+                      )}
                     </div>
                   </div>
                 </li>

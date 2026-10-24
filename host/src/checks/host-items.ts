@@ -88,6 +88,43 @@ const FACTS: (Item & { pass: Check['pass'] })[] = [
   },
 ]
 
+// 文体カードとの距離の 3 項目と読み比べ（6.3.2 (6)(7)）。カードがあれば 3 項目、見本の段落があれば読み比べ
+export const READ_ALIKE_QUESTION = '本文と「本人の文章の見本」を並べて読むと、同じ人が書いた文章に読める'
+const voiceCode = (
+  fn: 'voiceEndings' | 'voiceSentenceLength' | 'voiceFirstPerson',
+  title: string,
+  summary: string,
+) => ({
+  category: '声' as const,
+  title,
+  judge: { by: 'code' as const, fn, args: {} },
+  summary,
+  pass: { kind: 'all' as const },
+  hidden: false,
+  selfReport: '依頼に書いてある' as const,
+})
+const VOICE_CODE = [
+  voiceCode('voiceEndings', '文末の形が、あなたの文体カードと同じ割合で出てくる', '文末の形が文体カードと違います'),
+  voiceCode('voiceSentenceLength', '一文の長さが、あなたの文体カードに近い', '一文の長さが文体カードと違います'),
+  voiceCode('voiceFirstPerson', '一人称が、あなたの文体カードと同じ', '一人称が文体カードと違います'),
+]
+const READ_ALIKE = {
+  category: '声' as const,
+  title: 'あなたの過去の文章と並べて読んでも、同じ人が書いたように読める',
+  judge: {
+    by: 'claude' as const,
+    question: READ_ALIKE_QUESTION,
+    materials: ['draft' as const, 'voice-samples' as const],
+    scope: 'document' as const,
+  },
+  summary: 'あなたの過去の文章と書きぶりが違って読めます',
+  pass: { kind: 'all' as const },
+  hidden: true,
+  selfReport: '書いていない' as const,
+}
+// firstPerson = カードに一人称がある（「なし」なら一人称の項目は足さない。6.3.2 (6)）
+export type VoiceItems = { card: boolean; samples: boolean; firstPerson?: boolean }
+
 function itemsFor(t: DeliveryTarget): Item[] {
   switch (t.kind) {
     case 'page':
@@ -111,6 +148,7 @@ export function withHostItems(
   destinations: readonly DeliveryTarget[],
   token = randomBytes(16).toString('hex'),
   sources: Brief['sources'] = '出典なし',
+  voice: VoiceItems = { card: false, samples: false },
 ): Check[] {
   const formats = [...new Set(destinations.flatMap(itemsFor))]
   const added: Omit<Check, 'id'>[] = [
@@ -125,6 +163,10 @@ export function withHostItems(
       selfReport: '書いていない',
       canary: true,
     },
+    ...(voice.card ? VOICE_CODE : [])
+      .filter((v) => voice.firstPerson !== false || v.judge.fn !== 'voiceFirstPerson')
+      .map((v) => ({ ...v, phase: '本文' as const })),
+    ...(voice.samples ? [{ ...READ_ALIKE, phase: '本文' as const }] : []),
     ...(sources === '出典付き' ? FACTS : []).map((f) => ({
       ...f,
       phase: '本文' as const,

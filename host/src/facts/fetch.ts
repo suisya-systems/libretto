@@ -6,7 +6,8 @@ import { request as httpsRequest } from 'node:https'
 import { BlockList, isIP } from 'node:net'
 import { decode } from '../checks/text.ts'
 
-export type Fetched = { ok: true; url: string; title: string; paragraphs: string[]; fingerprint: string }
+// md = 見出しを `# `、箇条書きの項目を `- ` で始めた段落の Markdown（文体カードが使う。6.3.2 (3)）。キャッシュから読んだものには無い
+export type Fetched = { ok: true; url: string; title: string; paragraphs: string[]; fingerprint: string; md?: string }
 export type FetchFailure = {
   ok: false
   why: 'network' | 'timeout' | 'refused' | 'unsupported' | 'blocked'
@@ -60,17 +61,37 @@ const DROP_OPEN = new RegExp(`<(${DROPPED.replace('|head', '')})\\b[\\s\\S]*$`, 
 const BLOCK =
   /<\/?(p|div|br|li|ul|ol|h[1-6]|tr|td|th|table|section|article|header|footer|nav|aside|main|blockquote|pre|dd|dt|figcaption)\b[^>]*>/gi
 
-export function htmlText(html: string): { title: string; paragraphs: string[] } {
+export function htmlText(html: string): { title: string; paragraphs: string[]; md: string } {
   const title = decode(/<title\b[^>]*>([\s\S]*?)<\/title>/i.exec(html)?.[1]?.replace(/<[^>]*>/g, '') ?? '')
     .replace(/\s+/g, ' ')
     .trim()
-  const body = html
+  const kept = html
     .replace(/<!--[\s\S]*?(?:-->|$)/g, '') // 先頭 2 MB で切れた閉じていない注釈も捨てる
     .replace(DROP, '')
     .replace(DROP_OPEN, '')
-    .replace(BLOCK, '\n\n')
-    .replace(/<[^>]*>/g, '')
-  return { title, paragraphs: textParagraphs(decode(body)) }
+  // 項目の中のブロック（<li><p>…</p><p>…</p></li>）は区切らず、項目 1 つの段落にする（md だけ）
+  const items = kept.replace(/<li\b[^>]*>[\s\S]*?(?=<\/li>|<li\b|<\/[uo]l>|$)/gi, (m) =>
+    m.replace(/<\/?(p|div|br|section|article|blockquote|pre)\b[^>]*>/gi, ' '),
+  )
+  const text = (s: string) => textParagraphs(decode(s.replace(BLOCK, '\n\n').replace(/<[^>]*>/g, '')))
+  // 見出しと項目の開きタグに印を置いてから同じように段落に分ける
+  const marked = items.replace(/<h[1-6]\b[^>]*>/gi, '\n\n\uE000').replace(/<li\b[^>]*>/gi, '\n\n\uE001')
+  // 印だけの段落（<li><p>…</p></li> のように中にブロックがある形）は、次の段落に印を持ち越す
+  const out: string[] = []
+  let carry = ''
+  for (const p of text(marked)) {
+    const m = /^([\uE000\uE001]\s*)+/.exec(p)
+    const mark = m ? (m[0].includes('\uE000') ? '# ' : '- ') : ''
+    const rest = p.replace(/[\uE000\uE001]/g, '').trim()
+    if (!rest) {
+      carry = mark || carry
+      continue
+    }
+    out.push(`${mark || carry}${rest}`)
+    carry = ''
+  }
+  const md = out.join('\n\n')
+  return { title, paragraphs: text(kept), md }
 }
 
 export const textParagraphs = (text: string) =>
@@ -108,7 +129,10 @@ export async function fetchSource(url: string, o: Options = {}): Promise<Fetched
       }
       continue
     }
-    const text = r.html ? htmlText(r.body) : { title: '', paragraphs: textParagraphs(r.body) }
+    const paras = r.html ? undefined : textParagraphs(r.body)
+    const text = r.html
+      ? htmlText(r.body)
+      : { title: '', paragraphs: paras as string[], md: (paras as string[]).join('\n\n') }
     if (!text.paragraphs.length) return { ok: false, why: 'refused' }
     return {
       ok: true,
@@ -116,6 +140,7 @@ export async function fetchSource(url: string, o: Options = {}): Promise<Fetched
       title: text.title,
       paragraphs: text.paragraphs,
       fingerprint: sha256(text.paragraphs.join('\n')),
+      md: text.md,
     }
   }
   return { ok: false, why: 'refused' } // リダイレクトが多すぎる

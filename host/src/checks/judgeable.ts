@@ -2,10 +2,11 @@
 // 関数を実装する後の Issue（15・18・19・26）はここに 1 行足す
 import { Worker } from 'node:worker_threads'
 import { type Check, CodeArgs, type CodeFn, type Phase } from '@libretto/shared/checks'
-import type { FactsFile } from '@libretto/shared/ledger'
+import type { FactsFile, VoiceNumbers } from '@libretto/shared/ledger'
 import type { z } from 'zod'
 import { safeHref } from '../deliver/page.ts'
 import { markerCheck } from '../facts/markers.ts'
+import { endingShares, FIRST_PERSON, firstPersonOf, median, otherFirstPerson } from '../facts/voice.ts'
 import {
   align,
   blocks,
@@ -24,8 +25,9 @@ import {
 } from './text.ts'
 
 type PassKind = Check['pass']['kind']
-// 判定の材料。page / paste は仕立ての成果物（形式の phase だけ。6.2.5 (5)）。facts は版の事実（6.3.1 (7)）
-export type FnInput = { md: string; page?: string; paste?: string; facts?: FactsFile }
+// 判定の材料。page / paste は仕立ての成果物（形式の phase だけ。6.2.5 (5)）。facts は版の事実（6.3.1 (7)）。
+// voice は承認した組の文体カードの数値（6.3.2 (6)）
+export type FnInput = { md: string; page?: string; paste?: string; facts?: FactsFile; voice?: VoiceNumbers }
 // units は単位ごとの「はい」。timedOut は打ち切った（verdict は unable）。
 // measured.gap は合格までの距離（6.2.7 (1)）。範囲で測る関数だけが書き、ほかは judge が裏返す単位の数で埋める
 export type FnResult = { units: boolean[]; measured?: Record<string, number>; timedOut?: true }
@@ -39,6 +41,7 @@ type Fn<A> = {
   phase: Phase
   host?: true // ホストだけが書く（下書き役は使えない）
   facts?: true // 版の事実（棚卸し）が要る。judge が事実の関数の前に 1 回だけ棚卸しをする（6.3.1 (7)）
+  voice?: true // 文体カードが要る。無ければ judge が unable にする（6.3.2 (6)）
   run: (args: A, input: FnInput) => FnResult | Promise<FnResult>
 }
 const fn = <A>(f: Fn<A>) => f as Fn<unknown>
@@ -51,33 +54,14 @@ const norm = (s: string) => s.normalize('NFKC').toLowerCase()
 // 見出しも段落も Markdown の記号を外して比べる（**社外**秘 も「社外秘」として数える）
 const allBlocks = (md: string) =>
   blocks(md).map((b) => (b.kind === 'heading' ? plain(b.text) : b.lines.map(plain).join('\n')))
-const median = (xs: number[]) => {
-  const s = [...xs].sort((a, b) => a - b)
-  const m = Math.floor(s.length / 2)
-  return s.length % 2 ? (s[m] as number) : ((s[m - 1] as number) + (s[m] as number)) / 2
-}
 const counted = (units: boolean[]) => ({ units, measured: { hits: units.filter(Boolean).length } })
 const need = <T>(v: T | undefined, name: string) => {
   if (v === undefined) throw new Error(`no ${name} output`)
   return v
 }
 
-// 一人称の表（6.2.5 (2)）。長い語から当て、allowed で始まる語は許す。
-// ponytail: 「私立」「私服」のような語にも当たる。困ったら形態素で切る
-export const FIRST_PERSON = [
-  'わたくし',
-  'われわれ',
-  'わたし',
-  'あたし',
-  '私',
-  '僕',
-  'ぼく',
-  '俺',
-  'おれ',
-  '筆者',
-  '我々',
-  '小生',
-]
+export { FIRST_PERSON }
+
 const firstPersonHits = (md: string, allowed: string, others?: string[]) => {
   const terms = [...FIRST_PERSON, ...(others ?? [])].sort((a, b) => b.length - a.length)
   const bad = new Set(others ?? FIRST_PERSON.filter((p) => !p.startsWith(allowed)))
@@ -119,6 +103,8 @@ export function patternProblem(pattern: string): string | undefined {
   if (/[+*}]\)+[+*{]/.test(pattern)) return '量指定子の入れ子（(a+)+ のような形）は使えません'
   return undefined
 }
+
+export const VOICE_WIDTH = { endings: 0.15, length: [0.7, 1.3] as const }
 
 export const FNS: Partial<Record<CodeFn, Fn<unknown>>> = {
   charCount: fn({
@@ -286,6 +272,53 @@ export const FNS: Partial<Record<CodeFn, Fn<unknown>>> = {
       )
     },
   }),
+  // 文体カードとの距離（6.3.2 (6)）。幅は 1 人の文章の中のばらつきの目安
+  voiceEndings: fn({
+    args: CodeArgs.voiceEndings,
+    example: {},
+    unit: '本文全体',
+    yes: '文体カードでいちばん多い文末の形の割合が、カードの割合より 0.15 以上は下がっていない',
+    pass: ['all'],
+    phase: '本文',
+    host: true,
+    voice: true,
+    run: (_, { md, voice }) => {
+      const v = need(voice, 'voice')
+      const ratio = endingShares(sentences(md))[v.main]
+      const target = v.endings[v.main] - VOICE_WIDTH.endings
+      return { units: [ratio >= target], measured: { ratio, target, gap: Math.max(0, target - ratio) } }
+    },
+  }),
+  voiceSentenceLength: fn({
+    args: CodeArgs.voiceSentenceLength,
+    example: {},
+    unit: '本文全体',
+    yes: '文の長さの中央値が、文体カードの中央値の 0.7〜1.3 倍',
+    pass: ['all'],
+    phase: '本文',
+    host: true,
+    voice: true,
+    run: (_, { md, voice }) => {
+      const target = need(voice, 'voice').sentenceLength.median
+      const m = median(sentences(md).map(sentenceLength))
+      const r = { min: target * VOICE_WIDTH.length[0], max: target * VOICE_WIDTH.length[1] }
+      return { units: [inRange(m, r)], measured: { median: m, target, gap: outside(m, r) } }
+    },
+  }),
+  voiceFirstPerson: fn({
+    args: CodeArgs.voiceFirstPerson,
+    example: {},
+    unit: '本文全体',
+    yes: '文体カードの一人称以外の一人称が出てこない（カードが「なし」なら一人称が出てこない）',
+    pass: ['all'],
+    phase: '本文',
+    host: true,
+    voice: true,
+    run: (_, { md, voice }) => {
+      const hits = otherFirstPerson(md, need(voice, 'voice').firstPerson)
+      return { units: [hits === 0], measured: { hits, gap: hits } }
+    },
+  }),
   pasteSafe: fn({
     args: CodeArgs.pasteSafe,
     example: {},
@@ -370,6 +403,13 @@ export function judgeableViolations(c: Check, drafter: boolean): string[] {
       v.push(`${c.id}: materials の ${bad.join('、')} は使えません。使えるのは ${CLAUDE_MATERIALS.join(' / ')}`)
   }
   return v
+}
+
+export const needsVoice = (c: Check) => c.judge.by === 'code' && !!FNS[c.judge.fn]?.voice
+// 本文を voice の数え方で見た値（voiceMatch の draft。6.3.2 (9)）
+export function draftVoice(md: string, main: keyof ReturnType<typeof endingShares>) {
+  const ss = sentences(md)
+  return { ending: endingShares(ss)[main], median: median(ss.map(sentenceLength)), firstPerson: firstPersonOf(md) }
 }
 
 // 機械判定を 1 項目流す。表に無い関数・合わない args は例外（受け入れで弾いているので、起きるのは壊れた組だけ）

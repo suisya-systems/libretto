@@ -87,8 +87,23 @@ const draft = (k: number, md = BODY): ScriptReply => ({
 
 // 出典の取り寄せの偽物（網に出ない。6.3.1 (5)）
 const fetched: string[] = []
+// 文体の見本（です・ます。80〜400 字の段落が 2 つ）
+const VOICE_PARA_1 =
+  '私は毎週の振り返りで、うまくいったことを先に書くようにしています。そうすると次の一週間の始め方が決まります。小さな工夫ですが、続けるうちに効いてきました。忙しい週ほど、この順番が助けになります。'
+const VOICE_PARA_2 =
+  '振り返りの時間は十五分と決めています。長く取ると反省ばかりが増えて、手が止まってしまうからです。短く区切ると、次にやることが一つに絞れます。終わったら、その一つだけを手帳に書いておきます。'
+const VOICE_MD = `# 振り返りの話\n\n${VOICE_PARA_1}\n\n${VOICE_PARA_2}`
 const fakeFetch = async (url: string): Promise<Fetched | FetchFailure> => {
   fetched.push(url)
+  if (url.includes('/voice'))
+    return {
+      ok: true,
+      url,
+      title: '過去の記事',
+      paragraphs: [VOICE_PARA_1, VOICE_PARA_2],
+      fingerprint: 'v',
+      md: VOICE_MD,
+    }
   return url.endsWith('/gone')
     ? { ok: false, why: 'network' }
     : { ok: true, url, title: '週報', paragraphs: ['方針は 3 つ。'], fingerprint: 'f' }
@@ -579,6 +594,144 @@ describe('材料待ち（6.2.4）', () => {
 })
 
 // 判定役（docs/implementation.md 6.2.5・4.2 T15〜T17・T20〜T21b）。機械判定は通り、Claude の答えで合否が決まる組
+describe('文体カード（6.3.2）', () => {
+  const VOICE_URL = 'https://example.com/voice-1'
+  // 依頼書の書く内容にも見本の URL がある（出典として取り寄せない）
+  const matching = {
+    ...briefDraft,
+    brief: { ...briefDraft.brief, voice: '合わせる', subject: `${briefDraft.brief.subject}。参考 ${VOICE_URL}#part` },
+  }
+  const plainChecks = [
+    ...runnerChecks,
+    {
+      id: 'C07',
+      category: '声' as const,
+      title: '文末がだ・である調でそろっている',
+      judge: { by: 'code' as const, fn: 'sentenceEndingRatio' as const, args: { endings: ['だ', 'である'] } },
+      pass: { kind: 'ratio' as const, min: 0.9 },
+      phase: '本文' as const,
+      summary: '文末の調子がそろっていません',
+      hidden: false,
+      selfReport: '書いていない' as const,
+    },
+  ]
+  const rows: [Role, ScriptReply][] = [
+    ['話し相手', say(intake)],
+    ['下書き役・依頼書', say(matching)],
+    ['下書き役・確認項目', say({ checks: plainChecks })],
+    ['事実係・分類', say({ items: [...classified.items, { checkId: 'C07', verdict: '決まる' }] })],
+  ]
+  const portrait = say({ portrait: ['結論を先に書く。', 'です・ます調で語りかける。', '短い文を重ねる。'] })
+  // 作り手の呼び出しを止めておき、下書き中に留める（閉じたときの削除の前に見る）
+  const makers: { instruction: string }[] = []
+  const hangMaker =
+    (b: Backend): Backend =>
+    (call) =>
+      call.role === '作り手'
+        ? new Promise((_, reject) => {
+            makers.push(call)
+            call.signal.addEventListener('abort', () => reject(call.signal.reason), { once: true })
+          })
+        : b(call)
+  const putSamples = (samples: unknown) =>
+    server.app.request('/api/settings/voice-samples', {
+      method: 'PUT',
+      headers: { cookie, origin: ORIGIN, 'content-type': 'application/json' },
+      body: JSON.stringify({ samples }),
+    })
+
+  it('設定の見本から入口でカードと点検を作り、T11 で voice.md を作業場に置く。見本の段落は作業場に届かない', async () => {
+    makers.length = 0
+    await setup(script(...rows, ['事実係・描写', portrait]), hangMaker)
+    expect((await putSamples([{ title: '振り返りの話', url: VOICE_URL }])).status).toBe(200)
+    const id = await approved()
+    await vi.waitFor(() => expect(makers).toHaveLength(1), { timeout: 2000, interval: 5 })
+
+    const v = await caseView(id)
+    expect(v.entrance?.checks.voice).toEqual({ docs: 1, card: true })
+    // 本人の文章（です・ます）は だ・である の項目を通らない
+    expect(v.entrance?.checks.items.find((x) => x.id === 'C07')?.own).toBe('fail')
+    const fns = (v.entrance?.checks.items ?? []).filter((x) => x.category === '声').map((x) => x.title)
+    expect(fns).toHaveLength(5) // C07 とホストの 3 項目と読み比べ
+
+    // 見本は入口で 1 回だけ取り寄せる（T11 の出典に入れない）
+    expect(fetched).toEqual([VOICE_URL])
+    expect(readdirSync(join(caseDir(home, id), 'materials'))).toEqual([])
+    expect(readdirSync(work(id, 'materials'))).toEqual([])
+
+    const card = JSON.parse(readFileSync(join(caseDir(home, id), 'voice.json'), 'utf-8'))
+    expect(card).toMatchObject({
+      main: 'です・ます',
+      firstPerson: '私',
+      sources: [{ title: '振り返りの話', url: VOICE_URL }],
+    })
+    expect(card.portrait).toHaveLength(3)
+    expect(readFileSync(work(id, 'voice.md'), 'utf-8')).toContain('いちばん多いのは です・ます')
+    expect(readFileSync(join(caseDir(home, id), 'checks', 'voice-samples.md'), 'utf-8')).toContain(VOICE_PARA_1)
+    expect(allWorkText(id)).not.toContain(VOICE_PARA_1.slice(0, 20))
+    expect(makers[0]?.instruction).toContain('voice.md: 本人の文体カード')
+    // 描写には数値と見本を渡し、作業場は渡さない
+    const p = fake.calls.find((c) => c.role === '事実係・描写')
+    expect(p?.access).toBe('none')
+    expect(p?.materials.map((m) => m.name)).toEqual(['文体カード', '本人の文章'])
+  })
+
+  it('前の組み立てで取った出典は書き直す（今の組の見本になった本文を作業場に残さない）', async () => {
+    makers.length = 0
+    await setup(script(...rows, ['事実係・描写', portrait]), hangMaker)
+    await putSamples([{ title: '振り返りの話', url: VOICE_URL }])
+    await postJson('/api/conversation/messages', { requestId: uuid(), lastSeq: 0, text: '記事にして' })
+    await server.conversation.settled()
+    const id = ledger.lastMessage('lobby')?.caseId as string
+    await vi.waitFor(() => expect(ledger.getCase(id)?.turn).toBe('本人'), { timeout: 2000, interval: 5 })
+    const old = `# 過去の記事\n\n${VOICE_URL}\n\n${VOICE_PARA_1}\n`
+    for (const dir of [join(caseDir(home, id), 'materials'), work(id, 'materials')]) {
+      mkdirSync(dir, { recursive: true })
+      writeFileSync(join(dir, 'source-01.md'), old)
+    }
+    const v = await caseView(id)
+    await act(id, {
+      type: 'entrance.approve',
+      answers: { U01: ['b'] },
+      mode: '確認しながら',
+      setFingerprint: v.entrance?.setFingerprint,
+    })
+    await vi.waitFor(() => expect(makers).toHaveLength(1), { timeout: 2000, interval: 5 })
+    expect(readdirSync(join(caseDir(home, id), 'materials'))).toEqual([])
+    expect(allWorkText(id)).not.toContain(VOICE_PARA_1.slice(0, 20))
+  })
+
+  it('見本が 1 つも開けなければカードを作らず、ホストの声の項目も足さない', async () => {
+    makers.length = 0
+    await setup(script(...rows), hangMaker)
+    expect((await putSamples([{ title: '消えた記事', url: 'https://example.com/gone' }])).status).toBe(200)
+    const id = await approved()
+    await vi.waitFor(() => expect(makers).toHaveLength(1), { timeout: 2000, interval: 5 })
+    const v = await caseView(id)
+    expect(v.entrance?.checks.voice).toEqual({ docs: 0, card: false })
+    expect(v.entrance?.checks.items.filter((x) => x.category === '声').map((x) => x.id)).toEqual(['C07'])
+    expect(v.entrance?.checks.items.find((x) => x.id === 'C07')?.own).toBeUndefined()
+    expect(existsSync(work(id, 'voice.md'))).toBe(false)
+    expect(existsSync(join(caseDir(home, id), 'checks', 'voice-samples.md'))).toBe(false)
+    expect(makers[0]?.instruction).not.toContain('voice.md')
+  })
+
+  it('見本の設定: 形の誤りは 400、保存すると前の版を残す', async () => {
+    await setup([])
+    const bad = [
+      [{ title: '', url: VOICE_URL }],
+      [{ title: 't', url: 'ftp://example.com/a' }],
+      Array.from({ length: 6 }, (_, i) => ({ title: `t${i}`, url: `${VOICE_URL}${i}` })),
+    ]
+    for (const b of bad) expect((await putSamples(b)).status).toBe(400)
+    expect(await (await get('/api/settings/voice-samples')).json()).toEqual({ samples: [] })
+    await putSamples([{ title: 'a', url: VOICE_URL }])
+    const res = await putSamples([{ title: ' b ', url: VOICE_URL }])
+    expect(await res.json()).toEqual({ samples: [{ id: 'V1', kind: '声の見本', title: 'b', where: VOICE_URL }] })
+    expect(JSON.parse(readFileSync(join(home, 'settings.prev.json'), 'utf-8')).voiceSamples[0].title).toBe('a')
+  })
+})
+
 const verdicts = (ok: boolean): ScriptReply =>
   say({
     results: [

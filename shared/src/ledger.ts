@@ -269,6 +269,44 @@ export const BriefFile = Brief.extend({
   approvedFingerprint: z.string().optional(),
 })
 export type BriefFile = z.infer<typeof BriefFile>
+// 文体カードの数値（設計書 5.5 の表。決め方は docs/implementation.md 6.3.2 (3)）
+export const ENDINGS = ['です・ます', 'だ・である', '体言止め', 'ぼかし'] as const
+export const Ending = z.enum(ENDINGS)
+export type Ending = z.infer<typeof Ending>
+const share = z.number().min(0).max(1)
+export const VoiceNumbers = z.object({
+  endings: z.record(Ending, share),
+  main: Ending,
+  sentenceLength: z.object({ median: z.number().min(0), p90: z.number().min(0) }),
+  firstPerson: z.string().min(1), // 一人称の語か 'なし'
+  readerAddress: z.string().min(1), // 読者の呼び方か 'なし'
+  punctuation: z.object({
+    commasPerSentence: z.number().min(0),
+    marks: z.object({ '！': z.boolean(), '？': z.boolean(), '（': z.boolean(), '—': z.boolean() }),
+    fullwidthAlnum: share.nullable(), // 英数字が無ければ null
+  }),
+  script: z.object({ kanji: share, katakana: share }),
+  openers: z.array(z.string()).max(5),
+  unused: z.array(z.string()),
+  paragraphs: z.object({ sentences: z.number().min(0), headings: z.enum(['体言', '文', 'なし']) }),
+})
+export type VoiceNumbers = z.infer<typeof VoiceNumbers>
+// 承認した組に入れる文体の見本と点検（6.3.2 (2)(5)）。本文の写しは入れない
+export const ChecksVoice = z.object({
+  docs: z.array(z.object({ title: z.string(), url: z.string(), fingerprint: z.string(), usable: z.boolean() })),
+  card: VoiceNumbers.optional(),
+  samplesFingerprint: z.string().optional(),
+  ownChecked: z.array(z.string()),
+  ownFails: z.array(z.string()),
+})
+export type ChecksVoice = z.infer<typeof ChecksVoice>
+// voice.json（9.3。T11 で書く。6.3.2 (8)）
+export const VoiceCard = VoiceNumbers.extend({
+  portrait: z.array(z.string().min(1)).length(3).optional(),
+  sources: z.array(z.object({ title: z.string(), url: z.string() })),
+})
+export type VoiceCard = z.infer<typeof VoiceCard>
+
 export const ChecksFile = z.object({
   checks: z.array(Check),
   family: z.enum(['別系統', '同系統']),
@@ -276,6 +314,7 @@ export const ChecksFile = z.object({
   // Jev の項目の点検（同系統のときだけ。7.6 (7)）。shapeOnly は入口の面で書く側にも伝わる側に出す項目
   inspected: z.literal(true).optional(),
   shapeOnly: z.array(z.string()).optional(),
+  voice: ChecksVoice.optional(), // 依頼書が「合わせる」のときだけ（6.3.2 (2)）
   approvedFingerprint: z.string().optional(),
 })
 export type ChecksFile = z.infer<typeof ChecksFile>
