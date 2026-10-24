@@ -97,6 +97,21 @@ describe('srtSettings（8.3・8.6・8.9 (3)）', () => {
     expect(s).not.toHaveProperty('ripgrep')
   })
 
+  it('npm で入れた claude（JS）はパッケージのディレクトリを読めるようにする', () => {
+    const pkg = '/home/u/.npm-global/lib/node_modules/@anthropic-ai/claude-code'
+    const r = srtSettings({
+      home,
+      userHome: user,
+      configDir: `${user}/.claude`,
+      work,
+      tmp: '/t',
+      claude: `${pkg}/cli.js`,
+      node: '/n',
+      srtVendor: '/v',
+    })
+    expect(r.filesystem.allowRead).toContain(pkg)
+  })
+
   it('rg が無く claude が単体なら、claude を ripgrep として起こす', () => {
     const r = srtSettings({
       home,
@@ -175,6 +190,17 @@ describe('createSandbox.prepare（8.9 (1)(3)(4)）', () => {
     expect(p.env).not.toHaveProperty('OPENAI_API_KEY')
     await p.cleanup()
     expect(existsSync(p.env.CLAUDE_CODE_TMPDIR ?? '')).toBe(false)
+  })
+
+  it('JS の claude は許した Node で起こす（shebang の node を sandbox の中で探さない）', async () => {
+    const box = createSandbox({ home: join(dir, 'home'), claude: [FAKE], srt: FAKE_SRT, check: () => strong })
+    const p = await box.prepare(work(), ['-p'], { PATH: '/usr/bin' })
+    expect(p.argv.slice(p.argv.indexOf('--') + 1, p.argv.indexOf('--') + 4)).toEqual([
+      realpathSync(process.execPath),
+      realpathSync(FAKE),
+      '-p',
+    ])
+    await p.cleanup()
   })
 
   it('CLAUDE_CONFIG_DIR がホームの外でも、その置き場を拒否してログイン情報だけを戻す', async () => {

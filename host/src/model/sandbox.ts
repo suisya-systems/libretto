@@ -81,7 +81,15 @@ export function srtSettings(i: SettingsInput) {
   return {
     filesystem: {
       denyRead: [i.userHome, i.home, i.configDir],
-      allowRead: [i.work, i.claude, i.node, i.srtVendor, ...(i.credentials ? [i.credentials] : []), i.tmp],
+      // npm で入れた claude（JS）はパッケージのディレクトリごと要る
+      allowRead: [
+        i.work,
+        isScript(i.claude) ? dirname(i.claude) : i.claude,
+        i.node,
+        i.srtVendor,
+        ...(i.credentials ? [i.credentials] : []),
+        i.tmp,
+      ],
       allowWrite: [i.work, i.tmp],
       denyWrite: [],
     },
@@ -151,7 +159,15 @@ export function createSandbox(o: SandboxOptions) {
           '--settings',
           settings,
           '--',
-          ...(inner ?? [claude, ...rest, ...args, '--settings', deny]),
+          // JS の claude は shebang の node を sandbox の中の PATH で探せないので、許した Node で起こす
+          ...(inner ?? [
+            ...(isScript(claude) ? [realpathSync(process.execPath)] : []),
+            claude,
+            ...rest,
+            ...args,
+            '--settings',
+            deny,
+          ]),
         ],
         env: { ...withoutTmpdir(env), CLAUDE_CODE_TMPDIR: tmp },
         cleanup,
