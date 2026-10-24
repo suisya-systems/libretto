@@ -1853,15 +1853,15 @@ CLI に渡す旗（作り手。役割の `access` ごとの道具と `cwd`、材
 
 | 欄 | 中身 |
 |---|---|
-| `filesystem.denyRead` | ホーム、`LIBRETTO_HOME` |
-| `filesystem.allowRead` | 作業場、claude の実体のファイル（PATH から探して `realpath` したもの）、Node の実体、`srt` の `vendor/`（Linux で sandbox の中から起こす `apply-seccomp` がある）、ログイン情報のファイル（子に渡す `CLAUDE_CONFIG_DIR` があればその下、無ければ `~/.claude/` の下の `.credentials.json`。あるときだけ）、呼び出しごとの一時ディレクトリ |
+| `filesystem.denyRead` | ホーム、`LIBRETTO_HOME`、claude の設定の置き場（子に渡す `CLAUDE_CONFIG_DIR`、無ければ `~/.claude`。ホームの外に置かれていても、ほかのセッションの記録を読ませない） |
+| `filesystem.allowRead` | 作業場、claude の実体のファイル（PATH から探して `realpath` したもの）、Node の実体、`srt` の `vendor/`（Linux で sandbox の中から起こす `apply-seccomp` がある）、ログイン情報のファイル（上の設定の置き場の下の `.credentials.json`。あるときだけ）、呼び出しごとの一時ディレクトリ |
 | `filesystem.allowWrite` | 作業場、呼び出しごとの一時ディレクトリ |
 | `network.allowedDomains` | `api.anthropic.com`、`claude.ai`、`platform.claude.com` |
 | `ripgrep` | PATH に `rg` があれば既定のまま。無く、claude が単体の実行ファイル（公式のインストーラの形）なら `{ command: <claude の実体>, argv0: 'rg' }` |
 
 - claude は実体のパスで起こす（`~/.local/bin/claude` は版のディレクトリへの symlink で、sandbox の中の PATH はホームの下を見せない）。
 - Linux の `srt` はディレクトリの `denyRead` を空の書ける tmpfs にする。だからホームは 8.6 の「使い捨ての tmpfs」になり、CLI がホームに書く `~/.claude.json` などはそこに書かれて消える（8.3 の「libretto が作った使い捨ての `.claude.json`」はこれで足り、ホストは作らない）。ログイン情報は読めるだけで、更新（トークンの書き戻し）は残らない。期限が切れていれば `auth_expired`（6.2.3 (7) の待ち）になり、本人のふだんの CLI か包まない役割の呼び出しが更新する。
-- 一時: `srt` は子の `TMPDIR` を、`srt` 自身の環境の `CLAUDE_CODE_TMPDIR`（無ければ `/tmp/claude`）にする。ホストは呼び出しごとに一時ディレクトリを作り、`srt` に `CLAUDE_CODE_TMPDIR` として渡し、終わったら消す。
+- 一時: `srt` は子の `TMPDIR` を、`srt` 自身の環境の `CLAUDE_CODE_TMPDIR`（無ければ `/tmp/claude`）にする。ホストは呼び出しごとに一時ディレクトリを作り、`srt` に `CLAUDE_CODE_TMPDIR` として渡し、終わったら消す。`srt` の環境からは `TMPDIR` を外す（`srt` は Linux で proxy への橋の Unix ソケットを `os.tmpdir()` に作り、長い `TMPDIR` だとソケットのパスの上限 108 バイトに当たって起動に失敗する。実機の確認で見つかった。外せば `/tmp` に作る）。
 - 子に渡す環境変数は 6.1.2 (1) の許可一覧に `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` を足す（許した 3 つの宛先以外へ出ようとして拒否の記録を増やさない）。
 - `srt` は Linux / macOS で拒否のパスを探すのに ripgrep を要る。公式インストーラの claude は `ARGV0=rg` で ripgrep として動く（Claude Code 自身が Bash の `rg` をこの形で出している）ので、ripgrep を別に入れなくても動く。
 
@@ -1869,7 +1869,7 @@ CLI に渡す旗（作り手。役割の `access` ごとの道具と `cwd`、材
 
 決めたこと: 作り手の呼び出しでは、どの隔離でも `--settings <呼び出しごとの一時>/settings.json` に `{ permissions: { deny: [...] } }` を書いて渡す。規則は 8.5 の並びに、8.6 の表にある `undecided*`・`jobs/` と、費用の結果のファイル `calls/` を足したもの。**絶対パス**で書く（Claude Code の規則で絶対パスは `//` で始める。Windows の `C:\a\b` は `//c/a/b` に直す）:
 
-`Read(//<H>/cases/**/checks/**)`、`Read(//<H>/cases/**/review-*)`、`Read(//<H>/cases/**/facts*)`、`Read(//<H>/cases/**/undecided*)`、`Read(//<H>/cases/**/jobs/**)`、`Read(//<H>/cases/**/versions/**)`、`Read(//<H>/libretto.db*)`、`Read(//<H>/.env*)`、`Read(//<H>/api-keys.json)`、`Read(//<H>/calls/**)`、`Read(//<ホーム>/.claude/**)`（`<H>` = `LIBRETTO_HOME`）
+`Read(//<H>/cases/**/checks/**)`、`Read(//<H>/cases/**/review-*)`、`Read(//<H>/cases/**/facts*)`、`Read(//<H>/cases/**/undecided*)`、`Read(//<H>/cases/**/jobs/**)`、`Read(//<H>/cases/**/versions/**)`、`Read(//<H>/libretto.db*)`、`Read(//<H>/.env*)`、`Read(//<H>/api-keys.json)`、`Read(//<H>/calls/**)`、`Read(//<claude の設定の置き場>/**)`（`<H>` = `LIBRETTO_HOME`）
 
 理由: 経路を 1 つにして、弱い隔離の規則が実際に CLI に届く形を、どの OS でもテストで見られるようにする。強い隔離ではそれらのパスが名前空間に無いので害は無い。`--setting-sources ''` は設定の源（ユーザー・プロジェクト・ローカル）を止める旗で、`--settings` の旗で渡した設定は効く（(9) の実機の確認で確かめる）。
 
@@ -1910,7 +1910,7 @@ CLI に渡す旗（作り手。役割の `access` ごとの道具と `cwd`、材
 
 `npm run verify:sandbox`（`host/scripts/sandbox-live.ts`）が、一時の `LIBRETTO_HOME` に案件のフォルダ（作業場・`versions/01`・`checks/`・`review-01-a.json`・ほかの案件）を作って乱数の語を置き、表で出す:
 1. 自己点検の結果（版・隔離）。
-2. 包んだ起こし方で、作業場が読めて書ける、8.6 の「読めない」列のパスが読めない・書けない、ホームの一覧がログイン情報だけ（シェルの `cat` / `ls` で。費用 0）。
+2. 包んだ起こし方で、作業場が読めて書ける、8.6 の「読めない」列のパスが読めない、作業場の外へ書いたものがホストに残らない、ホームの一覧が許した名前だけ（シェルの `cat` / `ls` で。費用 0）。Linux の `srt` は読み取りを拒否したディレクトリ（`LIBRETTO_HOME` を含む）を空の書ける tmpfs にするので、sandbox の中では作業場の外にも書けるように見えるが、書いたものは tmpfs に入って消え、ホストの案件フォルダには届かない。だから「書けない」ではなく「ホストに残らない」で確かめる。
 3. 本物の claude（haiku、上限付き。数円）に Read 道具で作業場の語と外の語を読ませる。包んだ起こし方では作業場の語だけが返る。**対照**として、包まず (4) の規則だけで起こすと外の語は読めず、規則を外すと読める（規則が効いている証拠）。
 4. 中間のホストを `SIGKILL` して、claude と孫が残らない。
 

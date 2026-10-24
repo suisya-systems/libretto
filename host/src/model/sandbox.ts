@@ -44,8 +44,8 @@ export const rulePath = (p: string) => {
   return m ? `//${m[1]?.toLowerCase()}/${m[2]?.replaceAll('\\', '/')}` : `/${p}`
 }
 
-// 作り手の CLI に --settings で渡す読み取り拒否（8.5 の並び＋ undecided・jobs・calls。8.9 (4)）
-export function denyRules(home: string, userHome: string): string[] {
+// 作り手の CLI に --settings で渡す読み取り拒否（8.5 の並び＋ undecided・jobs・calls。8.9 (4)）。configDir は claude の設定の置き場
+export function denyRules(home: string, configDir: string): string[] {
   const h = rulePath(home)
   return [
     `Read(${h}/cases/**/checks/**)`,
@@ -58,13 +58,14 @@ export function denyRules(home: string, userHome: string): string[] {
     `Read(${h}/.env*)`,
     `Read(${h}/api-keys.json)`,
     `Read(${h}/calls/**)`,
-    `Read(${rulePath(userHome)}/.claude/**)`,
+    `Read(${rulePath(configDir)}/**)`,
   ]
 }
 
 export type SettingsInput = {
   home: string // LIBRETTO_HOME
   userHome: string
+  configDir: string // claude の設定の置き場（CLAUDE_CONFIG_DIR か ~/.claude）。ホームの外でも拒否する
   work: string
   tmp: string // 呼び出しごとの一時
   claude: string // claude の実体
@@ -79,7 +80,7 @@ export type SettingsInput = {
 export function srtSettings(i: SettingsInput) {
   return {
     filesystem: {
-      denyRead: [i.userHome, i.home],
+      denyRead: [i.userHome, i.home, i.configDir],
       allowRead: [i.work, i.claude, i.node, i.srtVendor, ...(i.credentials ? [i.credentials] : []), i.tmp],
       allowWrite: [i.work, i.tmp],
       denyWrite: [],
@@ -89,11 +90,17 @@ export function srtSettings(i: SettingsInput) {
   }
 }
 
-// ログイン情報のファイル。子に渡す CLAUDE_CONFIG_DIR があればその下（8.9 (3)）
-const credentialsOf = (env: Record<string, string>, userHome: string) => {
-  const f = join(env.CLAUDE_CONFIG_DIR ?? join(userHome, '.claude'), '.credentials.json')
+// claude の設定の置き場。子に渡す CLAUDE_CONFIG_DIR があればそれ（8.9 (3)）
+const configDirOf = (env: Record<string, string>, userHome: string) =>
+  env.CLAUDE_CONFIG_DIR ?? join(userHome, '.claude')
+const credentialsOf = (configDir: string) => {
+  const f = join(configDir, '.credentials.json')
   return existsSync(f) ? f : undefined
 }
+
+// srt は bridge の Unix ソケットを os.tmpdir() に作る。長い TMPDIR だと 108 バイトの上限で起動に失敗するので外し、/tmp に作らせる。
+// 子の TMPDIR は srt が CLAUDE_CODE_TMPDIR から決める（8.9 (3)）
+const withoutTmpdir = ({ TMPDIR: _, ...rest }: Record<string, string>) => rest
 
 export type Prepared = { argv: string[]; env: Record<string, string>; cleanup: () => Promise<void> }
 
@@ -117,7 +124,8 @@ export function createSandbox(o: SandboxOptions) {
       const cleanup = () => rm(tmp, { recursive: true, force: true })
       const env = { ...allowedEnv(parentEnv), CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1' }
       const deny = join(tmp, 'settings.json')
-      writeFileSync(deny, JSON.stringify({ permissions: { deny: denyRules(o.home, userHome) } }), { mode: 0o600 })
+      const configDir = configDirOf(env, userHome)
+      writeFileSync(deny, JSON.stringify({ permissions: { deny: denyRules(o.home, configDir) } }), { mode: 0o600 })
       const [exe = '', ...rest] = o.claude
       if (c.isolation === 'weak') return { argv: [...o.claude, ...args, '--settings', deny], env, cleanup }
       const claude = realExe(exe, env)
@@ -125,12 +133,13 @@ export function createSandbox(o: SandboxOptions) {
       const body = srtSettings({
         home: o.home,
         userHome,
+        configDir,
         work,
         tmp,
         claude,
         node: realpathSync(process.execPath),
         srtVendor: join(srtPkg(), 'vendor'),
-        credentials: credentialsOf(env, userHome),
+        credentials: credentialsOf(configDir),
         rgArgv0: !onPath('rg', env) && !isScript(o.rg ?? claude),
         rg: o.rg,
       })
@@ -144,7 +153,7 @@ export function createSandbox(o: SandboxOptions) {
           '--',
           ...(inner ?? [claude, ...rest, ...args, '--settings', deny]),
         ],
-        env: { ...env, CLAUDE_CODE_TMPDIR: tmp },
+        env: { ...withoutTmpdir(env), CLAUDE_CODE_TMPDIR: tmp },
         cleanup,
       }
     },

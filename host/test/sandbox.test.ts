@@ -54,6 +54,7 @@ describe('srtSettings（8.3・8.6・8.9 (3)）', () => {
   const s = srtSettings({
     home,
     userHome: user,
+    configDir: '/opt/claude-config',
     work,
     tmp: '/tmp/libretto-maker-x',
     claude: '/home/u/.local/share/claude/versions/2.1.310',
@@ -83,6 +84,7 @@ describe('srtSettings（8.3・8.6・8.9 (3)）', () => {
       `${home}/calls/x.json`,
       `${user}/.ssh/id_ed25519`,
       `${user}/.claude/projects/x.jsonl`,
+      '/opt/claude-config/projects/x.jsonl',
     ])
       expect(readable(p), p).toBe(false)
   })
@@ -99,6 +101,7 @@ describe('srtSettings（8.3・8.6・8.9 (3)）', () => {
     const r = srtSettings({
       home,
       userHome: user,
+      configDir: `${user}/.claude`,
       work,
       tmp: '/t',
       claude: '/c',
@@ -118,7 +121,7 @@ describe('denyRules（8.5・8.9 (4)）', () => {
   })
 
   it('8.6 の読めないものを全部覆う', () => {
-    const r = denyRules('/home/u/libretto', '/home/u')
+    const r = denyRules('/home/u/libretto', '/home/u/.claude')
     for (const x of [
       'Read(//home/u/libretto/cases/**/checks/**)',
       'Read(//home/u/libretto/cases/**/review-*)',
@@ -166,12 +169,33 @@ describe('createSandbox.prepare（8.9 (1)(3)(4)）', () => {
     const srt = JSON.parse(readFileSync(p.argv[at - 1] ?? '', 'utf8'))
     expect(srt.filesystem.allowWrite[0]).toBe(work())
     const deny = JSON.parse(readFileSync(p.argv.at(-1) ?? '', 'utf8'))
-    expect(deny.permissions.deny).toEqual(denyRules(join(dir, 'home'), homedir()))
+    expect(deny.permissions.deny).toEqual(denyRules(join(dir, 'home'), join(homedir(), '.claude')))
     expect(p.env.CLAUDE_CODE_TMPDIR).toBe(srt.filesystem.allowWrite[1])
     expect(p.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC).toBe('1')
     expect(p.env).not.toHaveProperty('OPENAI_API_KEY')
     await p.cleanup()
     expect(existsSync(p.env.CLAUDE_CODE_TMPDIR ?? '')).toBe(false)
+  })
+
+  it('CLAUDE_CONFIG_DIR がホームの外でも、その置き場を拒否してログイン情報だけを戻す', async () => {
+    const config = join(dir, 'claude-config')
+    mkdirSync(config)
+    writeFileSync(join(config, '.credentials.json'), '{}')
+    const box = createSandbox({
+      home: join(dir, 'home'),
+      claude: [process.execPath, FAKE],
+      srt: FAKE_SRT,
+      check: () => strong,
+    })
+    const p = await box.prepare(work(), [], { PATH: '/usr/bin', CLAUDE_CONFIG_DIR: config })
+    const at = p.argv.indexOf('--')
+    const srt = JSON.parse(readFileSync(p.argv[at - 1] ?? '', 'utf8'))
+    expect(srt.filesystem.denyRead).toContain(config)
+    expect(srt.filesystem.allowRead).toContain(join(config, '.credentials.json'))
+    const deny = JSON.parse(readFileSync(p.argv.at(-1) ?? '', 'utf8'))
+    expect(deny.permissions.deny).toContain(`Read(${rulePath(config)}/**)`)
+    expect(p.env).not.toHaveProperty('TMPDIR')
+    await p.cleanup()
   })
 
   it('弱い隔離: srt で包まず、拒否規則だけを渡す', async () => {

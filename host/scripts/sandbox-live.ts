@@ -2,7 +2,7 @@
 // 一時の LIBRETTO_HOME に案件のフォルダを作り、乱数の語を置いて、作り手と同じ起こし方で読めるものを確かめる
 import { spawn } from 'node:child_process'
 import { randomBytes, randomUUID } from 'node:crypto'
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -92,8 +92,13 @@ if (check.isolation === 'strong') {
   for (const k of Object.keys(files).filter((k) => k !== 'inside'))
     row(`shell: ${k} not readable`, !r.out.includes(tokens[k] ?? '-'), line(k).slice(0, 120))
   row('shell: write inside work', line('writeInside').endsWith('ok'))
-  row('shell: no write outside work', line('writeOutside').endsWith('ng'))
-  row('shell: no write to versions', line('writeVersions').endsWith('ng'))
+  // Linux の srt は読み取りを拒否したディレクトリを空の書ける tmpfs にするので、書けても消える。ホスト側に残らないことを見る
+  row('shell: write outside work does not reach the host', !existsSync(join(caseDir, 'w.txt')), line('writeOutside'))
+  row(
+    'shell: versions unchanged on the host',
+    readFileSync(files.versions ?? '', 'utf8') === `${tokens.versions}\n`,
+    line('writeVersions'),
+  )
   const listed = (k: string) =>
     line(k)
       .slice(k.length + 1)
