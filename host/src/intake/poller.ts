@@ -75,7 +75,7 @@ export function createPoller(d: Deps) {
       const r = await readThread(g, id, account, signal)
       if (!r.ok) return failed(r)
       const t = r.thread
-      const deps = { home: d.home, invoke: d.invoke, signal }
+      const deps = { home: d.home, invoke: d.invoke, signal, gdoc: g.status().docs }
       const flagged = await flagInstructions(deps, t.subject, t.body)
       if (flagged === 'stopped') return
       const drafted = await draftCard(deps, t)

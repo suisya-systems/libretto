@@ -17,9 +17,10 @@ import {
 import { type BriefFile, type CaseRecord, type FactsFile, VersionManifest } from '@libretto/shared/ledger'
 import { z } from 'zod'
 import { MAX_ROUNDS, transition } from '../case/transition.ts'
-import { CANARY_SUMMARY } from '../checks/host-items.ts'
+import { CANARY_SUMMARY, formatItems } from '../checks/host-items.ts'
 import { draftVoice, FNS, type FnInput, needsVoice, runCode } from '../checks/judgeable.ts'
 import { paragraphUnits, sections } from '../checks/text.ts'
+import { docxText } from '../deliver/docx.ts'
 import { supportsClaims } from '../facts/claims.ts'
 import { collectFacts, type Facts, type Fetch, linkRows, marksOf, renderFacts } from '../facts/inventory.ts'
 import { sha256Hex } from '../facts/voice.ts'
@@ -724,9 +725,27 @@ export function judgeBody(d: Deps, c: CaseRecord, signal: AbortSignal): Promise<
 }
 
 // 形式の関数 → 保存先の種類（6.2.5 (5)）。仕立ての成果物の名前もここ
-const FORMAT_KIND: Partial<Record<CodeFn, DeliveryTarget['kind']>> = { pageRoundTrip: 'page', pasteSafe: 'paste' }
-export const OUTPUT_FILES = { page: 'page.html', paste: 'paste.txt' } as const
+const FORMAT_KIND: Partial<Record<CodeFn, DeliveryTarget['kind']>> = {
+  pageRoundTrip: 'page',
+  pasteSafe: 'paste',
+  docsRoundTrip: 'gdoc',
+}
+export const OUTPUT_FILES = { page: 'page.html', paste: 'paste.txt', gdoc: 'gdoc.docx' } as const
 const kindOf = (c: Check) => (c.judge.by === 'code' ? FORMAT_KIND[c.judge.fn] : undefined)
+
+// 今の保存先の形式の項目。承認の後に保存先を変えた・足した（T23b・T26b）ときは、組に無い保存先の項目を
+// 組の最後の id の続きでホストが足す（同じ組と保存先からは同じ id。6.5 (8)）
+export function formatChecks(checks: readonly Check[], destination: readonly DeliveryTarget[]): Check[] {
+  const kinds = new Set(destination.map((t) => t.kind))
+  const have = checks.filter((x) => x.phase === '形式' && kinds.has(kindOf(x) as DeliveryTarget['kind']))
+  let last = Math.max(0, ...checks.map((x) => Number(x.id.slice(1))))
+  return [
+    ...have,
+    ...formatItems(destination)
+      .filter((f) => !have.some((x) => kindOf(x) === kindOf(f as Check)))
+      .map((f) => ({ ...f, id: `C${String(++last).padStart(2, '0')}` })),
+  ]
+}
 
 // この版の形式判定の回数 + 1（最後の draft.done より後の format.* の遷移行）
 export function formatAttempt(ledger: Ledger, caseId: string): number {
@@ -753,20 +772,24 @@ export function judgeFormat(d: Deps, c: CaseRecord, signal: AbortSignal): Promis
         const outputs = VersionManifest.parse(JSON.parse(readText(join(vdir, 'outputs.json'))))
         fingerprint = outputs.fingerprint
         const kinds = new Set(c.destination.map((t) => t.kind))
-        const checks = set.checks.checks.filter(
-          (x) => x.phase === '形式' && kinds.has(kindOf(x) as DeliveryTarget['kind']),
-        )
+        const checks = formatChecks(set.checks.checks, c.destination)
         const file = (kind: keyof typeof OUTPUT_FILES) => {
           if (!kinds.has(kind)) return undefined
           if (!checks.some((x) => kindOf(x) === kind)) throw new Error(`no format check for ${kind}`)
           if (!outputs.files.some((f) => f.path === OUTPUT_FILES[kind])) throw new Error(`no output for ${kind}`)
-          return readText(join(vdir, 'outputs', OUTPUT_FILES[kind]))
+          return readFileSync(join(vdir, 'outputs', OUTPUT_FILES[kind]))
         }
-        const page = file('page')
-        const paste = file('paste')
+        const page = file('page')?.toString('utf-8')
+        const paste = file('paste')?.toString('utf-8')
+        const gdoc = file('gdoc')
         return {
           checks,
-          input: { md: draftOf(d, c), ...(page !== undefined && { page }), ...(paste !== undefined && { paste }) },
+          input: {
+            md: draftOf(d, c),
+            ...(page !== undefined && { page }),
+            ...(paste !== undefined && { paste }),
+            ...(gdoc && { gdoc: docxText(gdoc) }),
+          },
           brief: set.brief,
           family: set.checks.family,
         }
@@ -811,7 +834,8 @@ export function reviewsOf(
     const r = readReview(path)
     if (r.series !== c.series) return undefined
     const rp = join(dir, `${name}.reasons.md`)
-    return summary(r, set.checks.checks, existsSync(rp) ? parseReasons(readText(rp)) : {})
+    const checks = [...set.checks.checks, ...formatChecks(set.checks.checks, c.destination)]
+    return summary(r, checks, existsSync(rp) ? parseReasons(readText(rp)) : {})
   }
   const re = new RegExp(`^review-${nn(c.version)}-f(\\d+)\\.json$`)
   const k = Math.max(0, ...readdirSync(dir).map((f) => Number(re.exec(f)?.[1] ?? 0)))

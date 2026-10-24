@@ -66,7 +66,7 @@ export function Case({
     return (
       <>
         {one.problem && <ProblemView problem={one.problem} retry={one.reload} />}
-        <ResultFace c={c} />
+        <ResultFace c={c} reload={one.reload} stopped={stopped} />
       </>
     )
   // 送付確認待ちは、保存先の形に整えているあいだ（turn=libretto）進行の面

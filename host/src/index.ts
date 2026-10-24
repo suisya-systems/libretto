@@ -137,8 +137,11 @@ const timer = setInterval(() => {
   server.stop.tick(ticks % 15 === 0).catch((e) => console.error(e))
 }, 2_000)
 
-// 拾い上げは 15 分ごと（4.5）。止めている間は poller が起きない
-const intakeTimer = setInterval(() => void server.poller.run(), POLL_MS)
+// 拾い上げは 15 分ごと（4.5）。止めている間は poller が起きない。同じ周期で送付の「不明」を探し直す（6.5 (7)）
+const intakeTimer = setInterval(() => {
+  void server.poller.run()
+  server.runner.recheck()
+}, POLL_MS)
 void server.poller.run()
 
 // 待ち受けが 127.0.0.1 を含まない（Tailscale の IP・::1 など）ときは、Google の戻り先のために 127.0.0.1 にも（6.4 (2)）。

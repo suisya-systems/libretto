@@ -2,8 +2,10 @@
 import { describe, expect, it } from 'vitest'
 import { runCode } from '../src/checks/judgeable.ts'
 import { renderHtml } from '../src/checks/text.ts'
+import { type DocText, docxOf, docxText, exportedText } from '../src/deliver/docx.ts'
 import { pageBlocks, pageDocument } from '../src/deliver/page.ts'
 import { pasteText } from '../src/deliver/paste.ts'
+import { destViolations } from '../src/roles/conversation.ts'
 import { attachment } from '../src/server/app.ts'
 
 const MD = '# 題\n\n前置きの **強調** です。\n\n## 見出し\n\n- 一つ目\n- 二つ目\n\n1. 手順\n2. 次\n'
@@ -75,5 +77,46 @@ describe('ダウンロードの名前（6.2.8 (4)）', () => {
       'attachment; filename="page-v3.html"; filename*=UTF-8\'\'%E3%83%96%E3%83%AC%E3%82%B9%E3%83%88%27s%20%28%E3%81%BE%E3%81%A8%E3%82%81%29%2A-%E7%AC%AC3%E7%89%88.html',
     )
     expect(decodeURIComponent(attachment('a/b\\c\nd', 1).split("''")[1] as string)).toBe('a_b_c_d-第1版.html')
+  })
+})
+
+describe('Google ドキュメントの docx（6.5 (4)(5)）', () => {
+  const SRC =
+    '# 題\n\n出典は [白書](https://example.com/a?x=1&y=2) です。\n\n- 一つ目\n- 二つ目\n\n1. 手順\n2. 次\n\n## 後半\n\n1. 別の手順\n'
+  const gdoc = (input: { md: string; gdoc: DocText }) =>
+    runCode({ id: 'C90', judge: { by: 'code', fn: 'docsRoundTrip', args: {} }, pass: { kind: 'all' } } as never, input)
+
+  it('作り手の HTML のブロックから作り、自分で読み戻すと本文の段落とリンクに一致する。同じ入力から同じバイト列', async () => {
+    const buf = docxOf(renderHtml(SRC))
+    expect(buf.subarray(0, 2).toString()).toBe('PK')
+    expect(docxOf(renderHtml(SRC)).equals(buf)).toBe(true)
+    const t = docxText(buf)
+    expect(t.units).toEqual(['題', '出典は 白書 です。', '一つ目', '二つ目', '手順', '次', '後半', '別の手順'])
+    expect(t.links).toEqual(['https://example.com/a?x=1&y=2'])
+    expect((await gdoc({ md: SRC, gdoc: t })).units).toEqual([true])
+    // 番号付きの箇条書きはまとまりごとに数え直す（num が 2 つ）
+    expect(
+      (/<w:numbering[\s\S]*<\/w:numbering>/.exec(buf.toString('latin1'))?.[0].match(/<w:num w:numId=/g) ?? []).length,
+    ).toBe(3)
+  })
+
+  it('段落が欠けた・リンクの行き先が違えば落ちる', async () => {
+    const t = docxText(docxOf(renderHtml(SRC)))
+    expect((await gdoc({ md: SRC, gdoc: { ...t, units: t.units.slice(1) } })).units).toEqual([false])
+    expect((await gdoc({ md: SRC, gdoc: { ...t, links: ['https://example.com/b'] } })).units).toEqual([false])
+  })
+
+  it('Google の書き出しは転送のリンクを外し、空の段落と style を数えない', () => {
+    const html =
+      '<html><head><style>p{color:red}</style></head><body><p class="c1"><span></span></p><h1 class="c2"><span>題</span></h1><p><span>出典は </span><a href="https://www.google.com/url?q=https://example.com/a?x%3D1%26y%3D2&amp;sa=D">白書</a><span> です。</span></p><a href="#h.1">目次</a></body></html>'
+    expect(exportedText(html)).toEqual({
+      units: ['題', '出典は 白書 です。'],
+      links: ['https://example.com/a?x=1&y=2'],
+    })
+  })
+
+  it('保存先の選択肢: gdoc は連携があるときだけ', () => {
+    expect(destViolations(['page', 'gdoc'], false)).toHaveLength(1)
+    expect(destViolations(['page', 'gdoc'], true)).toEqual([])
   })
 })

@@ -8,6 +8,7 @@ import { useCaseAction } from '../action.ts'
 import { Segment } from '../parts/Choice.tsx'
 import { IsolationBand } from '../parts/IsolationBand.tsx'
 import { W, w } from '../wording.ts'
+import { destLabel, targetOf } from './Deliver.tsx'
 import { CaseHeader, History, Versions } from './Progress.tsx'
 
 type Changes = z.infer<typeof DraftDiff>['changes']
@@ -71,6 +72,18 @@ export function ApprovalFace({
   const cutting = marks.some((m) => cut.has(m.claimId))
   const [note, setNote] = useState('')
   const locked = action.busy || stopped
+  // 保存先を変える（T23b。6.5 (8)）。選び直したら完成稿の承認はやり直し
+  const [changing, setChanging] = useState(false)
+  const [picked, setPicked] = useState<ReadonlySet<string>>(new Set())
+  const startChange = () => {
+    setPicked(new Set(c.deliveryPlan.targets.map((t) => t.kind)))
+    setChanging(true)
+  }
+  const change = async () => {
+    const targets = c.destinationChoices.filter((k) => picked.has(k)).map(targetOf)
+    if (!targets.length || locked) return
+    if (await action.run({ type: 'delivery.change', expectedRevision: c.revision, targets })) setChanging(false)
+  }
 
   const failed = [...(c.review?.failed ?? []), ...(c.formatReview?.failed ?? [])]
   const skipped = (c.review?.skipped ?? 0) + (c.formatReview?.skipped ?? 0)
@@ -135,7 +148,48 @@ export function ApprovalFace({
               {W['approval.redo']}
             </button>
           )}
+          {!changing && (
+            <button type="button" className="btn btn-secondary" disabled={locked} onClick={startChange}>
+              {W['approval.changeDest']}
+            </button>
+          )}
         </div>
+        {changing && (
+          <fieldset className="revise approval-dest">
+            <legend className="strong small">{W['approval.changeDestLabel']}</legend>
+            {c.destinationChoices.map((k) => (
+              <label key={k} className="row-gap">
+                <input
+                  type="checkbox"
+                  checked={picked.has(k)}
+                  disabled={locked}
+                  onChange={(ev) => {
+                    const next = new Set(picked)
+                    if (ev.target.checked) next.add(k)
+                    else next.delete(k)
+                    setPicked(next)
+                  }}
+                />
+                {destLabel(targetOf(k))}
+              </label>
+            ))}
+            <p className="muted small">{W['approval.changeDestNote']}</p>
+            <div className="row-gap">
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                disabled={locked || picked.size === 0}
+                aria-busy={action.busy || undefined}
+                onClick={() => void change()}
+              >
+                {W['approval.changeDestSave']}
+              </button>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => setChanging(false)}>
+                {W['approval.changeDestCancel']}
+              </button>
+            </div>
+          </fieldset>
+        )}
         {redoing && (
           <div className="revise approval-redo">
             <label htmlFor="redo-note" className="strong small">

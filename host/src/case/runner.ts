@@ -8,6 +8,7 @@ import { deliver, tailor } from '../deliver/run.ts'
 import { gatherSources } from '../facts/gather.ts'
 import { type Fetch, fetchCached, materialsDir } from '../facts/inventory.ts'
 import { type Portrait, portraitJob, renderVoice, sha256Hex } from '../facts/voice.ts'
+import type { Google } from '../intake/google.ts'
 import { caseDir } from '../ledger/db.ts'
 import type { Ledger } from '../ledger/ledger.ts'
 import type { Job, Outcome } from '../model/invoke.ts'
@@ -16,7 +17,7 @@ import { judgeBody, judgeFormat } from '../roles/judge.ts'
 import { make, nn, workDir } from '../roles/maker.ts'
 import type { Runs } from '../runs.ts'
 import { isStorageError } from '../server/stop.ts'
-import { transition } from './transition.ts'
+import { currentSend, transition } from './transition.ts'
 
 // 取り寄せる URL（6.3.1 (5)）。閉じ括弧・句読点で切る
 const URL_IN_TEXT = /https?:\/\/[^\s<>"'()[\]（）」』、。]+/g
@@ -45,6 +46,7 @@ type Deps = {
   log: (line: string) => void
   now?: () => Date
   fetch?: Fetch // 出典の取り寄せ（テストは偽物。6.3.1 (5)）
+  google: Google // Google ドキュメントの届け先（6.5）
 }
 
 export type Runner = ReturnType<typeof createRunner>
@@ -54,6 +56,7 @@ export function createRunner(d: Deps) {
   const running = new Map<string, { ac: AbortController; again: boolean }>()
   let signIn = false
   const waiting = new Set<string>()
+  const rechecking = new Set<string>() // 不明の attempt を探し直す印（6.5 (7)）。仕事が始まるときに下ろす
 
   const emit = (caseId: string, r: ReturnType<typeof transition>) => {
     d.storage(true)
@@ -185,8 +188,9 @@ export function createRunner(d: Deps) {
       make({ home, ledger, invoke: d.invoke, emit, onAuthExpired, ...(d.now && { now: d.now }) }, c, signal),
     検品中: (c, signal) => judgeBody(judgeDeps(), c, signal),
     送付確認待ち: tailorAndJudge,
-    // 送付中 → 今の送付回の attempt を 1 つずつ送付済に（T24。6.2.8 (3)）
-    送付中: async (c) => deliver({ home, ledger, emit, log: d.log }, c),
+    // 送付中 → 今の送付回の attempt を 1 つずつ送付済に（T24。6.2.8 (3)・6.5 (6)(7)）
+    送付中: (c, signal) =>
+      deliver({ home, ledger, google: d.google, emit, log: d.log }, c, signal, rechecking.delete(c.caseId)),
   }
 
   // ログインし直し待ちの関門。待っていれば案件を覚えて真（6.2.3 (7)）
@@ -256,5 +260,18 @@ export function createRunner(d: Deps) {
       for (const id of ids) kick(id)
     },
     running: () => [...running.keys()],
+    // 拾い上げの周期: 今の送付回に不明の attempt がある送付中の案件を探し直す（6.5 (7)）
+    recheck() {
+      // 動いている送付（作成の途中かもしれない）は止めない。次の周期に回す
+      for (const c of ledger.listCases(['送付中']))
+        if (
+          c.turn === 'libretto' &&
+          !running.has(c.caseId) &&
+          [...currentSend(ledger, c.caseId).values()].some((a) => a.status === '不明')
+        ) {
+          rechecking.add(c.caseId)
+          kick(c.caseId)
+        }
+    },
   }
 }

@@ -124,6 +124,11 @@ export function createServer(o: ServerOptions) {
 
   const google = o.google ?? createGoogle({ home, redirectUri: 'http://127.0.0.1/oauth/google/callback', log })
   const gmailLabel = o.gmailLabel ?? 'libretto'
+  // Google ドキュメントに保存できる連携があるか（6.5 (2)）
+  const gdocReady = () => {
+    const s = google.status()
+    return s.state === 'connected' && s.docs
+  }
   const candidatesChanged = () => hub.emit('candidates.changed', {})
   const poller = createPoller({
     home,
@@ -171,6 +176,7 @@ export function createServer(o: ServerOptions) {
       changed()
     },
     log,
+    google,
     ...(o.now && { now: o.now }),
     ...(o.fetch && { fetch: o.fetch }),
   })
@@ -193,6 +199,7 @@ export function createServer(o: ServerOptions) {
       return r.ok ? r.thread.body : undefined
     },
     // 依頼書と仮定だけ。チェック項目は渡さない（6.2.2 (8)）
+    gdocReady,
     briefOf: (caseId) => {
       const b = currentSet(home, ledger, caseId)?.brief
       return b && { ...b, decisions: undefined, approvedFingerprint: undefined }
@@ -470,6 +477,7 @@ export function createServer(o: ServerOptions) {
         reviewsOf(home, ledger, rec),
         fetchedSources(home, rec.caseId).map((s) => ({ ...s, gathered: gathered.has(s.url) })),
         g?.state === '集められなかった',
+        gdocReady() ? ['page', 'paste', 'gdoc'] : ['page', 'paste'],
       ),
     )
   })

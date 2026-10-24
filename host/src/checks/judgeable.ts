@@ -4,6 +4,7 @@ import { Worker } from 'node:worker_threads'
 import { type Check, CodeArgs, type CodeFn, type Phase } from '@libretto/shared/checks'
 import type { FactsFile, VoiceNumbers } from '@libretto/shared/ledger'
 import type { z } from 'zod'
+import type { DocText } from '../deliver/docx.ts'
 import { safeHref } from '../deliver/page.ts'
 import { markerCheck } from '../facts/markers.ts'
 import { endingShares, FIRST_PERSON, firstPersonOf, median, otherFirstPerson } from '../facts/voice.ts'
@@ -31,6 +32,7 @@ export type FnInput = {
   md: string
   page?: string
   paste?: string
+  gdoc?: DocText // 仕立てた docx か、Google の書き出しの段落とリンク（6.5 (5)）
   facts?: FactsFile
   brief?: string
   voice?: VoiceNumbers
@@ -446,6 +448,27 @@ export const FNS: Partial<Record<CodeFn, Fn<unknown>>> = {
       return { units: [missing === 0 && extra === 0 && links === 0], measured: { missing, extra, links } }
     },
   }),
+  // T20 は仕立てた docx、送付（T24 / T24b）は Google の書き出しを同じ数え方で比べる（6.5 (5)）
+  docsRoundTrip: fn({
+    args: CodeArgs.docsRoundTrip,
+    example: {},
+    unit: 'Google ドキュメントの成果物',
+    yes: '本文の見出し・段落・箇条書きの項目が、順番と数までそのまま文書に出ていて、出典のリンクの行き先も本文と同じ',
+    pass: ['all'],
+    phase: '形式',
+    host: true,
+    run: (_, { md, gdoc }) => roundTrip(md, need(gdoc, 'gdoc')),
+  }),
+}
+
+// 本文と成果物の段落を並べ、欠けた・増えた段落と、リンクの行き先の食い違い（同じ順で同じ行き先か）を数える
+export function roundTrip(md: string, d: DocText) {
+  const ops = align(compareUnits(md), d.units, sameText)
+  const missing = ops.filter((o) => o.op === 'removed').length
+  const extra = ops.filter((o) => o.op === 'added').length
+  const want = [...md.matchAll(/(?<!!)\[[^\]]*\]\((https?:\/\/[^)\s]+)\)/g)].map((m) => safeHref(m[1]))
+  const links = want.length === d.links.length && want.every((u, i) => u === d.links[i]) ? 0 : 1
+  return { units: [missing === 0 && extra === 0 && links === 0], measured: { missing, extra, links } }
 }
 
 // jev の state / scope と claude の materials のうち、S1 で組み立てられるもの（6.2.5 (1)(3)）

@@ -5,10 +5,13 @@ import { useEffect, useState } from 'react'
 import { Link } from 'wouter'
 import { useCaseAction } from '../action.ts'
 import { W, w } from '../wording.ts'
-import { CaseHeader, History, Versions } from './Progress.tsx'
+import { CaseHeader, History, Leftovers, Versions } from './Progress.tsx'
 
 export const destLabel = (t: DeliveryTarget) =>
   t.kind === 'file' ? w('dest.file', { format: t.format }) : W[`dest.${t.kind}`]
+// 画面から選べる保存先の種類（CaseView.destinationChoices）を保存先に。Google ドキュメントはマイドライブの直下（6.5 (3)）
+export const targetOf = (k: CaseView['destinationChoices'][number]): DeliveryTarget =>
+  k === 'page' ? { kind: 'page', shared: false } : k === 'gdoc' ? { kind: 'gdoc', folderId: 'root' } : { kind: 'paste' }
 
 const day = (at: string) =>
   new Intl.DateTimeFormat('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(
@@ -137,6 +140,7 @@ export function DeliverFace({ c, reload, stopped }: { c: CaseView; reload: () =>
           <div key={JSON.stringify(t)} className="card pad stack target">
             <h3 className="target-title">{destLabel(t)}</h3>
             {t.kind === 'page' && <p className="muted">{W['deliver.pageNote']}</p>}
+            {t.kind === 'gdoc' && <p className="muted">{w('deliver.gdocNote', { title: c.title, n: c.version })}</p>}
             {t.kind === 'paste' && (
               <>
                 <p className="muted">{W['deliver.pasteNote']}</p>
@@ -155,7 +159,10 @@ export function DeliverFace({ c, reload, stopped }: { c: CaseView; reload: () =>
 
 type Copy = 'idle' | 'copied' | 'failed'
 
-export function ResultFace({ c }: { c: CaseView }) {
+export function ResultFace({ c, reload, stopped }: { c: CaseView; reload: () => void; stopped: boolean }) {
+  const action = useCaseAction(c.id, reload)
+  // 今の保存先に無い種類だけを「にも保存する」に出す（T26b。6.5 (8)）
+  const more = c.destinationChoices.filter((k) => !c.deliveryPlan.targets.some((t) => t.kind === k))
   // 保存した版ごとの受け取り口（送付済の行）。新しい版が上
   const saved = c.deliveries.filter((d) => d.status === '送付済')
   const n = Math.max(0, ...saved.map((d) => d.version))
@@ -202,6 +209,13 @@ export function ResultFace({ c }: { c: CaseView }) {
         )}
       </div>
 
+      {action.notice && (
+        <p className="band band-stopped" role="alert">
+          <strong>{action.notice === 'moved' ? W['action.moved'] : W['band.sendFailed']}</strong>
+        </p>
+      )}
+      <Leftovers c={c} />
+
       <section aria-labelledby="h-receive" className="stack">
         <h2 id="h-receive">{W['result.receiveHeading']}</h2>
         {now.map((d) => (
@@ -222,6 +236,13 @@ export function ResultFace({ c }: { c: CaseView }) {
                 </div>
                 <p className="muted small">{W['result.downloadNote']}</p>
               </>
+            )}
+            {d.target.kind === 'gdoc' && d.link && (
+              <div className="row-gap">
+                <a className="btn btn-secondary" href={d.link} target="_blank" rel="noopener noreferrer">
+                  {W['result.openDoc']}
+                </a>
+              </div>
             )}
             {d.target.kind === 'paste' && (
               <>
@@ -244,6 +265,27 @@ export function ResultFace({ c }: { c: CaseView }) {
           </div>
         ))}
       </section>
+
+      {more.length > 0 && (
+        <section aria-labelledby="h-add" className="stack">
+          <h2 id="h-add">{W['result.addHeading']}</h2>
+          <div className="row-gap">
+            {more.map((k) => (
+              <button
+                key={k}
+                type="button"
+                className="btn btn-secondary"
+                disabled={action.busy || stopped}
+                onClick={() =>
+                  void action.run({ type: 'delivery.add', expectedRevision: c.revision, target: targetOf(k) })
+                }
+              >
+                {w('result.add', { dest: destLabel(targetOf(k)) })}
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
 
       {pages.length > 1 && (
         <section aria-labelledby="h-pages" className="stack">

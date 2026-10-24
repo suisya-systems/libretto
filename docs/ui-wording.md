@@ -408,6 +408,10 @@ libretto の画面に出す言葉の正本。設計書（[`docs/design.md`](./de
 | `event.delivery.decline` | 保存しないで戻りました |
 | `event.delivery.done` | 保存先に保存しました |
 | `event.delivery.failed` | 保存できなかったので中止しました |
+| `event.delivery.mismatch` | 保存した文書の中身が本文と違ったので、書き直しに回しました |
+| `event.delivery.unknown` | 保存できたか確かめています |
+| `event.delivery.change` | 保存先を変えました |
+| `event.delivery.add` | 別の保存先への保存を頼みました |
 | `reason.本人が止めた` | あなたが中止しました |
 | `reason.緊急停止` | すべて停止で中止しました |
 | `reason.費用上限` | 費用の上限に達しました |
@@ -439,6 +443,11 @@ libretto の画面に出す言葉の正本。設計書（[`docs/design.md`](./de
 | `approval.redoLabel` | どこをどう直してほしいか書いてください |
 | `approval.redoSend` | この内容で直してもらう |
 | `approval.redoCancel` | やめる |
+| `approval.changeDest` | 保存先を変える |
+| `approval.changeDestLabel` | 保存先を選んでください（1 つ以上） |
+| `approval.changeDestSave` | この保存先にする |
+| `approval.changeDestCancel` | やめる |
+| `approval.changeDestNote` | 保存先を変えたら、もう一度「これで承認する」を押してください。 |
 | `approval.version` | バージョン {n} |
 | `approval.draftTab` | 本文 |
 | `approval.diffTab` | 前のバージョンとの違い |
@@ -507,6 +516,7 @@ libretto の画面に出す言葉の正本。設計書（[`docs/design.md`](./de
 | `deliver.looksHeading` | 保存先ごとの見え方 |
 | `deliver.pageNote` | 保存すると、バージョン付きの Web ページで開けます。ほかの人に見せるときは、HTML をダウンロードして渡せます。 |
 | `deliver.pasteNote` | 保存すると、この文をコピーして note などに貼り付けられます。 |
+| `deliver.gdocNote` | 保存すると、あなたの Google ドライブに「{title}（第 {n} 版）」という Google ドキュメントを作ります。共有はしません。ほかの人に渡すときは、あなたがドライブで共有してください。 |
 | `deliver.pasteFailed` | 貼り付け用の文を読み込めませんでした |
 
 **成果の面（完了。実装設計書 6.2.8 (7)）**
@@ -528,6 +538,11 @@ libretto の画面に出す言葉の正本。設計書（[`docs/design.md`](./de
 | `result.copyFailed` | コピーできませんでした。下の欄から選んでコピーしてください |
 | `result.pagesHeading` | バージョンごとのページ |
 | `result.pageOf` | バージョン {n} のページ |
+| `result.openDoc` | Google ドキュメントを開く |
+| `result.leftover` | 中身を確かめられなかった Google ドキュメントがドライブに残っています。開いて、ごみ箱に移してください。 |
+| `result.leftoverOpen` | バージョン {n} のファイルを開く |
+| `result.addHeading` | 別の保存先にも保存する |
+| `result.add` | {dest}にも保存する |
 
 **完了した依頼（`/done`。実装設計書 6.2.8 (9)）**
 
@@ -636,8 +651,10 @@ libretto の画面に出す言葉の正本。設計書（[`docs/design.md`](./de
 | キー | 文 |
 |---|---|
 | `settings.linkHeading` | 連携 |
-| `settings.google.label` | Google（Gmail） |
+| `settings.google.label` | Google（Gmail・ドキュメント） |
 | `settings.google.use` | メールの本文を読めます。添付は読みません。ラベルは付けません（送りません・消しません） |
+| `settings.google.useDocs` | Google ドキュメントは、libretto が作ったものだけを作成・確認します。ほかのファイルは読みません。共有はしません。 |
+| `settings.google.docsMissing` | Google ドキュメントに保存するには、もう一度「連携する」を押して、ドライブの許可を足してください。 |
 | `settings.google.signal` | 取り込みの目印はラベル {label} です。このラベルを付けたメールが依頼の候補に出ます。 |
 | `settings.google.connected` | 連携済み |
 | `settings.google.as` | {email} で連携しています |

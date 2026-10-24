@@ -5,10 +5,12 @@ import { join } from 'node:path'
 import { CaseCard, CaseView, DraftDiff, HomeView } from '@libretto/shared/api'
 import { Review } from '@libretto/shared/checks'
 import { VersionManifest } from '@libretto/shared/ledger'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SAY, transition } from '../src/case/transition.ts'
 import { charCount, headingCount, renderHtml } from '../src/checks/text.ts'
+import { GDOC_SAY } from '../src/deliver/gdoc.ts'
 import type { Fetched, FetchFailure } from '../src/facts/fetch.ts'
+import { createGoogle, DRIVE_SCOPE, GMAIL_SCOPE, type Google } from '../src/intake/google.ts'
 import { caseDir, initHome } from '../src/ledger/db.ts'
 import type { Ledger } from '../src/ledger/ledger.ts'
 import { createFake, type ScriptEntry, type ScriptReply } from '../src/model/fake.ts'
@@ -16,6 +18,7 @@ import { type Backend, createInvoke } from '../src/model/invoke.ts'
 import { OUTPUT_FILES } from '../src/roles/judge.ts'
 import { MAKER_LIMITS } from '../src/roles/maker.ts'
 import { createServer } from '../src/server/app.ts'
+import { startFakeGoogle } from './fakes/google.ts'
 import { briefDraft, classified, goodChecks } from './fixtures/entrance.ts'
 
 const ORIGIN = 'http://127.0.0.1:7780'
@@ -25,6 +28,7 @@ let ledger: Ledger
 let server: ReturnType<typeof createServer>
 let fake: ReturnType<typeof createFake>
 let cookie: string
+let google: Google | undefined // Google ドキュメントの届け先の節だけ（6.5）
 let n = 0
 const uuid = () => `00000000-0000-4000-8000-${String(++n).padStart(12, '0')}`
 
@@ -138,6 +142,7 @@ async function setup(entries: ScriptEntry[], wrap: (b: Backend) => Backend = han
     runsWaitMs: 500,
     token: () => TOKEN,
     fetch: fakeFetch,
+    ...(google && { google }),
   })
   const { url } = server.issuePairing('テスト')
   const res = await server.app.request(new URL(url).pathname)
@@ -1284,5 +1289,209 @@ describe('canary（8.10 (1)）', () => {
     await setup([], hangJudge, true)
     server.runner.resume()
     await leaked(id)
+  })
+})
+
+describe('Google ドキュメントの届け先（6.5）', () => {
+  let g: Awaited<ReturnType<typeof startFakeGoogle>>
+  const link = (scopes = [GMAIL_SCOPE, DRIVE_SCOPE]) =>
+    writeFileSync(
+      join(home, 'google.json'),
+      JSON.stringify({ refreshToken: 'rt-1', email: 'me@example.com', scopes, savedAt: '2026-10-25T09:00:00+09:00' }),
+    )
+  const dests = (d: string[]) => ({ ...intake, intake: { ...intake.intake, destinations: d } })
+  const toFinal = (d: string[]): [Role, ScriptReply][] => [
+    ['話し相手', say(dests(d))],
+    ...upToEntrance.slice(1),
+    ['作り手', draft(1)],
+    ['判定役・文章', verdicts(true)],
+  ]
+  const fingerprint = async (id: string) => (await caseView(id)).versions[0]?.fingerprint
+  // 連携した Google（偽物）で、保存先 d の案件を送付確認待ち・本人の番まで進める
+  const toConfirm = async (d: string[], extra: [Role, ScriptReply][] = [], wrap: (b: Backend) => Backend = real) => {
+    home = mkdtempSync(join(tmpdir(), 'libretto-runner-'))
+    link()
+    google = createGoogle({
+      home,
+      config: { clientId: 'c', clientSecret: 's' },
+      redirectUri: 'http://127.0.0.1/oauth/google/callback',
+      endpoints: g.endpoints,
+    })
+    n = 0
+    await setup(script(...toFinal(d), ...extra), wrap, true)
+    const id = await approved()
+    await waitState(id, '承認待ち')
+    await act(id, { type: 'approval.ok', marks: {}, versionFingerprint: await fingerprint(id) })
+    await vi.waitFor(() => expect(ledger.getCase(id)).toMatchObject({ state: '送付確認待ち', turn: '本人' }))
+    return id
+  }
+  const send = async (id: string) =>
+    act(id, { type: 'delivery.send', planFingerprint: (await caseView(id)).deliveryPlan.fingerprint })
+  const gdocRows = (id: string) => ledger.listDeliveries(id).filter((x) => x.target.kind === 'gdoc')
+  const uploads = () => g.seen.filter((x) => x.method === 'POST' && x.path.startsWith('/upload/'))
+
+  beforeEach(async () => {
+    g = await startFakeGoogle()
+  })
+  afterEach(async () => {
+    google = undefined
+    await g.close()
+  })
+
+  it('T24: docx を変換付きで作り、書き出して照合が合えば保存済み。題に（第 N 版）、マイドライブ、attempt の印、共有しない', async () => {
+    const id = await toConfirm(['page', 'gdoc'])
+    const v0 = await caseView(id)
+    expect(v0.destinationChoices).toEqual(['page', 'paste', 'gdoc'])
+    expect(v0.formatReview?.failed).toEqual([])
+    expect((await send(id)).status).toBe(200)
+    await waitState(id, '完了')
+    const [f] = [...g.files.values()]
+    expect(g.files.size).toBe(1)
+    expect(f).toMatchObject({
+      name: 'ブレストのまとめ（第 1 版）',
+      parents: ['root'],
+      mimeType: 'application/vnd.google-apps.document',
+    })
+    const row = gdocRows(id).at(-1)
+    expect(f?.appProperties.librettoAttempt).toBe(row?.attemptId)
+    expect(row).toMatchObject({
+      status: '送付済',
+      receiptId: `gdoc:${f?.id}`,
+      link: `https://docs.google.com/document/d/${f?.id}/edit`,
+    })
+    expect(g.seen.some((x) => x.path.includes('/permissions'))).toBe(false)
+    // 作った後は書き出しで確かめる（検索は印が無ければ要らない）
+    expect(g.seen.filter((x) => x.path.includes('/export')).length).toBe(1)
+  })
+
+  it('T24b: 書き出しが本文と食い違えば書き直しに戻し、ファイルは失敗の行にリンクで残る。作り手に食い違いを返す', async () => {
+    const id = await toConfirm(
+      ['gdoc'],
+      [['作り手', draft(2)]],
+      (b) => (call) => (call.role === '判定役・文章' && judgeCalls().length ? hangJudge(b)(call) : b(call)),
+    )
+    g.state.dropParagraph = true
+    await send(id)
+    await vi.waitFor(() => expect(ledger.getCase(id)?.version).toBe(2), { timeout: 2000, interval: 5 })
+    const failed = gdocRows(id).find((x) => x.status === '失敗')
+    expect(failed?.link).toContain('docs.google.com')
+    expect(failed?.reason).toBe(GDOC_SAY.mismatch(1, 0))
+    expect(readFileSync(work(id, 'feedback.md'), 'utf-8')).toContain(GDOC_SAY.mismatch(1, 0))
+    expect((await caseView(id)).deliveries.find((d) => d.status === '失敗')?.link).toBe(failed?.link)
+  })
+
+  it('T25 → T24: 作成の応答が取れなければ不明にして作り直さず、探し直しの周期に attempt の印で見つけて照合する', async () => {
+    const id = await toConfirm(['gdoc'])
+    g.state.createThenFail = 1
+    await send(id)
+    await vi.waitFor(() => expect(gdocRows(id).at(-1)?.status).toBe('不明'))
+    await idle()
+    expect(ledger.getCase(id)?.state).toBe('送付中')
+    server.runner.recheck()
+    await waitState(id, '完了')
+    expect(uploads()).toHaveLength(1)
+    expect(g.files.size).toBe(1)
+  })
+
+  it('T26: 不明のまま 3 回探しても見つからなければ停止（送付失敗）', async () => {
+    const id = await toConfirm(['gdoc'])
+    g.state.createThenFail = 1
+    await send(id)
+    await vi.waitFor(() => expect(gdocRows(id).at(-1)?.status).toBe('不明'))
+    g.files.clear()
+    for (let k = 0; k < 3; k++) {
+      await idle()
+      server.runner.recheck()
+      await idle()
+    }
+    await waitState(id, '停止')
+    expect(ledger.getCase(id)?.stopReason).toBe('送付失敗')
+    expect(gdocRows(id).filter((x) => x.status === '不明')).toHaveLength(3)
+    expect(gdocRows(id).at(-1)?.reason).toBe(GDOC_SAY.notFound)
+    expect(uploads()).toHaveLength(1)
+  })
+
+  it('作成を送った後に落ちても、起こし直すと作り直さずに探して確かめる（作成の前の印）', async () => {
+    const id = await toConfirm(['gdoc'])
+    g.state.createThenFail = 1
+    // 応答が返る前に止めたのと同じ: 印は書かれ、作成は届いている。遷移は書かれていない
+    const c = ledger.getCase(id)
+    if (!c) throw new Error('no case')
+    await server.runs.abortAll()
+    transition(ledger, {
+      type: 'delivery.send',
+      eventId: uuid(),
+      caseId: id,
+      expectedRevision: c.revision,
+      planFingerprint: (await caseView(id)).deliveryPlan.fingerprint,
+      by: '本人',
+    })
+    const [a] = ledger.listDeliveries(id)
+    if (!a) throw new Error('no attempt')
+    mkdirSync(join(caseDir(home, id), 'deliveries'), { recursive: true })
+    writeFileSync(join(caseDir(home, id), 'deliveries', `${encodeURIComponent(a.attemptId)}.json`), '{}\n')
+    g.files.set('doc-x', {
+      id: 'doc-x',
+      name: 'x',
+      parents: ['root'],
+      appProperties: { librettoAttempt: a.attemptId },
+      docx: readFileSync(join(caseDir(home, id), 'versions/01/outputs', OUTPUT_FILES.gdoc)),
+      mimeType: 'application/vnd.google-apps.document',
+    })
+    ledger.close()
+    await setup([], real, true)
+    server.runner.resume()
+    await waitState(id, '完了')
+    expect(uploads()).toHaveLength(0)
+    expect(gdocRows(id).at(-1)?.receiptId).toBe('gdoc:doc-x')
+  })
+
+  it('T26: Google ドキュメントの許可が無い連携なら作らずに停止。画面は連携し直しを促し、保存先に出さない', async () => {
+    const id = await toConfirm(['gdoc'])
+    link([GMAIL_SCOPE])
+    expect((await caseView(id)).destinationChoices).toEqual(['page', 'paste'])
+    await send(id)
+    await waitState(id, '停止')
+    expect(gdocRows(id).at(-1)?.reason).toBe(GDOC_SAY.notLinked)
+    expect(uploads()).toHaveLength(0)
+    const conn = await (await get('/api/connections')).json()
+    expect(conn.google).toMatchObject({ state: 'connected', docs: false })
+  })
+
+  it('T23b: 承認の面で保存先を page から Google ドキュメントに変えると、組に無い形式の項目をホストが足して判定する', async () => {
+    home = mkdtempSync(join(tmpdir(), 'libretto-runner-'))
+    link()
+    google = createGoogle({
+      home,
+      config: { clientId: 'c', clientSecret: 's' },
+      redirectUri: 'http://127.0.0.1/oauth/google/callback',
+      endpoints: g.endpoints,
+    })
+    n = 0
+    await setup(script(...toFinal(['page'])), real, true)
+    const id = await approved()
+    await waitState(id, '承認待ち')
+    expect((await act(id, { type: 'delivery.change', targets: [{ kind: 'gdoc', folderId: 'root' }] })).status).toBe(200)
+    await act(id, { type: 'approval.ok', marks: {}, versionFingerprint: await fingerprint(id) })
+    await vi.waitFor(() => expect(ledger.getCase(id)).toMatchObject({ state: '送付確認待ち', turn: '本人' }))
+    const v = await caseView(id)
+    expect(v.formatReview?.failed).toEqual([])
+    expect(v.formatReview?.passed).toBe(1)
+    await send(id)
+    await waitState(id, '完了')
+    expect(ledger.listDeliveries(id).map((x) => x.target.kind)).toEqual(['gdoc', 'gdoc'])
+  })
+
+  it('T26b: 完了の後に Google ドキュメントにも保存すると、足した保存先だけを送る', async () => {
+    const id = await toConfirm(['page'])
+    await send(id)
+    await waitState(id, '完了')
+    expect((await act(id, { type: 'delivery.add', target: { kind: 'gdoc', folderId: 'root' } })).status).toBe(200)
+    await vi.waitFor(() => expect(ledger.getCase(id)).toMatchObject({ state: '送付確認待ち', turn: '本人' }))
+    await send(id)
+    await waitState(id, '完了')
+    const sent = ledger.listDeliveries(id).filter((x) => x.status === '送付済')
+    expect(sent.map((x) => x.target.kind)).toEqual(['page', 'gdoc'])
+    expect(g.files.size).toBe(1)
   })
 })

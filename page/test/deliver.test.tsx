@@ -36,6 +36,7 @@ const base: CaseView = {
     overwrites: false,
     quotesOthers: false,
   },
+  destinationChoices: ['page', 'paste'],
   deliveries: [],
   events: [{ at, type: 'created', to: '入口待ち' }],
 }
@@ -142,7 +143,7 @@ describe('成果の面', () => {
   it('ページを開く・HTML をダウンロード・本文をコピー', async () => {
     const writeText = vi.fn(async () => {})
     vi.stubGlobal('navigator', { clipboard: { writeText } })
-    const r = await render(<ResultFace c={done} />)
+    const r = await render(<ResultFace c={done} reload={() => {}} stopped={false} />)
     expect(r.text()).toContain(W['result.heading'])
     const links = [...r.el.querySelectorAll('a')].map((a) => [a.textContent, a.getAttribute('href')])
     expect(links).toContainEqual([W['result.openPage'], '/cases/c1/page?v=1'])
@@ -157,7 +158,7 @@ describe('成果の面', () => {
 
   it('クリップボードが使えなければ、欄から選んでコピーするよう出す', async () => {
     vi.stubGlobal('navigator', { clipboard: { writeText: () => Promise.reject(new Error('denied')) } })
-    const r = await render(<ResultFace c={done} />)
+    const r = await render(<ResultFace c={done} reload={() => {}} stopped={false} />)
     await r.click(r.button(W['result.copy']))
     expect(r.text()).toContain(W['result.copyFailed'])
     r.done()

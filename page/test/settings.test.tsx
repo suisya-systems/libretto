@@ -27,7 +27,7 @@ beforeEach(() => {
   jev = { kind: 'jev', set: true, last4: 'WXYZ', savedAt: '2026-10-24T17:00:00+09:00' }
   conn = {
     isolation: { level: 'strong', running: false },
-    google: { configured: false, state: 'none', label: 'libretto' },
+    google: { configured: false, state: 'none', label: 'libretto', docs: false },
   }
   respond = () => new Response('{}')
   samples = []
@@ -284,7 +284,7 @@ describe('あなたの文体の見本（6.3.2 (10)）', () => {
 
 describe('連携の節（Google。6.4 (7)）', () => {
   const google = (g: Partial<ConnectionsView['google']>) => {
-    conn = { ...conn, google: { configured: true, state: 'none', label: 'libretto', ...g } }
+    conn = { ...conn, google: { configured: true, state: 'none', label: 'libretto', docs: true, ...g } }
   }
   const row = (el: HTMLElement) => el.querySelector('#h-link')?.parentElement as HTMLElement
 
