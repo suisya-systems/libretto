@@ -4,12 +4,14 @@ import { Worker } from 'node:worker_threads'
 import { type Check, CodeArgs, type CodeFn, type Phase } from '@libretto/shared/checks'
 import type { FactsFile } from '@libretto/shared/ledger'
 import type { z } from 'zod'
+import { safeHref } from '../deliver/page.ts'
 import { markerCheck } from '../facts/markers.ts'
 import {
   align,
   blocks,
   charCount,
   compareUnits,
+  decode,
   ending,
   headingCount,
   pageUnits,
@@ -310,7 +312,7 @@ export const FNS: Partial<Record<CodeFn, Fn<unknown>>> = {
     args: CodeArgs.pageRoundTrip,
     example: {},
     unit: 'ページの成果物',
-    yes: '本文の見出し・段落・箇条書きの項目が、順番と数までそのままページに出ている',
+    yes: '本文の見出し・段落・箇条書きの項目が、順番と数までそのままページに出ていて、出典のリンクの行き先も本文と同じ',
     pass: ['all'],
     phase: '形式',
     host: true,
@@ -320,7 +322,11 @@ export const FNS: Partial<Record<CodeFn, Fn<unknown>>> = {
       const ops = align(a, b, sameText)
       const missing = ops.filter((o) => o.op === 'removed').length
       const extra = ops.filter((o) => o.op === 'added').length
-      return { units: [missing === 0 && extra === 0], measured: { missing, extra } }
+      // 出典のリンクは判定した本文と同じ行き先を同じ順で（6.3.1 (11)）
+      const want = [...md.matchAll(/(?<!!)\[[^\]]*\]\((https?:\/\/[^)\s]+)\)/g)].map((m) => safeHref(m[1]))
+      const got = [...need(page, 'page').matchAll(/<a href="([^"]*)"/g)].map((m) => decode(m[1] as string))
+      const links = want.length === got.length && want.every((u, i) => u === got[i]) ? 0 : 1
+      return { units: [missing === 0 && extra === 0 && links === 0], measured: { missing, extra, links } }
     },
   }),
 }

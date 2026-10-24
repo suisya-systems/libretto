@@ -204,6 +204,7 @@ describe('機械判定（6.2.5 (2)）', () => {
     expect((await page('<h1>題</h1><p>Beta</p><p>Alpha</p><ul><li>一</li><li>二</li></ul>')).measured).toEqual({
       missing: 1,
       extra: 0,
+      links: 0,
     })
     expect(
       (await page('<h1>題</h1><p>Alpha</p><p>Beta</p><p>Alpha</p><ul><li>一</li><li>二</li></ul><p>余り</p>')).units,

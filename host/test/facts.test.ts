@@ -624,6 +624,20 @@ describe('届け先と承認の面のリンク（6.3.1 (11)）', () => {
     expect(renderHtml(md)).toContain('href="https://example.com/a__b~~c"')
   })
 
+  it('ページの形式の判定は、出典のリンクの行き先を判定した本文と比べる', async () => {
+    const c = withHostItems([], [{ kind: 'page', shared: false }], 'x'.repeat(32)).find(
+      (x) => x.judge.by === 'code' && x.judge.fn === 'pageRoundTrip',
+    ) as Check
+    const md = '利用者は 10 人（[調査](https://ex.com/a?x=1&y=2)）。'
+    const page = (href: string) =>
+      pageBlocks(`<p>利用者は 10 人（<a href="${href}">調査</a>）。</p>`)
+        .map((b) => `<p>${b.html}</p>`)
+        .join('')
+    expect((await runCode(c, { md, page: page('https://ex.com/a?x=1&amp;y=2') })).units).toEqual([true])
+    expect((await runCode(c, { md, page: page('https://ex.com/other') })).units).toEqual([false])
+    expect((await runCode(c, { md, page: '<p>利用者は 10 人（調査）。</p>' })).units).toEqual([false])
+  })
+
   it('貼り付け用は「題（URL）」、承認の面の本文はリンク', () => {
     const md = `利用者は 120 万人（[調査](${URL_B})）。![図](https://ex.com/i.png)`
     expect(pasteText(md)).toBe(`利用者は 120 万人（調査（${URL_B}））。図\n`)
