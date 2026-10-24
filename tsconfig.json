@@ -13,5 +13,5 @@
     "noEmit": true,
     "jsx": "react-jsx"
   },
-  "include": ["shared", "host", "page"]
+  "include": ["shared", "host", "page", ".claude/skills"]
 }
