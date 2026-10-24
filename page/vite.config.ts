@@ -8,6 +8,7 @@ export default defineConfig({
     host: '127.0.0.1',
     port: 5173,
     strictPort: true,
-    proxy: { '/api': host, '/pair': host },
+    // 版のあるページはホストが配信する（6.2.8 (4)）。/cases/:id の画面の経路は中継しない
+    proxy: { '/api': host, '/pair': host, '^/cases/[^/]+/page(?:[?#]|$)': host },
   },
 })

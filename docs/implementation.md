@@ -620,7 +620,7 @@ type DeliveryTarget = { kind: 'page', shared: boolean } | { kind: 'paste' } | { 
 | 画面を開く URL | `http://127.0.0.1:5173`（Vite。`host: '127.0.0.1'`・`strictPort: true` で、別のポートへ逃げない） |
 | ホスト | `http://127.0.0.1:7780`（既定のまま） |
 | ホストが許す `Origin` | `http://127.0.0.1:5173`。開発用の起こし方 `npm run dev:host` が `LIBRETTO_ORIGIN` をこの値にして起こす |
-| Vite が中継する経路 | `/api`（SSE を含む）と `/pair` を `http://127.0.0.1:7780` へ。`Origin` と `Cookie` の頭は書き換えない（`changeOrigin` を使わない） |
+| Vite が中継する経路 | `/api`（SSE を含む）と `/pair`、版のあるページ `/cases/:id/page`（6.2.8 (4)。画面の経路 `/cases/:id` は中継しない）を `http://127.0.0.1:7780` へ。`Origin` と `Cookie` の頭は書き換えない（`changeOrigin` を使わない） |
 | ペアリング URL を開く経路 | ホストが端末に出す URL をそのまま開く。URL の起点は `LIBRETTO_ORIGIN` の先頭なので `http://127.0.0.1:5173/pair/<token>` になり、Vite を通ってホストに届く。Cookie は `127.0.0.1` に置かれ、`/` へ戻ると Vite の画面がその Cookie で `/api` を読める |
 
 - **`localhost` は使わない**（ブラウザの欄にも、設定にも）。ブラウザは `localhost` と `127.0.0.1` を別のサイトとして Cookie を分けるので、片方でペアリングしてもう片方で開くと `401` になる。`Origin` も文字列の完全一致（5.4）なので、`http://localhost:5173` からの `POST` は `403` になる。
