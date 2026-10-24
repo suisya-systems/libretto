@@ -1,7 +1,7 @@
 // 画面とホストの契約（docs/implementation.md 5.2・5.3。確定範囲は 5.3.3）
 // 本人に見える型の欄の名前に「出さない語」を使わない（11.2。shared/test で確かめる）
 import { z } from 'zod'
-import { Category, CheckId, Escalate, Mark, Phase, SourceRow } from './checks.ts'
+import { Category, CheckId, Escalate, Mark, Phase, SourceRow, VoiceMatch } from './checks.ts'
 
 export const CaseState = z.enum([
   '候補',
@@ -133,6 +133,7 @@ export const CheckForPerson = z.object({
   summary: z.string(),
   isolation: z.boolean(), // canary。画面は「隔離の点検」
   minority: z.boolean(), // 少数派の項目（設計書 5.8.1。6.2.2 (9)）
+  own: z.enum(['pass', 'fail']).optional(), // 本人の過去文書で流した結果。流していなければ無い（6.3.2 (5)）
 })
 
 // 同系統で書いた理由（別系統の鍵が無い / つながらなかった）。識別子で、画面は wording.ts で引く（6.1.3 (5)）
@@ -143,6 +144,8 @@ export const ChecksSummary = z.object({
   family: z.enum(['別系統', '同系統']),
   fallback: FamilyFallback.optional(),
   items: z.array(CheckForPerson),
+  // 依頼書が「合わせる」のときだけ。docs = 取り寄せた見本の数、card = 文体カードを作れたか（6.3.2 (2)）
+  voice: z.object({ docs: z.number().int().min(0), card: z.boolean() }).optional(),
 })
 
 // 最初の entrance.drafted（T6）まで無い（5.3.2）
@@ -181,6 +184,7 @@ export const ReviewSummary = z.object({
   // Jev が答えた単位の数と、そのうち帯の中で別の読み手に回した数（7.6 (6)）
   jev: z.object({ units: z.number().int().min(1), unsure: z.number().int().min(0) }).optional(),
   escalate: Escalate.optional(), // 3 回目を待たずに上げた（6.2.7 (5)）
+  voiceMatch: VoiceMatch.optional(), // 文体カードとの比べ（6.3.2 (9)）
 })
 
 export const Version = z.object({

@@ -1,7 +1,7 @@
 // 入口の段取り（docs/implementation.md 6.2.2）。依頼書 → 確認項目 → ホストの項目 → Undecided → 組のファイル → T6。
 // 仕事の起動は transition の外（4.1）。runner の全体は Issue 10 で、ここは入口待ちの部分だけ
 import { createHash, randomBytes } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import {
   type Answer,
@@ -20,16 +20,28 @@ import { z } from 'zod'
 import { transition } from '../case/transition.ts'
 import { checksViolations } from '../checks/accept.ts'
 import { CANARY_SUMMARY, withHostItems } from '../checks/host-items.ts'
-import { CLAUDE_MATERIALS, DRAFTER_FNS, DRAFTER_PHASES, FNS, JEV_SCOPES, JEV_STATES } from '../checks/judgeable.ts'
+import {
+  CLAUDE_MATERIALS,
+  DRAFTER_FNS,
+  DRAFTER_PHASES,
+  FNS,
+  JEV_SCOPES,
+  JEV_STATES,
+  runCode,
+} from '../checks/judgeable.ts'
+import type { Fetched, FetchFailure } from '../facts/fetch.ts'
 import { type Inspection, inspectChecks } from '../facts/inspect.ts'
 import { markerCheck } from '../facts/markers.ts'
 import { type Classified, classifyJob, toUndecided } from '../facts/undecided.ts'
+import { gatherVoice } from '../facts/voice.ts'
 import { caseDir } from '../ledger/db.ts'
 import type { Ledger } from '../ledger/ledger.ts'
 import { type Job, type Outcome, withoutNulls } from '../model/invoke.ts'
 import { keyStatus } from '../model/keys.ts'
 import type { Runs } from '../runs.ts'
 import { isStorageError } from '../server/stop.ts'
+import { voiceSamples } from '../settings.ts'
+import { verdictOf } from './judge.ts'
 
 export const BRIEF_LIMITS = { maxYen: 120, timeoutMs: 600_000 }
 export const CHECKS_LIMITS = { maxYen: 160, timeoutMs: 600_000 }
@@ -148,7 +160,7 @@ const BRIEF_INSTRUCTION = `あなたは libretto の「下書き役（依頼書�
 
 依頼書の欄:
 - subject: 書く内容。何について書くか（題材）と、入れる中身（本人が言ったこと）を 1〜3 文で。「本人の指示」で題材や中身が変わったら、それに合わせて書き直す
-- wanted: 本人に渡してほしいもの。本文の中身を依頼の文だけでは書けず、本人しか持っていないもの（メモ・記録・数字・過去の文章など）が要るなら、それを 1 件ずつ短い名詞句で書く（例「ブレストのメモか記録」）。依頼の文だけで書けるなら []。待つものを assumptions に「本人からもらう」と書かない
+- wanted: 本人に渡してほしいもの。本文の中身を依頼の文だけでは書けず、本人しか持っていないもの（メモ・記録・数字・過去の文章など）が要るなら、それを 1 件ずつ短い名詞句で書く（例「ブレストのメモか記録」）。依頼の文だけで書けるなら []。待つものを assumptions に「本人からもらう」と書かない。本人の文体に合わせるための過去の文章は wanted に入れない（文体の見本は設定から取る）
 - gather: libretto がウェブで集めるもの。本文の中身に、公開されていて誰でもウェブで読める情報（公式のお知らせ・更新履歴・公開の統計など）が要るなら、それを 1 件ずつ書く（3 件まで）。1 件は、それだけ読んで探せる公開の情報の名前にする（例「この一週間の Claude Code の公式の更新履歴」）。社内の名前・数・人の名前は入れない。社内のメール・ドライブ・Slack にあるものや本人しか持っていないものは wanted に書く。gather があるときは sources を "${Brief.shape.sources.options[0]}" にする。集める先を assumptions に書かない
 - audience: 誰が読むか（どんな人で、何を知っているか）
 - shape: 分量と形（例「2,500 字前後、見出し 4〜5」）。本人が言っていなければ、文書の種類と読む人に合う形を決め、仮定に入れる
@@ -257,6 +269,7 @@ type Deps = {
   // ログインし直し待ちの関門（runner が持つ。待っていれば案件を覚えて真。6.2.3 (7)）
   blocked?: (caseId: string) => boolean
   onAuthExpired?: (caseId: string) => void
+  fetch?: (url: string, o: { signal: AbortSignal }) => Promise<Fetched | FetchFailure> // 文体の見本の取り寄せ（テストは偽物）
 }
 
 // --- 組のファイル（6.2.2 (7)）
@@ -316,6 +329,7 @@ export function setFingerprint(s: EntranceSet) {
     checks: s.checks.checks,
     family: s.checks.family,
     shapeOnly: s.checks.shapeOnly,
+    voice: s.checks.voice, // 無い組は今までの指紋と同じ（JSON に出ない。6.3.2 (2)）
     undecided: { items: s.undecided.items, mismatches: s.undecided.mismatches },
   })
 }
@@ -366,6 +380,9 @@ const renderUndecided = (u: UndecidedFile) =>
     '',
   ].join('\n')
 
+export const voiceSamplesPath = (home: string, caseId: string) =>
+  join(caseDir(home, caseId), 'checks', 'voice-samples.md')
+
 function writeSet(home: string, caseId: string, k: number, s: EntranceSet) {
   const f = files(caseDir(home, caseId), k)
   writeAtomic(f.brief, json(s.brief))
@@ -398,6 +415,9 @@ export function entranceView(home: string, ledger: Ledger, c: CaseRecord): Entra
       summary: x.summary,
       isolation: !!x.canary,
       minority: !!x.minority,
+      ...(s.checks.voice?.ownChecked.includes(x.id) && {
+        own: s.checks.voice.ownFails.includes(x.id) ? ('fail' as const) : ('pass' as const),
+      }),
     }),
   )
   const byCategory: Record<string, number> = {}
@@ -416,6 +436,7 @@ export function entranceView(home: string, ledger: Ledger, c: CaseRecord): Entra
       family: s.checks.family,
       ...(s.checks.fallback && { fallback: s.checks.fallback }),
       items,
+      ...(s.checks.voice && { voice: { docs: s.checks.voice.docs.length, card: !!s.checks.voice.card } }),
     },
   }
 }
@@ -592,6 +613,22 @@ export function createEntrance(d: Deps) {
       inspection = r.inspection
     }
 
+    // 文体の見本を取り寄せ、カードの数値・読み比べの段落・本人の過去文書での点検をその場で作る（6.3.2 (1)(2)(5)）
+    const gathered =
+      brief.voice === '合わせる'
+        ? await gatherVoice(
+            voiceSamples(home),
+            drafted,
+            signal,
+            async (x, md) => {
+              const r = await runCode(x, { md })
+              return !!r.timedOut || verdictOf(x.pass, r.units) === 'pass'
+            },
+            d.fetch,
+          )
+        : undefined
+    if (signal.aborted) return
+
     const u = await d.invoke(classifyJob(brief, bd.assumptions, drafted, caseId, signal, inspection?.notDerivable))
     if (!u.ok) return failed(c, u)
     if (signal.aborted) return
@@ -599,14 +636,21 @@ export function createEntrance(d: Deps) {
     const set: EntranceSet = {
       brief: { ...brief, assumptions: bd.assumptions as Assumption[], decisions: [] },
       checks: {
-        checks: withHostItems(drafted, c.destination, token(), brief.sources),
+        checks: withHostItems(drafted, c.destination, token(), brief.sources, {
+          card: !!gathered?.voice.card,
+          samples: !!gathered?.samples,
+        }),
+        ...(gathered && { voice: gathered.voice }),
         ...family,
         ...(inspection && { inspected: true as const }),
         ...(inspection?.shapeOnly.length && { shapeOnly: inspection.shapeOnly }),
       },
       undecided: toUndecided(u.json as Classified, drafted),
     }
-    // ファイルはトランザクションの前に（4.1）
+    // ファイルはトランザクションの前に（4.1）。読み比べの段落は作り手から読めない checks/ に（6.3.2 (2)）
+    const samplesPath = voiceSamplesPath(home, caseId)
+    if (gathered?.samples) writeAtomic(samplesPath, gathered.samples)
+    else rmSync(samplesPath, { force: true })
     writeSet(home, caseId, k, set)
     const r = transition(ledger, {
       type: 'entrance.drafted',

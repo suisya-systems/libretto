@@ -6,7 +6,8 @@ import { request as httpsRequest } from 'node:https'
 import { BlockList, isIP } from 'node:net'
 import { decode } from '../checks/text.ts'
 
-export type Fetched = { ok: true; url: string; title: string; paragraphs: string[]; fingerprint: string }
+// md = 見出しを `# `、箇条書きの項目を `- ` で始めた段落の Markdown（文体カードが使う。6.3.2 (3)）。キャッシュから読んだものには無い
+export type Fetched = { ok: true; url: string; title: string; paragraphs: string[]; fingerprint: string; md?: string }
 export type FetchFailure = {
   ok: false
   why: 'network' | 'timeout' | 'refused' | 'unsupported' | 'blocked'
@@ -60,17 +61,27 @@ const DROP_OPEN = new RegExp(`<(${DROPPED.replace('|head', '')})\\b[\\s\\S]*$`, 
 const BLOCK =
   /<\/?(p|div|br|li|ul|ol|h[1-6]|tr|td|th|table|section|article|header|footer|nav|aside|main|blockquote|pre|dd|dt|figcaption)\b[^>]*>/gi
 
-export function htmlText(html: string): { title: string; paragraphs: string[] } {
+export function htmlText(html: string): { title: string; paragraphs: string[]; md: string } {
   const title = decode(/<title\b[^>]*>([\s\S]*?)<\/title>/i.exec(html)?.[1]?.replace(/<[^>]*>/g, '') ?? '')
     .replace(/\s+/g, ' ')
     .trim()
-  const body = html
+  const kept = html
     .replace(/<!--[\s\S]*?(?:-->|$)/g, '') // 先頭 2 MB で切れた閉じていない注釈も捨てる
     .replace(DROP, '')
     .replace(DROP_OPEN, '')
-    .replace(BLOCK, '\n\n')
-    .replace(/<[^>]*>/g, '')
-  return { title, paragraphs: textParagraphs(decode(body)) }
+  const text = (s: string) => textParagraphs(decode(s.replace(BLOCK, '\n\n').replace(/<[^>]*>/g, '')))
+  // 見出しと項目の開きタグに印を置いてから同じように段落に分ける
+  const marked = kept.replace(/<h[1-6]\b[^>]*>/gi, '\n\n\uE000').replace(/<li\b[^>]*>/gi, '\n\n\uE001')
+  const md = text(marked)
+    .map((p) =>
+      p
+        .replace(/^\uE000\s*/, '# ')
+        .replace(/^\uE001\s*/, '- ')
+        .replace(/[\uE000\uE001]/g, ''),
+    )
+    .filter((p) => p !== '#' && p !== '-' && p !== '# ' && p !== '- ')
+    .join('\n\n')
+  return { title, paragraphs: text(kept), md }
 }
 
 export const textParagraphs = (text: string) =>
@@ -108,7 +119,10 @@ export async function fetchSource(url: string, o: Options = {}): Promise<Fetched
       }
       continue
     }
-    const text = r.html ? htmlText(r.body) : { title: '', paragraphs: textParagraphs(r.body) }
+    const paras = r.html ? undefined : textParagraphs(r.body)
+    const text = r.html
+      ? htmlText(r.body)
+      : { title: '', paragraphs: paras as string[], md: (paras as string[]).join('\n\n') }
     if (!text.paragraphs.length) return { ok: false, why: 'refused' }
     return {
       ok: true,
@@ -116,6 +130,7 @@ export async function fetchSource(url: string, o: Options = {}): Promise<Fetched
       title: text.title,
       paragraphs: text.paragraphs,
       fingerprint: sha256(text.paragraphs.join('\n')),
+      md: text.md,
     }
   }
   return { ok: false, why: 'refused' } // リダイレクトが多すぎる

@@ -18,22 +18,26 @@ import { type BriefFile, type CaseRecord, type FactsFile, VersionManifest } from
 import { z } from 'zod'
 import { MAX_ROUNDS, transition } from '../case/transition.ts'
 import { CANARY_SUMMARY } from '../checks/host-items.ts'
-import { FNS, type FnInput, runCode } from '../checks/judgeable.ts'
+import { draftVoice, FNS, type FnInput, needsVoice, runCode } from '../checks/judgeable.ts'
 import { paragraphUnits, sections } from '../checks/text.ts'
 import { supportsClaims } from '../facts/claims.ts'
 import { collectFacts, type Facts, type Fetch, linkRows, marksOf, renderFacts } from '../facts/inventory.ts'
+import { sha256Hex } from '../facts/voice.ts'
 import { caseDir } from '../ledger/db.ts'
 import type { Ledger } from '../ledger/ledger.ts'
 import type { Job, Outcome } from '../model/invoke.ts'
 import { askNoul, BAND, type NoulGroup, yesOf } from '../model/noul.ts'
 import { isStorageError } from '../server/stop.ts'
-import { approvedSet, renderBrief, writeAtomic } from './entrance.ts'
+import { approvedSet, renderBrief, voiceSamplesPath, writeAtomic } from './entrance.ts'
 import { canaryOf, draftNames, leakedIn, nn, versionDir } from './maker.ts'
 
 export const JUDGE_LIMITS = { maxYen: 160, timeoutMs: 600_000 }
 export const FAMILY_NOTE = '確認項目は作り手と同じ系統が書きました'
 export { JEV_NOTE, JEV_PARTIAL }
 export const TOO_HEAVY = '確かめ方が重すぎて判定できませんでした'
+// 文体カード・見本が無くて判定できなかった（6.3.2 (6)(7)）
+export const NO_VOICE = '文体カードが作れませんでした'
+export const NO_SAMPLES = '文体の見本が読めませんでした'
 
 // --- Claude の文章判定の出力（6.2.5 (3)）。yes: null は「この単位は決められない」なので withoutNulls は使わない
 
@@ -206,13 +210,14 @@ export type JudgeInput = {
   brief: BriefFile
   family: '別系統' | '同系統'
   signal: AbortSignal
+  samples?: string // 読み比べ用の段落（checks/voice-samples.md。指紋を確かめたもの。6.3.2 (7)）
   // 版の事実を集める（棚卸しと取り寄せ）。事実の項目があるときだけ呼ぶ（6.3.1 (7)）
   facts?: () => Promise<{ ok: true; facts: Facts } | { ok: false; out: Failure }>
 }
 export type Judged = {
   body: Pick<
     Review,
-    'results' | 'pass' | 'failedSummaries' | 'marks' | 'sources' | 'familyNote' | 'jevNote' | 'jevBand'
+    'results' | 'pass' | 'failedSummaries' | 'marks' | 'sources' | 'familyNote' | 'jevNote' | 'jevBand' | 'voiceMatch'
   >
   reasons: Record<string, string>
   facts?: FactsFile // 支持の判定を書き込んだもの。棚卸しを流さなかった版には無い
@@ -242,6 +247,11 @@ export async function judge(
       const got = await j.facts()
       if (!got.ok) return { ok: false, out: got.out }
       facts = got.facts
+    }
+    if (needsVoice(c) && !j.input.voice) {
+      reasons[c.id] = NO_VOICE
+      results.set(c.id, { id: c.id, verdict: 'unable', by: 'code', reasonRef: c.id })
+      continue
     }
     const r = await runCode(c, { ...j.input, ...(facts && { facts: facts.file }) })
     if (r.timedOut) reasons[c.id] = TOO_HEAVY
@@ -304,7 +314,15 @@ export async function judge(
         })
     }
   }
-  if (!codeFailed && model.length) {
+  // 見本が要るのに見本が無い項目は聞かずに unable（6.3.2 (7)）
+  if (!codeFailed)
+    for (const c of model.filter((x) => needsSamples(x) && !j.samples)) {
+      reasons[c.id] = NO_SAMPLES
+      results.set(c.id, { id: c.id, verdict: 'unable', by: 'claude', reasonRef: c.id })
+    }
+  const asking = model.filter((x) => !results.has(x.id))
+  if (!codeFailed && asking.length) {
+    const model = asking
     const units = new Map(model.map((c) => [c.id, unitsOf(scopeOf(c), j.input.md)]))
     // 2. Jev の項目を単位ごとに聞く（7.6 (5)）
     const noul = new Map<string, number>()
@@ -351,6 +369,7 @@ export async function judge(
         materials: [
           { name: '本文の単位', text: JSON.stringify(body) },
           ...(sent.some(needsBrief) ? [{ name: '依頼書', text: renderBrief(j.brief) }] : []),
+          ...(sent.some(needsSamples) && j.samples ? [{ name: '本人の文章の見本', text: j.samples }] : []),
           { name: '確かめること', text: JSON.stringify(asked) },
         ],
         output: { kind: 'json', schema: JudgeReply, accept: (x) => replyViolations(x as JudgeReply, asked) },
@@ -404,9 +423,34 @@ export async function judge(
         ...(checks.some((c) => c.judge.by === 'jev') &&
           (!jevUsed ? { jevNote: JEV_NOTE } : jevPartial ? { jevNote: JEV_PARTIAL } : {})),
         ...(jevUsed && { jevBand: [BAND.low, BAND.high] as [number, number] }),
+        ...voiceMatchOf(checks, results, j.input),
       },
       reasons,
       ...(facts && { facts: facts.file }),
+    },
+  }
+}
+
+const needsSamples = (c: Check) => c.judge.by === 'claude' && c.judge.materials.includes('voice-samples')
+
+// 文体カードとの比べ（6.3.2 (9)）。ホストが文体の項目を足した組の本文の判定にだけ付ける
+function voiceMatchOf(checks: readonly Check[], results: Map<string, CheckResult>, input: FnInput) {
+  const v = input.voice
+  const fnOf = (c: Check) => (c.judge.by === 'code' ? c.judge.fn : undefined)
+  if (!v || !checks.some((c) => needsVoice(c))) return {}
+  const okOf = (c: Check | undefined) => {
+    const verdict = c && results.get(c.id)?.verdict
+    return verdict === 'pass' ? true : verdict === 'fail' ? false : null
+  }
+  const by = (fn: string) => checks.find((c) => fnOf(c) === fn)
+  const d = draftVoice(input.md, v.main)
+  const round = (n: number) => Math.round(n * 1000) / 1000
+  return {
+    voiceMatch: {
+      endings: { main: v.main, you: v.endings[v.main], draft: round(d.ending), ok: okOf(by('voiceEndings')) },
+      sentenceLength: { you: v.sentenceLength.median, draft: d.median, ok: okOf(by('voiceSentenceLength')) },
+      firstPerson: { you: v.firstPerson, draft: d.firstPerson, ok: okOf(by('voiceFirstPerson')) },
+      readAlike: okOf(checks.find(needsSamples)),
     },
   }
 }
@@ -551,7 +595,7 @@ async function run(
     phase: Phase
     reuse: boolean
     previous?: () => Review | undefined
-    read: () => Pick<JudgeInput, 'checks' | 'input' | 'brief' | 'family' | 'facts'>
+    read: () => Pick<JudgeInput, 'checks' | 'input' | 'brief' | 'family' | 'facts' | 'samples'>
   },
   done: (r: Review) => ReturnType<typeof transition>,
 ): Promise<boolean> {
@@ -635,9 +679,13 @@ export function judgeBody(d: Deps, c: CaseRecord, signal: AbortSignal): Promise<
       read: () => {
         const set = approved(d, c)
         const md = draftOf(d, c)
+        const voice = set.checks.voice
+        const sp = voiceSamplesPath(d.home, c.caseId)
+        const samples = voice?.samplesFingerprint && existsSync(sp) ? readText(sp) : undefined
         return {
           checks: set.checks.checks,
-          input: { md },
+          input: { md, ...(voice?.card && { voice: voice.card }) },
+          ...(samples && sha256Hex(samples) === voice?.samplesFingerprint && { samples }),
           brief: set.brief,
           family: set.checks.family,
           facts: () =>
@@ -782,6 +830,7 @@ function summary(r: Review, checks: readonly Check[], reasons: Record<string, st
     ...(r.jevNote && { jevNote: r.jevNote }),
     ...(jevOf(r) && { jev: jevOf(r) }),
     ...(r.escalate && { escalate: r.escalate }),
+    ...(r.voiceMatch && { voiceMatch: r.voiceMatch }),
   }
 }
 

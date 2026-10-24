@@ -39,6 +39,7 @@ import { createEntrance, currentSet, entranceView, writeApproval, writeAtomic } 
 import { currentMarks, OUTPUT_FILES, reviewsOf } from '../roles/judge.ts'
 import { draftNames, pastedCount, pastedName, versionDir, versionsOf } from '../roles/maker.ts'
 import { createRuns, Stopped } from '../runs.ts'
+import { saveVoiceSamples, VoiceSamplesInput, voiceSamples } from '../settings.ts'
 import { createHub, type SseMessage } from './sse.ts'
 import { createStop, isStorageError } from './stop.ts'
 import { caseView, DEFAULTS, homeView, toCard } from './views.ts'
@@ -123,6 +124,7 @@ export function createServer(o: ServerOptions) {
     ...(o.token && { token: o.token }),
     blocked: (caseId) => runner.blocked(caseId),
     onAuthExpired: (caseId) => runner.onAuthExpired(caseId),
+    ...(o.fetch && { fetch: o.fetch }),
   })
   // 状態ごとの仕事を起こす（6.2.3 (1)）。入口待ちは entrance に任せる
   const runner = createRunner({
@@ -533,6 +535,17 @@ export function createServer(o: ServerOptions) {
     if (r instanceof Response) return r
     hub.emit('settings.changed', {})
     return c.json(r)
+  })
+
+  // あなたの文体の見本（6.3.2 (10)）。GET /api/settings ができたらその voiceSamples に移す
+  app.get('/api/settings/voice-samples', (c) => c.json({ samples: voiceSamples(home) }))
+  app.put('/api/settings/voice-samples', async (c) => {
+    const body = VoiceSamplesInput.safeParse(await c.req.json().catch(() => undefined))
+    if (!body.success) return c.json({ reason: 'invalid' }, 400)
+    const r = writing(c, () => saveVoiceSamples(home, body.data))
+    if (r instanceof Response) return r
+    hub.emit('settings.changed', {})
+    return c.json({ samples: r })
   })
 
   app.post('/api/devices', async (c) => {

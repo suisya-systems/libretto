@@ -278,7 +278,17 @@ describe('取り寄せ（6.3.1 (5)）', () => {
     const t = htmlText(
       '<html><head><title>題 &amp; 副題</title><style>p{}</style></head><body><script>x()</script><p>一つ目<b>強調</b></p><div>二つ目&nbsp;です</div></body></html>',
     )
-    expect(t).toEqual({ title: '題 & 副題', paragraphs: ['一つ目強調', '二つ目 です'] })
+    expect(t).toEqual({
+      title: '題 & 副題',
+      paragraphs: ['一つ目強調', '二つ目 です'],
+      md: '一つ目強調\n\n二つ目 です',
+    })
+  })
+
+  it('md は見出しを # 、箇条書きの項目を - で始める（文体カード。6.3.2 (3)）', () => {
+    const t = htmlText('<h2>見出し</h2><p>本文です。</p><ul><li>項目 1</li><li>項目 2</li></ul><h3> </h3>')
+    expect(t.md).toBe('# 見出し\n\n本文です。\n\n- 項目 1\n\n- 項目 2')
+    expect(t.paragraphs).toEqual(['見出し', '本文です。', '項目 1', '項目 2'])
   })
 
   let http: Server
