@@ -4,7 +4,7 @@ import { accessSync, constants, existsSync, mkdirSync, realpathSync, writeFileSy
 import { mkdtemp, rm } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { homedir, tmpdir } from 'node:os'
-import { delimiter, dirname, join, relative, sep } from 'node:path'
+import { delimiter, dirname, isAbsolute, join, relative, sep } from 'node:path'
 import { allowedEnv } from './claude-cli.ts'
 
 export const SRT_VERSION = '0.0.81' // host/package.json と同じ版（8.9 (1)）
@@ -128,7 +128,8 @@ export type SandboxOptions = {
 export function homeNamesOf(allowRead: readonly string[], userHome: string): string[] {
   const top = allowRead
     .map((a) => relative(userHome, a))
-    .filter((x) => x && !x.startsWith('..') && !x.startsWith(sep))
+    // 別のドライブ（Windows）では relative が絶対パスを返すので、ホームの下ではない
+    .filter((x) => x && !x.startsWith('..') && !isAbsolute(x))
     .map((x) => x.split(sep)[0] as string)
   return [...new Set([...top, '.claude.json'])]
 }
