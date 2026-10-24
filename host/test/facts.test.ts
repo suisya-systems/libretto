@@ -306,6 +306,7 @@ describe('取り寄せ（6.3.1 (5)）', () => {
     expect(hits - before).toBe(2)
     expect(await fetchSource('file:///etc/passwd')).toEqual({ ok: false, why: 'unsupported' })
     expect(await fetchSource('not a url')).toEqual({ ok: false, why: 'unsupported' })
+    expect(await fetchSource('https://%zz@example.com/')).toEqual({ ok: false, why: 'unsupported' })
   })
 
   it('成功・リダイレクト・回数・種類・大きさ・時間切れ・404', async () => {

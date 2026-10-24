@@ -144,15 +144,21 @@ function getOnce(u: URL, blocked: (ip: string) => boolean, signal: AbortSignal):
     })
   const request = u.protocol === 'https:' ? httpsRequest : httpRequest
   return new Promise((resolve) => {
-    const req = request(
-      u,
-      {
-        lookup: lookup as never,
-        signal,
-        headers: { accept: 'text/html,text/plain', 'accept-encoding': 'identity', 'user-agent': 'libretto' },
-      },
-      (res) => onResponse(res, resolve),
-    )
+    let req: ReturnType<typeof request>
+    try {
+      req = request(
+        u,
+        {
+          lookup: lookup as never,
+          signal,
+          headers: { accept: 'text/html,text/plain', 'accept-encoding': 'identity', 'user-agent': 'libretto' },
+        },
+        (res) => onResponse(res, resolve),
+      )
+    } catch {
+      // URL の資格情報が読めないなど、要求を作る前に投げる形（6.3.1 (5)）
+      return resolve({ kind: 'fail', why: 'unsupported' })
+    }
     req.on('error', () => resolve({ kind: 'fail', why: refused ? 'blocked' : signal.aborted ? 'timeout' : 'network' }))
     req.end()
   })
@@ -160,18 +166,19 @@ function getOnce(u: URL, blocked: (ip: string) => boolean, signal: AbortSignal):
 
 function onResponse(res: IncomingMessage, resolve: (o: Once) => void) {
   const status = res.statusCode ?? 0
+  // 使わない本文は読まずに切る（大きさの上限の外で読み続けない）
   if (status >= 300 && status < 400 && res.headers.location) {
-    res.resume()
+    res.destroy()
     return resolve({ kind: 'redirect', location: res.headers.location })
   }
   if (status !== 200) {
-    res.resume()
+    res.destroy()
     return resolve({ kind: 'fail', why: 'refused' })
   }
   const type = res.headers['content-type'] ?? ''
   const html = /^text\/html\b/i.test(type)
   if (!html && !/^text\/plain\b/i.test(type)) {
-    res.resume()
+    res.destroy()
     return resolve({ kind: 'fail', why: 'unsupported' })
   }
   const charset = /charset=["']?([\w-]+)/i.exec(type)?.[1] ?? 'utf-8'

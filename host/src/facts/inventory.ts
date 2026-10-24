@@ -368,7 +368,8 @@ export async function fetchCached(
         } catch {}
         if (c?.success && c.data.url === url) return [url, { ok: true, ...c.data }]
       }
-      const f = await fetch(url, { signal })
+      // 1 つの URL の思わぬ例外で、ほかの出典と材料待ちの段取りを止めない
+      const f = await fetch(url, { signal }).catch((): FetchFailure => ({ ok: false, why: 'network' }))
       if (f.ok) {
         mkdirSync(dir, { recursive: true, mode: 0o700 })
         writeAtomic(path, `${JSON.stringify({ ...f, ok: undefined, url })}\n`)
