@@ -185,7 +185,7 @@ export function claimsFrom(md: string, found: Inventory['claims'], notClaims: re
   for (const s of spans) if (!kept.some((k) => s.start < k.end && k.start < s.end)) kept.push(s)
   const excused = notClaims.flatMap((t) => locate(md, t))
   for (const s of sentencesOf(md)) {
-    if (/^\s*#/.test(s.text) || !/\d/.test(cleanText(s.text))) continue
+    if (/^\s*#/.test(s.text) || !/\d/.test(cleanText(s.text).normalize('NFKC'))) continue
     if (kept.some((k) => k.start < s.end && s.start < k.end)) continue
     if (excused.some(([a, b]) => a < s.end && s.start < b)) continue
     const lead = s.text.length - s.text.trimStart().length
@@ -272,10 +272,14 @@ export function buildFacts(
     const s = sentences.find((x) => x.start <= c.range[0] && c.range[0] < x.end)
     const text = cleanText(c.text)
     const mark = s?.marked ? { mark: true as const } : {}
-    const url = s?.links[0]
-    if (url) {
-      const src = sources.get(url)
-      const top = src?.ok ? best(text, src.paragraphs) : undefined
+    // 文に出典が複数あれば、主張に一番当たる出典を相手にする
+    const links = s?.links ?? []
+    if (links.length) {
+      const scored = links.map((url) => {
+        const src = sources.get(url)
+        return { url, top: src?.ok ? best(text, src.paragraphs) : undefined }
+      })
+      const { url, top } = scored.reduce((a, b) => ((b.top?.score ?? -1) > (a.top?.score ?? -1) ? b : a))
       if (!top || top.score < SOURCE_MIN) return { claimId: c.id, kind: '出典あり', sourceRef: url, ...mark }
       const ex = excerptOf(text, top.para)
       excerpts.set(c.id, ex)
@@ -386,7 +390,7 @@ export async function collectFacts(
   if (!inv.ok) return inv
   const sentences = sentencesOf(md)
   const urls = inv.claims.flatMap(
-    (c) => sentences.find((s) => s.start <= c.range[0] && c.range[0] < s.end)?.links[0] ?? [],
+    (c) => sentences.find((s) => s.start <= c.range[0] && c.range[0] < s.end)?.links ?? [],
   )
   const sources = await fetchCached(d.home, d.caseId, urls, d.signal, d.fetch)
   return { ok: true, facts: buildFacts(version, md, inv.claims, readMaterials(d.home, d.caseId), sources) }

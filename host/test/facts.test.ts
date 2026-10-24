@@ -107,6 +107,30 @@ describe('棚卸し（6.3.1 (2)）', () => {
     for (const c of cs) expect(md.slice(...c.range)).toBe(c.text)
   })
 
+  it('全角の数字の文も下限に入る', () => {
+    expect(claimsFrom('利用者は１２０万人だった。', []).map((c) => c.kind)).toEqual(['数値'])
+  })
+
+  it('文に出典が複数あれば、主張ごとに一番当たる出典を相手にする', () => {
+    const md = 'A 社は 10 人、B 社は 20 人だった（[A](https://ex.com/a)、[B](https://ex.com/b)）。'
+    const cs = claimsFrom(md, [
+      { text: 'A 社は 10 人', kind: '数値' },
+      { text: 'B 社は 20 人だった', kind: '数値' },
+    ])
+    const src = (url: string, p: string): [string, Fetched] => [
+      url,
+      { ok: true, url, title: url, paragraphs: [p], fingerprint: 'f' },
+    ]
+    const f = buildFacts(
+      1,
+      md,
+      cs,
+      [],
+      new Map([src('https://ex.com/a', 'A 社は 10 人だ。'), src('https://ex.com/b', 'B 社は 20 人だった。')]),
+    )
+    expect(f.file.verdicts.map((v) => v.sourceRef)).toEqual(['https://ex.com/a', 'https://ex.com/b'])
+  })
+
   it('数字を含む文でも notClaims に挙げた文は主張に足さない', () => {
     const md = '来月は 2 本の記事で試します。売上は 30 億円だった。'
     expect(claimsFrom(md, [], ['来月は 2 本の記事で試します。']).map((c) => c.text)).toEqual(['売上は 30 億円だった。'])
@@ -591,6 +615,12 @@ describe('届け先と承認の面のリンク（6.3.1 (11)）', () => {
       '<p>出典は<a href="https://ex.com/a?x=1&amp;y=2" onclick="x()" target="_top">調査</a>と<a href="javascript:alert(1)">危ない</a>。</p>',
     )
     expect(b[0]?.html).toBe('出典は<a href="https://ex.com/a?x=1&amp;y=2" rel="noopener noreferrer">調査</a>と危ない。')
+  })
+
+  it('URL の中の __ や ~~ は消さない（貼り付け用・承認の面）', () => {
+    const md = '- 利用者は 10 人（[調__査](https://example.com/a__b~~c)）。'
+    expect(pasteText(md)).toBe('・利用者は 10 人（調査（https://example.com/a__b~~c））。\n')
+    expect(renderHtml(md)).toContain('href="https://example.com/a__b~~c"')
   })
 
   it('貼り付け用は「題（URL）」、承認の面の本文はリンク', () => {
