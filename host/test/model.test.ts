@@ -1,3 +1,7 @@
+import { createHash } from 'node:crypto'
+import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { Role } from '@libretto/shared/ledger'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { z } from 'zod'
@@ -395,5 +399,45 @@ describe('JSON の読み取りの形の違い（6.2.2 (3)）', () => {
     const out = await invoke(job({ role: '下書き役・確認項目', fallback: true, output: { kind: 'json', schema: Out } }))
     expect(out).toMatchObject({ ok: true, json: { title: 'x' }, family: 'claude' })
     expect(fake.calls).toHaveLength(1)
+  })
+})
+
+describe('invoke: jobs/ の記録と返答ごとの通知（8.10 (1)(3)）', () => {
+  it('Job ごとに 1 件（言い直しでは増えない）。材料は名前・大きさ・sha256 だけ。案件の無い呼び出しは書かない', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'libretto-jobs-'))
+    const file = join(dir, 'a.txt')
+    writeFileSync(file, 'ファイルの中身')
+    const { invoke } = setup(
+      [
+        { role: R, nth: 1, reply: { text: '{broken' } },
+        { role: R, nth: 2, reply: { text: '{"title":"題"}' } },
+        { role: R, nth: 3, reply: { text: 'ok' } },
+      ],
+      { jobsDir: (caseId) => join(dir, caseId, 'jobs') },
+    )
+    const replies: string[] = []
+    const out = await invoke(
+      job({
+        output: { kind: 'json', schema: Out },
+        materials: [
+          { name: '依頼', text: '本文の中身' },
+          { name: '資料', file, mime: 'text/plain' },
+        ],
+        onReply: (t) => replies.push(t),
+      }),
+    )
+    expect(out.ok).toBe(true)
+    expect(replies).toEqual(['{broken', '{"title":"題"}'])
+    expect(readdirSync(join(dir, 'c1', 'jobs'))).toEqual([`${R}-1.json`])
+    const rec = JSON.parse(readFileSync(join(dir, 'c1', 'jobs', `${R}-1.json`), 'utf-8'))
+    const sha = (v: string) => createHash('sha256').update(v).digest('hex')
+    expect(rec).toMatchObject({ role: R, access: 'none', output: 'json', instruction: '依頼書を書く' })
+    expect(rec.materials).toEqual([
+      { name: '依頼', chars: 5, sha256: sha('本文の中身') },
+      { name: '資料', mime: 'text/plain', bytes: Buffer.byteLength('ファイルの中身'), sha256: sha('ファイルの中身') },
+    ])
+    expect(JSON.stringify(rec)).not.toContain('本文の中身')
+    await invoke(job({ caseId: '点検' }))
+    expect(readdirSync(dir).sort()).toEqual(['a.txt', 'c1'])
   })
 })

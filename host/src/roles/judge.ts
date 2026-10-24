@@ -23,7 +23,7 @@ import type { Ledger } from '../ledger/ledger.ts'
 import type { Job, Outcome } from '../model/invoke.ts'
 import { isStorageError } from '../server/stop.ts'
 import { approvedSet, renderBrief, writeAtomic } from './entrance.ts'
-import { draftNames, nn, versionDir } from './maker.ts'
+import { canaryOf, draftNames, leakedIn, nn, versionDir } from './maker.ts'
 
 export const JUDGE_LIMITS = { maxYen: 160, timeoutMs: 600_000 }
 export const FAMILY_NOTE = '確認項目は作り手と同じ系統が書きました'
@@ -373,6 +373,9 @@ async function run(
     )
   let review: Review | undefined
   try {
+    // 版の正本に canary の語があれば判定しない。使い回しの道より前に見る（8.10 (1)）
+    const token = canaryOf(home, ledger, c.caseId)
+    if (token && leakedIn(versionDir(home, c.caseId, c.version), token)) return fail('隔離の失敗')
     review = how.reuse ? prior(join(dir, `${how.name}.json`), c) : undefined
     if (!review) {
       const src = how.read()

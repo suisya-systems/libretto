@@ -23,6 +23,7 @@ import {
   checkSandbox,
   createSandbox,
   denyRules,
+  homeNamesOf,
   MIN_CLAUDE,
   rulePath,
   type SandboxCheck,
@@ -454,5 +455,52 @@ describe('API キーのファイルと隔離（6.1.3 (4)）', () => {
     expect(s.filesystem.denyRead.some((d) => under(d, file))).toBe(true)
     expect(s.filesystem.allowRead.some((a) => under(a, file))).toBe(false)
     expect(denyRules(home, join(dir, '.claude'))).toContain(`Read(${rulePath(file)})`)
+  })
+})
+
+describe('隔離の点検の対照と、ホームに出てよい名前（8.10 (4)）', () => {
+  const strongCheck: SandboxCheck = { isolation: 'strong', claudeOk: true }
+  it('対照: strong は allowRead に足し、どの水準でも CLI の拒否規則を渡さない', async () => {
+    const w = join(dir, 'home', 'cases', '_probe', 'work')
+    const checks = join(dir, 'home', 'cases', '_probe', 'checks')
+    mkdirSync(w, { recursive: true })
+    mkdirSync(checks, { recursive: true })
+    const box = createSandbox({
+      home: join(dir, 'home'),
+      claude: [process.execPath, FAKE],
+      srt: FAKE_SRT,
+      check: () => strongCheck,
+      reopen: [checks],
+    })
+    const p = await box.prepare(w, ['-p'], { PATH: '/usr/bin' })
+    const at = p.argv.indexOf('--')
+    const srt = JSON.parse(readFileSync(p.argv[at - 1] ?? '', 'utf8'))
+    expect(srt.filesystem.allowRead).toContain(checks)
+    expect(p.argv.slice(at + 1)).toEqual([realpathSync(process.execPath), FAKE, '-p'])
+    await p.cleanup()
+    const weak = createSandbox({
+      home: join(dir, 'home'),
+      claude: ['claude.exe'],
+      check: () => ({ isolation: 'weak', reason: 'windows', claudeOk: true }),
+      reopen: [checks],
+    })
+    const q = await weak.prepare(w, ['-p'], {})
+    expect(q.argv).toEqual(['claude.exe', '-p'])
+    await q.cleanup()
+  })
+
+  it('ホームの下の allowRead の一番上の名前と .claude.json だけ', () => {
+    const h = join(dir, 'u')
+    expect(
+      homeNamesOf(
+        [
+          join(h, '.claude', '.credentials.json'),
+          join(h, '.local', 'share', 'claude'),
+          '/usr/bin/node',
+          join(dir, 'x'),
+        ],
+        h,
+      ).sort(),
+    ).toEqual(['.claude', '.claude.json', '.local'])
   })
 })

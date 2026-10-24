@@ -1,6 +1,6 @@
 // モデル呼び出しのアダプタ 1 つ（docs/implementation.md 6.1・6.1.1）。費用の予約と精算、出力の検査と 1 回の言い直しはここだけ
-import { randomUUID } from 'node:crypto'
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { createHash, randomUUID } from 'node:crypto'
+import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { z } from 'zod'
 import { type Ledger, NON_CASE_COSTS } from '../ledger/ledger.ts'
@@ -22,6 +22,7 @@ export type Job = {
   limits: { maxYen: number; timeoutMs: number }
   signal: AbortSignal
   fallback?: true // 別系統の代わりに受け皿の表（roles.ts の FALLBACK）で呼ぶ（6.2.2 (3)）
+  onReply?: (text: string) => void // 言い直しの前の回も含め、返ってきた文ごとに呼ぶ（canary を見る。8.10 (1)）
 }
 
 export type CapScope = '案件' | '全体' | '呼び出し'
@@ -91,6 +92,28 @@ type Deps = {
   debugDir?: string
   settleMs?: number // 止めた後に中身の決着（子孫の終了まで）を待つ上限（6.1.2 (2)）
   retryWaitMs?: number // 混雑の再試行の前に待つ時間（6.1.2 (3)）
+  jobsDir?: (caseId: string) => string // 役割に渡した Job の記録の置き場（8.4・8.10 (3)）
+}
+
+const sha = (v: string | Buffer) => createHash('sha256').update(v).digest('hex')
+
+// cases/<id>/jobs/<role>-<n>.json。instruction の全文と、材料の名前・大きさ・sha256 だけ（本文は入れない。8.4）
+function recordJob(dir: string, job: Job, now: Date) {
+  mkdirSync(dir, { recursive: true, mode: 0o700 })
+  const n = readdirSync(dir).filter((f) => f.startsWith(`${job.role}-`)).length + 1
+  const record = {
+    role: job.role,
+    at: now.toISOString(),
+    access: job.access,
+    output: job.output.kind,
+    instruction: job.instruction,
+    materials: job.materials.map((m) =>
+      'text' in m
+        ? { name: m.name, chars: m.text.length, sha256: sha(m.text) }
+        : { name: m.name, mime: m.mime, bytes: statSync(m.file).size, sha256: sha(readFileSync(m.file)) },
+    ),
+  }
+  writeFileSync(join(dir, `${job.role}-${n}.json`), `${JSON.stringify(record, null, 2)}\n`)
 }
 
 type Ended = Reply | { fail: 'stopped' | 'timeout'; costYen: null }
@@ -177,6 +200,8 @@ export function createInvoke(deps: Deps) {
     let retried = false
     // 中身の files は呼び出しごとの差分（6.1.2 (6)）。言い直しで足りない分だけ書けば揃うよう、この invoke の中で合わせる
     const written = new Set<string>()
+    // 書けなければ例外のまま上へ（保存の帯。8.10 (3)）
+    if (deps.jobsDir && !NON_CASE_COSTS.includes(job.caseId)) recordJob(deps.jobsDir(job.caseId), job, new Date())
 
     const capped = async (scope: CapScope, callId: string): Promise<Outcome> => {
       // 発火はアダプタだけ。案件の無い呼び出しは通知しない（6.1.1 (1)）
@@ -238,6 +263,7 @@ export function createInvoke(deps: Deps) {
         const why = 'why' in ended && ended.why ? { why: ended.why } : {}
         return { ok: false, kind: ended.fail, ...why, detail: DETAIL[ended.fail], costYen, family, model }
       }
+      job.onReply?.(ended.text)
       for (const f of ended.files ?? []) written.add(f)
       const files = ended.files || written.size ? [...written] : undefined
       const { errors, json } = check(job, { text: ended.text, ...(files && { files }) })

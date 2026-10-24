@@ -4,7 +4,7 @@ import { accessSync, constants, existsSync, mkdirSync, realpathSync, writeFileSy
 import { mkdtemp, rm } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { homedir, tmpdir } from 'node:os'
-import { delimiter, dirname, join } from 'node:path'
+import { delimiter, dirname, join, relative, sep } from 'node:path'
 import { allowedEnv } from './claude-cli.ts'
 
 export const SRT_VERSION = '0.0.81' // host/package.json と同じ版（8.9 (1)）
@@ -74,6 +74,7 @@ export type SettingsInput = {
   credentials?: string | undefined
   rgArgv0?: boolean // rg が無く、claude を ripgrep として起こす
   rg?: string | undefined
+  reopen?: string[] // 隔離の点検の対照で開け直すディレクトリ（8.10 (4)）
 }
 
 // 案件ごとの srt の設定（8.3・8.9 (3)）。純関数
@@ -89,6 +90,7 @@ export function srtSettings(i: SettingsInput) {
         i.srtVendor,
         ...(i.credentials ? [i.credentials] : []),
         i.tmp,
+        ...(i.reopen ?? []),
       ],
       allowWrite: [i.work, i.tmp],
       denyWrite: [],
@@ -119,38 +121,65 @@ export type SandboxOptions = {
   srt?: string[] // テストで偽の srt に替える
   userHome?: string
   rg?: string // ripgrep として起こす claude の実体。既定は claude 自身（偽の CLI で包む確認用）
+  reopen?: string[] // 対照: srt の allowRead に足し、CLI の拒否規則を渡さない（8.10 (4)）
+}
+
+// ホームの一覧に出てよい名前: allowRead のうちホームの下にあるものの一番上の名前と、CLI が使い捨てのホームに書く .claude.json（8.4・8.10 (4)）
+export function homeNamesOf(allowRead: readonly string[], userHome: string): string[] {
+  const top = allowRead
+    .map((a) => relative(userHome, a))
+    .filter((x) => x && !x.startsWith('..') && !x.startsWith(sep))
+    .map((x) => x.split(sep)[0] as string)
+  return [...new Set([...top, '.claude.json'])]
 }
 
 // 作り手 1 回分の起こし方。args は claude の旗。inner を渡すと claude の代わりにそれを動かす（自己点検の網）
 export function createSandbox(o: SandboxOptions) {
   const userHome = o.userHome ?? homedir()
+  const envOf = (parentEnv: NodeJS.ProcessEnv) => ({
+    ...allowedEnv(parentEnv),
+    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+  })
+  const settingsFor = (work: string, tmp: string, env: Record<string, string>) => {
+    const configDir = configDirOf(env, userHome)
+    const claude = realExe(o.claude[0] ?? '', env)
+    return srtSettings({
+      home: o.home,
+      userHome,
+      configDir,
+      work,
+      tmp,
+      claude,
+      node: realpathSync(process.execPath),
+      srtVendor: join(srtPkg(), 'vendor'),
+      credentials: credentialsOf(configDir),
+      rgArgv0: !onPath('rg', env) && !isScript(o.rg ?? claude),
+      rg: o.rg,
+      ...(o.reopen && { reopen: o.reopen }),
+    })
+  }
   return {
+    // 隔離の点検でホームの一覧と比べる名前（8.10 (4)）
+    homeNames(work: string, parentEnv: NodeJS.ProcessEnv = process.env): string[] {
+      return homeNamesOf(settingsFor(work, tmpdir(), envOf(parentEnv)).filesystem.allowRead, userHome)
+    },
     async prepare(work: string, args: string[], parentEnv: NodeJS.ProcessEnv, inner?: string[]): Promise<Prepared> {
       const c = o.check()
       if (c.isolation === 'broken') throw new Error(`sandbox: isolation broken (${c.reason})`)
       const tmp = await mkdtemp(join(tmpdir(), 'libretto-maker-'))
       const cleanup = () => rm(tmp, { recursive: true, force: true })
-      const env = { ...allowedEnv(parentEnv), CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1' }
+      const env = envOf(parentEnv)
       const deny = join(tmp, 'settings.json')
-      const configDir = configDirOf(env, userHome)
-      writeFileSync(deny, JSON.stringify({ permissions: { deny: denyRules(o.home, configDir) } }), { mode: 0o600 })
-      const [exe = '', ...rest] = o.claude
-      if (c.isolation === 'weak') return { argv: [...o.claude, ...args, '--settings', deny], env, cleanup }
-      const claude = realExe(exe, env)
-      const settings = join(tmp, 'srt.json')
-      const body = srtSettings({
-        home: o.home,
-        userHome,
-        configDir,
-        work,
-        tmp,
-        claude,
-        node: realpathSync(process.execPath),
-        srtVendor: join(srtPkg(), 'vendor'),
-        credentials: credentialsOf(configDir),
-        rgArgv0: !onPath('rg', env) && !isScript(o.rg ?? claude),
-        rg: o.rg,
+      writeFileSync(deny, JSON.stringify({ permissions: { deny: denyRules(o.home, configDirOf(env, userHome)) } }), {
+        mode: 0o600,
       })
+      // 対照は CLI の拒否規則を渡さない（strong でも拒否規則が checks/ を拒むので。8.10 (4)）
+      const denyArgs = o.reopen ? [] : ['--settings', deny]
+      const [, ...rest] = o.claude
+      if (c.isolation === 'weak') return { argv: [...o.claude, ...args, ...denyArgs], env, cleanup }
+      const body = settingsFor(work, tmp, env)
+      const claude = realExe(o.claude[0] ?? '', env)
+      const settings = join(tmp, 'srt.json')
       writeFileSync(settings, JSON.stringify(body), { mode: 0o600 })
       // -- が無いと srt が後ろの --version や --settings を自分の旗として読む（8.9 (1)）
       return {
@@ -165,8 +194,7 @@ export function createSandbox(o: SandboxOptions) {
             claude,
             ...rest,
             ...args,
-            '--settings',
-            deny,
+            ...denyArgs,
           ]),
         ],
         env: { ...withoutTmpdir(env), CLAUDE_CODE_TMPDIR: tmp },

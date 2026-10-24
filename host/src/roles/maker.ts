@@ -12,7 +12,7 @@ import { charCount, headingCount } from '../checks/text.ts'
 import { caseDir } from '../ledger/db.ts'
 import type { Ledger } from '../ledger/ledger.ts'
 import type { Job, Outcome } from '../model/invoke.ts'
-import { writeAtomic } from './entrance.ts'
+import { approvedSet, writeAtomic } from './entrance.ts'
 
 export const MAKER_LIMITS = { maxYen: 400, timeoutMs: 1_800_000 }
 
@@ -51,6 +51,20 @@ ${feedback ? '- feedback.md: 前のバージョンで直してほしいこと。
 3. ${f.done}: 1 と 2 を書き終えてから、done の 1 行だけを書く
 
 書き終えたら、何を書いたかを 1 行で答えてください。`
+}
+
+// --- canary（8.10 (1)）。承認した組の語と、フォルダの下の全ファイル（再帰・バイト列）に語があるか
+
+export function canaryOf(home: string, ledger: Ledger, caseId: string): string | undefined {
+  const j = approvedSet(home, ledger, caseId)?.checks.checks.find((x) => x.canary)?.judge
+  return j?.by === 'code' && j.fn === 'canary' ? (j.args as { token: string }).token : undefined
+}
+export function leakedIn(dir: string, token: string): boolean {
+  if (!existsSync(dir)) return false
+  return readdirSync(dir, { recursive: true, encoding: 'utf-8' }).some((f) => {
+    const p = join(dir, f)
+    return statSync(p).isFile() && readFileSync(p).includes(token)
+  })
 }
 
 // --- feedback.md（6.2.3 (4)）。いまの下書き中を作った遷移で決める
@@ -178,7 +192,12 @@ export async function make(d: Deps, c: CaseRecord, signal: AbortSignal): Promise
       c.caseId,
       transition(ledger, { ...job, type: 'fail.system', reason, eventId: `${c.caseId}:fail.system:r${c.revision}` }),
     )
+  // 作り手のどの回の返答と作業場の全ファイルに canary の語があっても、写さずに止める（8.10 (1)）
+  const token = canaryOf(home, ledger, c.caseId)
+  const replies: string[] = []
+  const leaked = () => !!token && (replies.some((t) => t.includes(token)) || leakedIn(work, token))
   const commit = () => {
+    if (leaked()) return fail('隔離の失敗')
     const m = copyVersion(home, c.caseId, n, now())
     return d.emit(
       c.caseId,
@@ -214,18 +233,20 @@ export async function make(d: Deps, c: CaseRecord, signal: AbortSignal): Promise
     output: { kind: 'files', expect: [f.md, f.html, f.done] },
     limits: MAKER_LIMITS,
     signal,
+    onReply: (t) => replies.push(t),
   })
-  if (out.ok) return complete(work, n) ? commit() : fail('書けなかった')
+  if (out.ok && complete(work, n)) return commit()
   // invoke は子孫まで終わってから返すので、改名の後に書き足されない（6.1.2 (2)）
-  if (out.kind === 'stopped' || out.kind === 'timeout') setAside(work, n)
+  if (!out.ok && (out.kind === 'stopped' || out.kind === 'timeout')) setAside(work, n)
+  // stopped は止めた側が、budget は cost.cap が遷移を書いた
+  if (!out.ok && (out.kind === 'stopped' || out.kind === 'budget')) return false
+  // 隔離の失敗は作り手の不出来や道具の失敗より先に言う（8.10 (1)）
+  if (leaked()) return fail('隔離の失敗')
+  if (out.ok || out.kind === 'invalid_output') return fail('書けなかった')
   if (out.kind === 'timeout') return fail('時間切れ')
-  if (out.kind === 'invalid_output') return fail('書けなかった')
-  if (out.kind === 'unavailable') {
-    if (out.why === 'auth_expired') {
-      d.onAuthExpired(c.caseId)
-      return false
-    }
-    return fail('つながらない')
+  if (out.kind === 'unavailable' && out.why === 'auth_expired') {
+    d.onAuthExpired(c.caseId)
+    return false
   }
-  return false // stopped は止めた側が、budget は cost.cap が遷移を書いた
+  return fail('つながらない')
 }

@@ -1,14 +1,16 @@
 // 起動（docs/implementation.md 12 章）。`libretto` でホスト、`libretto stop` で緊急停止（4.4・5.7 (3)）
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { serve } from '@hono/node-server'
 import { transition } from './case/transition.ts'
-import { callsDir, initHome, resolveHome } from './ledger/db.ts'
+import { causeOf, checkIsolation, probeDir } from './checks/isolation.ts'
+import { callsDir, caseDir, initHome, resolveHome } from './ledger/db.ts'
 import { createClaudeCli, resolveClaude } from './model/claude-cli.ts'
-import { createInvoke } from './model/invoke.ts'
+import { createInvoke, type Job } from './model/invoke.ts'
 import { readKey } from './model/keys.ts'
 import { createOpenai } from './model/openai.ts'
 import { settleOrphans } from './model/orphans.ts'
-import { checkSandbox, createSandbox, MIN_CLAUDE } from './model/sandbox.ts'
+import { checkSandbox, createSandbox, MIN_CLAUDE, type Sandbox } from './model/sandbox.ts'
 import { createServer } from './server/app.ts'
 import { writeStopFile } from './server/stop.ts'
 
@@ -42,29 +44,41 @@ if (sandboxCheck.reason?.startsWith('missing:') || sandboxCheck.reason === 'user
 if (!sandboxCheck.claudeOk)
   console.error(`libretto: Claude Code ${MIN_CLAUDE} or later is required. Claude is not called.`)
 const sandbox = createSandbox({ home, claude, check: () => sandboxCheck })
+// 隔離の点検の対照: checks/ を開け直した起こし方（8.10 (4)）
+const control = createSandbox({
+  home,
+  claude,
+  check: () => sandboxCheck,
+  reopen: [join(probeDir(home), 'checks')],
+})
 // ponytail: 為替と上限は 5.3 の既定（P3: 全体は未入力）。settings.json から読むのは設定の Issue
 const usdJpy = () => 150
-const invoke = createInvoke({
-  ledger,
-  backends: {
-    claude: createClaudeCli({
-      usdJpy,
-      callsDir: callsDir(home),
-      sandbox,
-      blocked: () =>
-        sandboxCheck.claudeOk ? undefined : `claude ${sandboxCheck.claudeVersion ?? 'unknown'} < ${MIN_CLAUDE}`,
-    }),
-    openai: createOpenai({ key: () => readKey(home, 'openai'), usdJpy }),
-  },
-  caps: () => ({ caseCapYen: 1500, monthCapYen: null }),
-  // 費用上限で案件を止める（6.1.1 (1)）。revision は確かめない。止めたら画面に知らせる（6.2.2 (1)）
-  onCostCap: (n) => {
-    const r = transition(ledger, { type: 'cost.cap', by: '費用', ...n })
-    if (r.ok && !r.replayed) server.caseChanged(n.caseId)
-  },
-  callsDir: callsDir(home),
-  ...(process.env.LIBRETTO_DEBUG_DIR && { debugDir: process.env.LIBRETTO_DEBUG_DIR }),
-})
+const invokeWith = (box: Sandbox) =>
+  createInvoke({
+    ledger,
+    backends: {
+      claude: createClaudeCli({
+        usdJpy,
+        callsDir: callsDir(home),
+        sandbox: box,
+        blocked: () =>
+          sandboxCheck.claudeOk ? undefined : `claude ${sandboxCheck.claudeVersion ?? 'unknown'} < ${MIN_CLAUDE}`,
+      }),
+      openai: createOpenai({ key: () => readKey(home, 'openai'), usdJpy }),
+    },
+    caps: () => ({ caseCapYen: 1500, monthCapYen: null }),
+    // 費用上限で案件を止める（6.1.1 (1)）。revision は確かめない。止めたら画面に知らせる（6.2.2 (1)）
+    onCostCap: (n) => {
+      const r = transition(ledger, { type: 'cost.cap', by: '費用', ...n })
+      if (r.ok && !r.replayed) server.caseChanged(n.caseId)
+    },
+    callsDir: callsDir(home),
+    jobsDir: (caseId) => join(caseDir(home, caseId), 'jobs'),
+    ...(process.env.LIBRETTO_DEBUG_DIR && { debugDir: process.env.LIBRETTO_DEBUG_DIR }),
+  })
+const invoke = invokeWith(sandbox)
+const cause = causeOf(sandboxCheck.reason)
+const invokeControl: (job: Job) => ReturnType<typeof invoke> = invokeWith(control)
 const server = createServer({
   home,
   ledger,
@@ -72,10 +86,28 @@ const server = createServer({
   origins,
   staticDir: fileURLToPath(new URL('../../page/dist', import.meta.url)),
   isolation: sandboxCheck.isolation,
+  ...(cause && { cause }),
+  probe: (signal) =>
+    checkIsolation(
+      {
+        home,
+        check: () => sandboxCheck,
+        invoke,
+        control: invokeControl,
+        homeNames: (work) => sandbox.homeNames(work),
+      },
+      signal,
+    ),
 })
 server.stop.boot()
 // libretto の番の案件の仕事を起こし直す（4.4 の再起動。6.2.3 (1)）。精算と STOP の確認の後
 server.runner.resume()
+// 隔離の点検を裏で 1 回（8.4・8.10 (4)）。止めていれば起動時は流さない
+try {
+  void server.checkIsolation()
+} catch (e) {
+  console.error(`libretto: isolation check not started: ${(e as Error).message}`)
+}
 
 let ticks = 0
 const timer = setInterval(() => {

@@ -160,6 +160,7 @@ export const Role = z.enum([
   '事実係・分類',
   '事実係・命題',
   '事実係・描写',
+  '隔離の点検', // 作り手と同じ起こし方の短いセッション（8.10 (4)）
 ])
 
 const costBase = { seq: z.number().int(), caseId: z.string(), at: z.string() } // caseId は案件 id、または '推測' / '点検' / '会話'

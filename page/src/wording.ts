@@ -159,6 +159,11 @@ export const W = {
   'talk.note': 'まとまったら依頼書とチェック項目を出し直します。',
   'band.signIn': 'AI のログインが切れています。PC でログインし直してから「続ける」を押してください',
   'band.signInResume': '続ける',
+  'band.isolationWeak':
+    'この環境では、書く側からチェック項目を隠す仕組みが弱いです（チェック項目のファイルは別の場所にありますが、OS の仕切りはありません）',
+  'band.isolationBroken':
+    '書く側からチェック項目を隠す仕組みが動きません。下書きは始まりません。libretto を再起動してください',
+  'band.isolationLink': '設定で確かめる',
   'progress.now': 'いま',
   'progress.round': '{n} 回目のチェック（最大 {max} 回）',
   'progress.lead': 'このページを閉じても進みます。',
@@ -244,6 +249,7 @@ export const W = {
   'reason.つながらない': 'AI につながりませんでした',
   'reason.書けなかった': '下書きを書けませんでした',
   'reason.判定できなかった': 'チェックを終えられませんでした',
+  'reason.隔離の失敗': '書く側にチェック項目が見えたおそれがありました',
   'reason.other': '中止しました',
   'approval.eyebrow': 'あなたの番',
   'approval.allPassed': 'チェックはすべて通りました（{n} 項目）',
@@ -321,6 +327,29 @@ export const W = {
   'settings.key.deleted': '削除しました。',
   'settings.key.invalid': '8 文字以上の半角の英数字と記号で入れてください。空白は入れられません。',
   'settings.key.failed': '保存できませんでした。もう一度お試しください。',
+  'settings.envHeading': '動作環境の確認',
+  'settings.isolation.label': 'チェック項目を書く側から隠す仕組み',
+  'settings.isolation.use': '書く側の AI には、チェック項目のファイルが見えない場所で下書きを書かせます。',
+  'settings.isolation.strong': 'しっかり隠せています',
+  'settings.isolation.weak': '弱い',
+  'settings.isolation.broken': '動きません',
+  'settings.isolation.why.windows': 'Windows には OS の仕切りがありません。WSL2 で動かすと、しっかり隠せます。',
+  'settings.isolation.why.tools':
+    '必要なソフトが入っていません。PC で `apt install bubblewrap socat ripgrep` を実行すると、しっかり隠せます。',
+  'settings.isolation.why.userns':
+    'OS の設定が仕切りを止めています。PC で `sudo sysctl kernel.apparmor_restrict_unprivileged_userns=0` を実行すると、しっかり隠せます。',
+  'settings.isolation.why.srt':
+    '仕切りの道具を起こせませんでした。libretto を再起動してください。直るまで下書きは始まりません。',
+  'settings.isolation.why.network':
+    '仕切りの中から AI につながりませんでした。libretto を再起動してください。直るまで下書きは始まりません。',
+  'settings.probe.hidden': '書く側からチェック項目は見えませんでした',
+  'settings.probe.visible': '書く側からチェック項目が見えました。libretto を再起動して、もう一度確認してください',
+  'settings.probe.unknown': '確かめられませんでした。もう一度「今すぐ確認」を押してください',
+  'settings.probe.never': 'まだ確認していません',
+  'settings.probe.running': '確認しています。1〜2 分かかります',
+  'settings.probe.at': '{at} に確認',
+  'settings.probe.run': '今すぐ確認',
+  'settings.probe.failed': '確認を始められませんでした。もう一度お試しください。',
 } as const
 
 export type WKey = keyof typeof W
