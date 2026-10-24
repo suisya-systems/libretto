@@ -18,7 +18,9 @@ describe('wording.ts', () => {
     delete table.設計書での言葉
     expect(table).toEqual(STATE)
   })
-  it('出さない語を含まない', () => {
-    for (const s of [...Object.values(W), ...Object.values(STATE)]) expect(s).not.toMatch(CLI_MARKERS)
+  it('出さない語を含まない。欄の名前としてオーナーが承認したキーだけ許す（11.2）', () => {
+    const allowed: string[] = ['settings.openai.label']
+    const rest = Object.entries(W).filter(([k]) => !allowed.includes(k))
+    for (const s of [...rest.map(([, v]) => v), ...Object.values(STATE)]) expect(s).not.toMatch(CLI_MARKERS)
   })
 })

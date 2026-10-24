@@ -5,7 +5,8 @@ import { Link, Route, Switch, useLocation } from 'wouter'
 import { Case } from './faces/Case.tsx'
 import { Done } from './faces/Done.tsx'
 import { Home } from './faces/Home.tsx'
-import { NotFound, Pending, ProblemView } from './faces/Pending.tsx'
+import { NotFound, ProblemView } from './faces/Pending.tsx'
+import { Settings } from './faces/Settings.tsx'
 import { send, useLoad, useOffline } from './load.ts'
 import { Confirm } from './parts/Dialog.tsx'
 import { W } from './wording.ts'
@@ -130,7 +131,7 @@ export function App() {
           <Route path="/cases/:id/deliver">{(p) => <Case key={p.id} id={p.id} stopped={stopped} />}</Route>
           <Route path="/cases/:id">{(p) => <Case key={p.id} id={p.id} stopped={stopped} />}</Route>
           <Route path="/done">{() => <Done />}</Route>
-          <Route path="/settings">{() => <Pending title={W['nav.settings']} />}</Route>
+          <Route path="/settings" component={Settings} />
           <Route component={NotFound} />
         </Switch>
       </main>

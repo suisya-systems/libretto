@@ -277,6 +277,9 @@ libretto の画面に出す言葉の正本。設計書（[`docs/design.md`](./de
 | `entrance.checksHeading` | チェック項目 |
 | `entrance.sameFamily` | チェック項目は、書く側と同じ種類の AI が作りました。見落としが重なることがあります。 |
 | `entrance.otherFamily` | チェック項目は、書く側とは別の種類の AI が作りました（ダブルチェック）。 |
+| `entrance.fallback.no_key` | 設定で API キーを入れると、別の種類の AI が作ります。 |
+| `entrance.fallback.unavailable` | 別の種類の AI につながりませんでした。設定の API キーを確かめてください。 |
+| `entrance.fallback.link` | 設定を開く |
 | `entrance.checksShow` | すべての項目を見る |
 | `entrance.checksHide` | 閉じる |
 | `entrance.ifNg` | NG のとき書く側に返す一言: |
@@ -482,3 +485,28 @@ libretto の画面に出す言葉の正本。設計書（[`docs/design.md`](./de
 |---|---|
 | `done.open` | 開く |
 | `done.empty` | 完了した依頼はありません |
+
+**設定の面（画面 7 の API キーの節。実装設計書 6.1.3 (6)）**
+
+`entrance.fallback.*` は入口の面で、チェック項目を同じ種類の AI が作った理由（API キーが無い / つながらなかった）と次の一手。「OpenAI の API キー」は欄の名前としてオーナーが承認した語（対応表の「鍵・キー」の行）。
+
+| キー | 文 |
+|---|---|
+| `settings.keysHeading` | API キー |
+| `settings.openai.label` | OpenAI の API キー |
+| `settings.openai.use` | チェック項目を、書く側とは別の種類の AI に作らせます。 |
+| `settings.key.unset` | 未設定 |
+| `settings.key.unsetNote` | 未設定のあいだは、書く側と同じ種類の AI がチェック項目を作ります。 |
+| `settings.key.set` | 設定済み（末尾 {last4}） |
+| `settings.key.savedAt` | {at} に保存 |
+| `settings.key.input` | API キーを貼り付け |
+| `settings.key.save` | 保存 |
+| `settings.key.replace` | 入れ直す |
+| `settings.key.cancel` | やめる |
+| `settings.key.delete` | 削除 |
+| `settings.key.deleteTitle` | API キーを削除しますか |
+| `settings.key.deleteBody` | 削除すると、チェック項目は書く側と同じ種類の AI が作ります。 |
+| `settings.key.saved` | 保存しました。次の依頼から使います。 |
+| `settings.key.deleted` | 削除しました。 |
+| `settings.key.invalid` | 8 文字以上の半角の英数字と記号で入れてください。空白は入れられません。 |
+| `settings.key.failed` | 保存できませんでした。もう一度お試しください。 |
