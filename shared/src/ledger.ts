@@ -10,6 +10,7 @@ import {
   DeliveryStatus,
   DeliveryTarget,
   DocType,
+  FamilyFallback,
   LEAVE_IT,
   MaterialRef,
   Mismatch,
@@ -269,6 +270,7 @@ export type BriefFile = z.infer<typeof BriefFile>
 export const ChecksFile = z.object({
   checks: z.array(Check),
   family: z.enum(['別系統', '同系統']),
+  fallback: FamilyFallback.optional(), // 同系統のときだけ（6.1.3 (5)）
   approvedFingerprint: z.string().optional(),
 })
 export type ChecksFile = z.infer<typeof ChecksFile>

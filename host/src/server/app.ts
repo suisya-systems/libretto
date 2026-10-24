@@ -26,7 +26,7 @@ import { diff, renderHtml } from '../checks/text.ts'
 import { pageVersions } from '../deliver/run.ts'
 import type { Ledger } from '../ledger/ledger.ts'
 import type { Job, Outcome } from '../model/invoke.ts'
-import { deleteKey, setKey } from '../model/keys.ts'
+import { deleteKey, keyStatus, setKey } from '../model/keys.ts'
 import type { Isolation } from '../model/sandbox.ts'
 import { createConversation } from '../roles/conversation.ts'
 import { createEntrance, currentSet, entranceView, writeApproval, writeAtomic } from '../roles/entrance.ts'
@@ -430,6 +430,10 @@ export function createServer(o: ServerOptions) {
     return r ? c.json(status) : c.json({ reason: 'storage' }, 503)
   })
 
+  // Settings.apiKeys の形。GET /api/settings ができたらそちらの apiKeys に移して消す（6.1.3 (6)）
+  app.get('/api/settings/keys', (c) =>
+    c.json(Object.fromEntries(ApiKeyKind.options.map((k) => [k, keyStatus(home, k)]))),
+  )
   app.put('/api/settings/keys/:kind', async (c) => {
     const kind = ApiKeyKind.safeParse(c.req.param('kind'))
     if (!kind.success) return c.json({ reason: 'not_found' }, 404)

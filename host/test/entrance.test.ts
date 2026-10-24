@@ -10,6 +10,7 @@ import { caseDir, initHome } from '../src/ledger/db.ts'
 import type { Ledger } from '../src/ledger/ledger.ts'
 import { createFake, type ScriptEntry, type ScriptReply } from '../src/model/fake.ts'
 import { type Backend, createInvoke } from '../src/model/invoke.ts'
+import { setKey } from '../src/model/keys.ts'
 import { TALK } from '../src/roles/conversation.ts'
 import { COOKIE, createServer } from '../src/server/app.ts'
 import { briefDraft, classified, goodChecks } from './fixtures/entrance.ts'
@@ -52,17 +53,18 @@ const entranceOk = (): [Role, ScriptReply][] => [
   ['事実係・分類', say(classified)],
 ]
 
-async function setup(entries: ScriptEntry[], wrap: (b: Backend) => Backend = (b) => b) {
+async function setup(entries: ScriptEntry[], wrap: (b: Backend) => Backend = (b) => b, openaiKey = false) {
   n = 0
   home = mkdtempSync(join(tmpdir(), 'libretto-entrance-'))
   ledger = initHome(home)
+  if (openaiKey) setKey(home, 'openai', 'sk-test-0123456789')
   const staticDir = join(home, 'dist')
   mkdirSync(staticDir)
   writeFileSync(join(staticDir, 'index.html'), '<div></div>')
   fake = createFake(entries)
   const invoke = createInvoke({
     ledger,
-    backends: { claude: wrap(fake.backend) },
+    backends: { claude: wrap(fake.backend), openai: wrap(fake.backend) },
     caps: () => ({ caseCapYen: 1500, monthCapYen: null }),
     onCostCap: () => {},
     log: () => {},
@@ -177,7 +179,11 @@ describe('入口の段取り', () => {
     const id = await request()
     await waitTurn(id)
     const call = callsOf('下書き役・確認項目')[0]
+    // 鍵が無いので別系統を呼ばずに同系統。少数派の指示付き（6.1.3 (5)）
+    expect(callsOf('下書き役・確認項目')).toHaveLength(1)
     expect(call?.family).toBe('claude')
+    expect(call?.instruction).toContain('少数派の項目を 3 件以上')
+    expect((await caseView(id)).entrance?.checks).toMatchObject({ family: '同系統', fallback: 'no_key' })
     const all = JSON.stringify(call?.materials) + (call?.instruction ?? '')
     for (const s of [
       'ブレストで決まった 3 つの方針',
@@ -535,5 +541,78 @@ describe('案件の中で話す（話して内容を変える）', () => {
     ]
     for (const s of shown) expect(s).not.toMatch(CLI_MARKERS)
     expect(COOKIE).toBe('libretto_session')
+  })
+})
+
+describe('別系統の確認項目（6.1.3 (5)）', () => {
+  const MINORITY = '少数派の項目を 3 件以上'
+  const noMinority = goodChecks.map(({ minority: _, ...c }) => c)
+
+  it('鍵があれば別系統で書き、少数派を求めない。依頼書の本文は渡らない', async () => {
+    await setup(
+      script(
+        ['話し相手', say(done)],
+        ['下書き役・依頼書', say(briefDraft)],
+        ['下書き役・確認項目', say({ checks: noMinority })],
+        ['事実係・分類', say(classified)],
+      ),
+      undefined,
+      true,
+    )
+    const id = await request()
+    await waitTurn(id)
+    const calls = callsOf('下書き役・確認項目')
+    expect(calls.map((c) => [c.family, c.model])).toEqual([['openai', 'codex']])
+    expect(calls[0]?.instruction).not.toContain(MINORITY)
+    expect(JSON.stringify(calls[0]?.materials)).not.toContain('ブレストで決まった 3 つの方針')
+    const e = (await caseView(id)).entrance
+    expect(e?.checks.family).toBe('別系統')
+    expect(e?.checks.fallback).toBeUndefined()
+    expect(file(id, 'checks/checks.json', ChecksFile)).toMatchObject({ family: '別系統' })
+    expect(ledger.listCosts(id).find((x) => x.type === 'hold' && x.role === '下書き役・確認項目')).toMatchObject({
+      family: 'openai',
+    })
+  })
+
+  it.each([
+    ['つながらない', [{ fail: 'unavailable' }] as ScriptReply[]],
+    ['出力が 2 回とも通らない', [{ text: '{broken' }, { text: '{"checks":[]}' }] as ScriptReply[]],
+  ])('別系統が%sなら、同系統に少数派の指示を足して書き直す', async (_, bad) => {
+    await setup(
+      script(
+        ['話し相手', say(done)],
+        ['下書き役・依頼書', say(briefDraft)],
+        ...bad.map((r): [Role, ScriptReply] => ['下書き役・確認項目', r]),
+        ['下書き役・確認項目', say({ checks: goodChecks })],
+        ['事実係・分類', say(classified)],
+      ),
+      undefined,
+      true,
+    )
+    const id = await request()
+    await waitTurn(id)
+    const calls = callsOf('下書き役・確認項目')
+    expect(calls.map((c) => c.family)).toEqual([...bad.map(() => 'openai'), 'claude'])
+    expect(calls.at(-1)?.instruction).toContain(MINORITY)
+    expect((await caseView(id)).entrance?.checks).toMatchObject({ family: '同系統', fallback: 'unavailable' })
+    expect(file(id, 'checks/checks.json', ChecksFile)).toMatchObject({ family: '同系統', fallback: 'unavailable' })
+  })
+
+  it('別系統が費用の上限で止まったら、同系統に落とさない', async () => {
+    await setup(
+      script(
+        ['話し相手', say(done)],
+        ['下書き役・依頼書', say(briefDraft)],
+        ['下書き役・確認項目', { fail: 'budget' }],
+      ),
+      undefined,
+      true,
+    )
+    const id = await request()
+    await vi.waitFor(() => expect(callsOf('下書き役・確認項目')).toHaveLength(1))
+    await server.runs.abortAll()
+    expect(callsOf('下書き役・確認項目').map((c) => c.family)).toEqual(['openai'])
+    expect(fake.unused()).toEqual([])
+    expect(ledger.getCase(id)?.state).toBe('入口待ち')
   })
 })

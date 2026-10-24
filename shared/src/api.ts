@@ -130,10 +130,13 @@ export const CheckForPerson = z.object({
   minority: z.boolean(), // 少数派の項目（設計書 5.8.1。6.2.2 (9)）
 })
 
+// 同系統で書いた理由（別系統の鍵が無い / つながらなかった）。識別子で、画面は wording.ts で引く（6.1.3 (5)）
+export const FamilyFallback = z.enum(['no_key', 'unavailable'])
 export const ChecksSummary = z.object({
   count: z.number().int().min(0),
   byCategory: z.partialRecord(Category, z.number().int().min(0)),
   family: z.enum(['別系統', '同系統']),
+  fallback: FamilyFallback.optional(),
   items: z.array(CheckForPerson),
 })
 
@@ -438,4 +441,10 @@ export const SseData = {
 }
 
 // 前後の空白を落とした後で 8 文字以上、空白・改行を含まない（last4 が値の全部にならない。5.7 (7)）
-export const ApiKeyInput = z.object({ value: z.string().trim().min(8).regex(/^\S+$/) })
+export const ApiKeyInput = z.object({
+  value: z
+    .string()
+    .trim()
+    .min(8)
+    .regex(/^[\x21-\x7e]+$/),
+}) // 印字できる ASCII だけ（6.1.3 (4)）

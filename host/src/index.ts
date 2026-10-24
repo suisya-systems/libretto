@@ -5,6 +5,8 @@ import { transition } from './case/transition.ts'
 import { callsDir, initHome, resolveHome } from './ledger/db.ts'
 import { createClaudeCli, resolveClaude } from './model/claude-cli.ts'
 import { createInvoke } from './model/invoke.ts'
+import { readKey } from './model/keys.ts'
+import { createOpenai } from './model/openai.ts'
 import { settleOrphans } from './model/orphans.ts'
 import { checkSandbox, createSandbox, MIN_CLAUDE } from './model/sandbox.ts'
 import { createServer } from './server/app.ts'
@@ -52,6 +54,7 @@ const invoke = createInvoke({
       blocked: () =>
         sandboxCheck.claudeOk ? undefined : `claude ${sandboxCheck.claudeVersion ?? 'unknown'} < ${MIN_CLAUDE}`,
     }),
+    openai: createOpenai({ key: () => readKey(home, 'openai'), usdJpy }),
   },
   caps: () => ({ caseCapYen: 1500, monthCapYen: null }),
   // 費用上限で案件を止める（6.1.1 (1)）。revision は確かめない。止めたら画面に知らせる（6.2.2 (1)）
