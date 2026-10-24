@@ -15,6 +15,7 @@ export const API_MODEL: Record<string, { id: string; usdPerMTok: Price }> = {
   codex: { id: 'gpt-6-astra', usdPerMTok: { input: 10, cached: 1, write30m: 12.5, write12h: 25, output: 50 } },
 }
 const MIN_OUTPUT_TOKENS = 2000
+const REQUEST_OVERHEAD_TOKENS = 256 // 役割・書式の指定など、本文の外で数えられる分
 
 const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : undefined)
 const obj = (v: unknown) => (v && typeof v === 'object' ? (v as Record<string, unknown>) : {})
@@ -58,12 +59,14 @@ export function createOpenai(opts: Opts): Backend {
     // 送っていないので 0 円（6.1.3 (3)）
     if (!key) return { fail: 'unavailable', costYen: 0 }
     const input = stdinText(call)
-    // 入力は 1 字 1 トークン以下と見て、最も高い入力の単価で上に倒す。残りを出力の枠にする（6.1.3 (2)）
+    // 1 トークンは 1 バイト以上なので、UTF-8 のバイト数＋要求の枠の分を入力の上限とし、最も高い入力の単価で上に倒す。
+    // 残りを出力の枠にする（6.1.3 (2)）
     const p = m.usdPerMTok
-    const room = call.maxYen / rate - (input.length * p.write30m) / 1e6
+    const inputMax = Buffer.byteLength(input, 'utf8') + REQUEST_OVERHEAD_TOKENS
+    const room = call.maxYen / rate - (inputMax * p.write30m) / 1e6
     const maxOutput = Math.floor((room / p.output) * 1e6)
     if (maxOutput < MIN_OUTPUT_TOKENS) {
-      log(`openai: input too large for maxYen ${call.maxYen} (${input.length} chars)`)
+      log(`openai: input too large for maxYen ${call.maxYen} (${inputMax} tokens at most)`)
       return { fail: 'unavailable', costYen: 0 }
     }
 
@@ -78,6 +81,7 @@ export function createOpenai(opts: Opts): Backend {
           text: { format: { type: 'json_object' } },
           max_output_tokens: maxOutput,
           store: false,
+          service_tier: 'default', // 単価は標準のもの。プロジェクトの既定が高い層でも標準で呼ぶ
           prompt_cache_options: { mode: 'explicit' },
         }),
         signal: call.signal,

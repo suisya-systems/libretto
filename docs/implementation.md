@@ -927,7 +927,7 @@ type Outcome =                         // costYen は全部の呼び出しの精
 **(1) 呼び方と JSON 出力**
 
 決めたこと:
-- `POST https://api.openai.com/v1/responses` を `fetch` で。本文は `{ model, instructions, input, text: { format: { type: 'json_object' } }, max_output_tokens, store: false, prompt_cache_options: { mode: 'explicit' } }`。`instructions` は `Job.instruction`、`input` は claude-cli と同じ材料の枠（6.1.2 (4)）。
+- `POST https://api.openai.com/v1/responses` を `fetch` で。本文は `{ model, input, text: { format: { type: 'json_object' } }, max_output_tokens, store: false, service_tier: 'default', prompt_cache_options: { mode: 'explicit' } }`。`input` は claude-cli と同じ文書（指示の全文と材料の枠。6.1.2 (4)）。`service_tier: 'default'` は、鍵のプロジェクトの既定が高い層（優先処理など）でも標準の単価で呼ぶため（費用の計算と予約は標準の単価で行う）。
 - **JSON モード（`json_object`）にし、`json_schema` の strict は使わない**。理由: `Check.judge` の `args` は自由な形のオブジェクトで、`minority` のような任意の欄もあり、strict の制約（全欄必須・`additionalProperties: false`）では表せない。strict でない `json_schema` は形を保証しない。型の検査は他の系統と同じく `invoke` の zod＋受け入れ規則＋言い直し 1 回（6.1.1 (4)）で受ける。
 - `store: false` は応答をあとから取り出せる形で OpenAI に残させないだけで、不正利用の監視のための保存は残る。0 日保存は v1 の前提にしない（要るならオーナーのアカウント側の設定）。
 - ファイルの材料と `access: none` 以外は受けない（例外 → `unavailable`）。
@@ -936,7 +936,7 @@ type Outcome =                         // costYen は全部の呼び出しの精
 **(2) 予約額を実際の上限にする**
 
 決めたこと:
-- 送る前に入力の上限を見積もる: (`instructions`＋`input` の文字数) トークン × 入力の最も高い単価（キャッシュ書き 30 分の 12.5）。日本語は 1 字 1 トークン以下、英字はもっと少ないので、上に倒れる。
+- 送る前に入力の上限を見積もる: (`input` の UTF-8 のバイト数＋要求の枠の 256) トークン × 入力の最も高い単価（キャッシュ書き 30 分の 12.5）。1 トークンは 1 バイト以上なので、字の種類によらず上に倒れる（文字数だと、珍しい漢字のように 1 字が複数トークンになる文で下回る）。
 - `max_output_tokens = floor((maxYen ÷ usdJpy − 入力の上限) ÷ 出力単価 × 10^6)`。推論のトークンもこの中に入るので、1 回の費用は `maxYen` を超えない。2,000 未満なら送らずに `unavailable`（0 円）。
 - `status: 'incomplete'`（上限に当たった）は `unavailable`（usage の額）。**openai は `budget` を返さない**。理由: `budget` は `cost.cap` で案件を止める（6.1.1 (1)）。確認項目は同系統で書き直せるので、止めるより (4) で落とす。
 

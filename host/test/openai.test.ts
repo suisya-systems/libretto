@@ -68,11 +68,12 @@ describe('openai の中身', () => {
       model: 'gpt-6-astra',
       text: { format: { type: 'json_object' } },
       store: false,
+      service_tier: 'default',
       prompt_cache_options: { mode: 'explicit' },
     })
     expect(s?.body.input).toContain('<材料 name="依頼">\n記事を書く\n</材料>')
     // 入力の上限 × 12.5 ＋ 出力の枠 × 50 が予約額（160 円 = 1.0667 ドル）に収まる
-    const input = String(s?.body.input).length
+    const input = Buffer.byteLength(String(s?.body.input)) + 256
     const max = s?.body.max_output_tokens as number
     expect((input * 12.5 + max * 50) / 1e6).toBeLessThanOrEqual(160 / 150)
     expect(max).toBeGreaterThan(15_000)
@@ -127,7 +128,7 @@ describe('openai の中身', () => {
   it('鍵が無い・入力が大きすぎるときは送らずに 0 円', async () => {
     ok('{}')
     expect(await backend(() => undefined)(call())).toEqual({ fail: 'unavailable', costYen: 0 })
-    expect(await backend()(call({ materials: [{ name: '依頼', text: 'あ'.repeat(90_000) }] }))).toEqual({
+    expect(await backend()(call({ materials: [{ name: '依頼', text: 'あ'.repeat(30_000) }] }))).toEqual({
       fail: 'unavailable',
       costYen: 0,
     })
