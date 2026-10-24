@@ -4,10 +4,11 @@ import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import type { CaseState } from '@libretto/shared/api'
 import type { CaseRecord } from '@libretto/shared/ledger'
+import { deliver, tailor } from '../deliver/run.ts'
 import type { Ledger } from '../ledger/ledger.ts'
 import type { Job, Outcome } from '../model/invoke.ts'
 import { approvedSet, renderBrief, writeAtomic } from '../roles/entrance.ts'
-import { judgeBody } from '../roles/judge.ts'
+import { judgeBody, judgeFormat } from '../roles/judge.ts'
 import { make, workDir } from '../roles/maker.ts'
 import type { Runs } from '../runs.ts'
 import { isStorageError } from '../server/stop.ts'
@@ -63,17 +64,47 @@ export function createRunner(d: Deps) {
     )
   }
 
-  // 送付確認待ち（仕立て → judgeFormat）と送付中は、仕事を作る Issue 12 がここに足す
+  const judgeDeps = () => ({
+    home,
+    ledger,
+    invoke: d.invoke,
+    emit,
+    onAuthExpired,
+    log: d.log,
+    ...(d.now && { now: d.now }),
+  })
+
+  // 送付確認待ち → 仕立て → 形式の判定（T20〜T21b。6.2.8 (1)）。版が読めない・作れない保存先は判定できなかった
+  async function tailorAndJudge(c: CaseRecord, signal: AbortSignal): Promise<boolean> {
+    try {
+      tailor(home, c, (d.now ?? (() => new Date()))())
+    } catch (e) {
+      if (isStorageError(e)) throw e
+      d.log(`tailor ${c.caseId}: ${e instanceof Error ? e.stack : String(e)}`)
+      return emit(
+        c.caseId,
+        transition(ledger, {
+          type: 'fail.system',
+          reason: '判定できなかった',
+          eventId: `${c.caseId}:fail.system:r${c.revision}`,
+          caseId: c.caseId,
+          expectedRevision: c.revision,
+          by: 'libretto',
+        }),
+      )
+    }
+    if (signal.aborted) return false
+    return judgeFormat(judgeDeps(), c, signal)
+  }
+
   const JOBS: Partial<Record<CaseState, (c: CaseRecord, signal: AbortSignal) => Promise<boolean>>> = {
     材料待ち: assemble,
     下書き中: (c, signal) =>
       make({ home, ledger, invoke: d.invoke, emit, onAuthExpired, ...(d.now && { now: d.now }) }, c, signal),
-    検品中: (c, signal) =>
-      judgeBody(
-        { home, ledger, invoke: d.invoke, emit, onAuthExpired, log: d.log, ...(d.now && { now: d.now }) },
-        c,
-        signal,
-      ),
+    検品中: (c, signal) => judgeBody(judgeDeps(), c, signal),
+    送付確認待ち: tailorAndJudge,
+    // 送付中 → 今の送付回の attempt を 1 つずつ送付済に（T24。6.2.8 (3)）
+    送付中: async (c) => deliver({ home, ledger, emit, log: d.log }, c),
   }
 
   // ログインし直し待ちの関門。待っていれば案件を覚えて真（6.2.3 (7)）

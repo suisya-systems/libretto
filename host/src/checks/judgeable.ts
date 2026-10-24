@@ -242,7 +242,15 @@ export const FNS: Partial<Record<CodeFn, Fn<unknown>>> = {
     host: true,
     run: (_, { paste }) => {
       const t = need(paste, 'paste')
-      const bad = [/^\s*\|.*\|\s*$/m, /\[\^/, /<\/?[a-z][^>]*>/i, /^\s*#/m, /\*\*/].some((re) => re.test(t))
+      // 表は外側の | がある行と、外側の | が無くてもよい区切りの行（--- | ---）で見る（6.2.8 (2)）
+      const bad = [
+        /^\s*\|.*\|\s*$/m,
+        /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)+\|?\s*$/m,
+        /\[\^/,
+        /<\/?[a-z][^>]*>/i,
+        /^\s*#/m,
+        /\*\*/,
+      ].some((re) => re.test(t))
       return { units: [!bad] }
     },
   }),

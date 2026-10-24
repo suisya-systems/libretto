@@ -1,7 +1,7 @@
 // 撮る状態の定義。状態を足すときはここに 1 つ足す（preview.ts と shoot.sh は触らない）
 // どの状態も、会話で依頼を 1 つ出して入口待ち（本人の番）に着いたところから始まる（preview.ts）
 import type { CaseAction, CaseView } from '@libretto/shared/api'
-import { paragraphUnits } from '../../../host/src/checks/text.ts'
+import { paragraphUnits, renderHtml } from '../../../host/src/checks/text.ts'
 import type { ScriptEntry } from '../../../host/src/model/fake.ts'
 import { briefDraft, classified, goodChecks } from '../../../host/test/fixtures/entrance.ts'
 import { W, w } from '../../../page/src/wording.ts'
@@ -71,7 +71,8 @@ const draft = (k: number): Row => [
     text: '書きました',
     write: {
       [`draft-${nn(k)}.md`]: body(k),
-      [`draft-${nn(k)}.html`]: '<h1>先週のブレストのまとめ</h1>',
+      // 本文と同じ中身の HTML（ページの形式の判定を通す。6.2.8 (1)）
+      [`draft-${nn(k)}.html`]: renderHtml(body(k)),
       [`draft-${nn(k)}.done`]: 'done',
     },
   },
@@ -112,6 +113,19 @@ const approve = async (ctx: Ctx) => {
 const toApproval = async (ctx: Ctx) => {
   await approve(ctx)
   await ctx.until((v) => v.state === '承認待ち')
+}
+// 承認して、仕立てと保存先の形のチェックが済むまで（6.2.8 (1)）
+const toDeliver = async (ctx: Ctx) => {
+  await toApproval(ctx)
+  const last = (await ctx.view()).versions.at(-1)
+  if (!last) throw new Error('no version')
+  await ctx.act({ type: 'approval.ok', marks: {}, versionFingerprint: last.fingerprint })
+  await ctx.until((v) => v.state === '送付確認待ち' && v.turn === '本人')
+}
+const toDone = async (ctx: Ctx) => {
+  await toDeliver(ctx)
+  await ctx.act({ type: 'delivery.send', planFingerprint: (await ctx.view()).deliveryPlan.fingerprint })
+  await ctx.until((v) => v.state === '完了')
 }
 const clean: Row[] = [...entrance(), draft(1), verdicts(1, false), draft(2), verdicts(2, true)]
 const hang: Row = ['作り手', { fail: 'hang' }]
@@ -169,19 +183,37 @@ export const STATES: Record<string, State> = {
     mark: w('approval.remaining', { n: 1 }),
     selector: '.doc-body',
   },
-  // 進行: 承認の後、保存先の形に整えている
-  tailoring: {
+  // 送付の確認: 仕立てと保存先の形のチェックが済み、本人の番（仕立ては機械だけで、整えている間は撮れない）
+  deliver: {
     script: clean,
-    drive: async (ctx) => {
-      await toApproval(ctx)
-      const v = await ctx.view()
-      const last = v.versions.at(-1)
-      if (!last) throw new Error('no version')
-      await ctx.act({ type: 'approval.ok', marks: {}, versionFingerprint: last.fingerprint })
-      await ctx.until((v) => v.state === '送付確認待ち')
-    },
-    expect: (v) => v.state === '送付確認待ち' && v.turn === 'libretto' && v.step === '保存先の形に整えています',
-    mark: '保存先の形に整えています', // 段取りの文（host/src/case/transition.ts）
+    drive: toDeliver,
+    expect: (v) => v.state === '送付確認待ち' && v.turn === '本人',
+    mark: W['deliver.looksHeading'],
+    selector: '.paste-preview',
+  },
+  // 成果: 保存して完了
+  done: {
+    script: clean,
+    drive: toDone,
+    expect: (v) => v.state === '完了',
+    mark: W['result.receiveHeading'],
+    selector: '.paste-preview',
+  },
+  // 完了した依頼の一覧
+  'done-list': {
+    script: clean,
+    drive: toDone,
+    expect: (v) => v.state === '完了',
+    mark: W['done.open'],
+    path: () => '/done',
+  },
+  // 版のあるページ（保存した Web ページそのもの）
+  page: {
+    script: clean,
+    drive: toDone,
+    expect: (v) => v.state === '完了',
+    mark: 'バージョン 2', // ページの末尾の 1 行（host/src/deliver/page.ts）
+    path: (caseId) => `/cases/${caseId}/page`,
   },
   // 進行: 下書きの途中で中止した
   stopped: {

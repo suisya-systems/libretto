@@ -1,10 +1,12 @@
 // 依頼の面。入口待ちは依頼の確認（Issue 9。6.2.2 (10)）、材料待ち〜送付中と停止・取り消しは進行（Issue 10。6.2.3 (8)）、
-// 承認待ち（完成稿）は承認（Issue 11。6.2.5 (8)）、ほかは見出しだけ（構成案・送付・成果は Issue 27・12。5.8 (3)）
+// 承認待ち（完成稿）は承認（Issue 11。6.2.5 (8)）、送付確認待ち・本人の番は送付、完了は成果（Issue 12。6.2.8 (6)(7)）、
+// ほかは見出しだけ（構成案は Issue 27。5.8 (3)）
 import { CaseView } from '@libretto/shared/api'
 import { Link } from 'wouter'
 import { useLoad } from '../load.ts'
 import { STATE, W, w } from '../wording.ts'
 import { ApprovalFace } from './Approval.tsx'
+import { DeliverFace, ResultFace } from './Deliver.tsx'
 import { EntranceFace } from './Entrance.tsx'
 import { tone } from './Home.tsx'
 import { ProblemView } from './Pending.tsx'
@@ -45,7 +47,21 @@ export function Case({ id, stopped = false }: { id: string; stopped?: boolean })
         <ApprovalFace c={c} reload={one.reload} stopped={stopped} />
       </>
     )
-  // 送付確認待ちは、保存先の形に整えているあいだ（turn=libretto）進行の面。本人の番は送付の面（Issue 12）
+  if (c.state === '送付確認待ち' && c.turn === '本人')
+    return (
+      <>
+        {one.problem && <ProblemView problem={one.problem} retry={one.reload} />}
+        <DeliverFace c={c} reload={one.reload} stopped={stopped} />
+      </>
+    )
+  if (c.state === '完了')
+    return (
+      <>
+        {one.problem && <ProblemView problem={one.problem} retry={one.reload} />}
+        <ResultFace c={c} />
+      </>
+    )
+  // 送付確認待ちは、保存先の形に整えているあいだ（turn=libretto）進行の面
   if (PROGRESS_STATES.includes(c.state) || (c.state === '送付確認待ち' && c.turn === 'libretto'))
     return (
       <>

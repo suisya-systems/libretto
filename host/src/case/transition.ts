@@ -591,7 +591,7 @@ function latestAttempts(ledger: Ledger, caseId: string) {
 }
 
 // 今の送付回（最後の gate=送付 の承認）の attempt と、その最新の行（4.6 (3)）
-function currentSend(ledger: Ledger, caseId: string) {
+export function currentSend(ledger: Ledger, caseId: string) {
   const send = ledger
     .listApprovals(caseId)
     .filter((a) => a.gate === '送付')

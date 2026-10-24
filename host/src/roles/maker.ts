@@ -30,7 +30,9 @@ export const draftNames = (n: number) => ({
 })
 const reviewFile = (n: number, phase: string) => `review-${nn(n)}-${phase}.json`
 const read = <T>(path: string, schema: z.ZodType<T>) => schema.parse(JSON.parse(readFileSync(path, 'utf-8')))
-const sha256 = (v: string | Buffer) => createHash('sha256').update(v).digest('hex')
+export const sha256 = (v: string | Buffer) => createHash('sha256').update(v).digest('hex')
+// manifest.json / outputs.json の指紋 = 一覧（path・sha256・bytes）の sha256。at は入れない（9.3）
+export const filesFingerprint = (files: VersionManifest['files']) => sha256(JSON.stringify(files))
 
 export function makerInstruction(work: string, n: number, feedback: boolean) {
   const f = draftNames(n)
@@ -112,7 +114,7 @@ export function copyVersion(home: string, caseId: string, n: number, now: Date):
     writeAtomic(join(dir, path), body)
     return { path, sha256: sha256(body), bytes: body.length }
   })
-  const manifest = { n, at: now.toISOString(), files, fingerprint: sha256(JSON.stringify(files)) }
+  const manifest = { n, at: now.toISOString(), files, fingerprint: filesFingerprint(files) }
   writeAtomic(join(dir, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`)
   return manifest
 }

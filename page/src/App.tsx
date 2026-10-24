@@ -3,6 +3,7 @@ import { HostStatus } from '@libretto/shared/api'
 import { useState } from 'react'
 import { Link, Route, Switch, useLocation } from 'wouter'
 import { Case } from './faces/Case.tsx'
+import { Done } from './faces/Done.tsx'
 import { Home } from './faces/Home.tsx'
 import { NotFound, Pending, ProblemView } from './faces/Pending.tsx'
 import { send, useLoad, useOffline } from './load.ts'
@@ -125,9 +126,10 @@ export function App() {
         </div>
         <Switch>
           <Route path="/">{() => <Home stopped={stopped} />}</Route>
-          <Route path="/cases/:id/deliver">{() => <Pending title={W['face.deliver']} />}</Route>
+          {/* 送付の確認は案件の面が状態で出す。/deliver は同じ面の別名（6.2.8 (6)） */}
+          <Route path="/cases/:id/deliver">{(p) => <Case key={p.id} id={p.id} stopped={stopped} />}</Route>
           <Route path="/cases/:id">{(p) => <Case key={p.id} id={p.id} stopped={stopped} />}</Route>
-          <Route path="/done">{() => <Pending title={W['nav.done']} />}</Route>
+          <Route path="/done">{() => <Done />}</Route>
           <Route path="/settings">{() => <Pending title={W['nav.settings']} />}</Route>
           <Route component={NotFound} />
         </Switch>

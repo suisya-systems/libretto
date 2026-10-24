@@ -114,7 +114,7 @@ export function compareUnits(md: string): string[] {
 }
 
 const ENTITY: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' }
-const decode = (s: string) =>
+export const decode = (s: string) =>
   s.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m, e: string) => {
     if (e[0] === '#') {
       const cp = e[1]?.toLowerCase() === 'x' ? Number.parseInt(e.slice(2), 16) : Number(e.slice(1))
@@ -156,7 +156,7 @@ export function align<T>(a: readonly T[], b: readonly T[], eq: (x: T, y: T) => b
 
 // --- 承認の面に出す本文（6.2.5 (7)）。判定した Markdown から組み立て、文字は全部エスケープする
 
-const escapeHtml = (s: string) =>
+export const escapeHtml = (s: string) =>
   s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string)
 // 強調（**）だけ残す
 const inline = (s: string) =>

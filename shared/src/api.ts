@@ -245,6 +245,7 @@ export const CaseCard = z.object({
   nextForPerson: z.string().optional(),
   costNote: z.string().optional(), // 費用の欄の 1 行。予約の額で確定した呼び出しがあるときだけ（9.4 (7)）
   approvalKind: ApprovalKind.optional(), // state = 承認待ち のときだけ（5.3.2）
+  doneAt: z.string().optional(), // state = 完了 のときだけ。完了に入った遷移の時刻（6.2.8 (9)）
 })
 export type CaseCard = z.infer<typeof CaseCard>
 

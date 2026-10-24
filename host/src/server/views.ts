@@ -44,8 +44,13 @@ export function toCard(ledger: Ledger, c: CaseRecord): CaseCard {
     costCapYen: CASE_CAP_YEN,
     ...(ledger.costUnknown(c.caseId) && { costNote: COST_UNKNOWN }),
     ...(c.approvalKind && { approvalKind: c.approvalKind }),
+    ...(c.state === '完了' && { doneAt: doneAt(ledger, c.caseId) ?? c.updatedAt }),
   }
 }
+
+// 完了に入った最後の遷移の時刻（T26c は完了 → 完了なので from で除く）
+const doneAt = (ledger: Ledger, caseId: string) =>
+  ledger.listCaseEvents(caseId).findLast((e) => e.type === 'transition' && e.to === '完了' && e.from !== '完了')?.at
 
 export function homeView(ledger: Ledger, host: HostStatus): HomeView {
   const open = ledger.listCases(OPEN).map((c) => toCard(ledger, c))

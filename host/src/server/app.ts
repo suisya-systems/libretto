@@ -1,6 +1,6 @@
 // hono のルート（docs/implementation.md 5.2・5.4・5.7）。経路の順は 5.7 (6): 公開 → /api/* → /cases/:id/page → 静的 → 画面の殻
 import { createHash, randomBytes } from 'node:crypto'
-import { readFileSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { serveStatic } from '@hono/node-server/serve-static'
 import {
@@ -9,7 +9,7 @@ import {
   ApiKeyKind,
   CaseAction,
   type CaseCard,
-  type CaseState,
+  CaseState,
   ConversationPost,
   DraftDiff,
   type HostStatus,
@@ -23,13 +23,14 @@ import { z } from 'zod'
 import { createRunner } from '../case/runner.ts'
 import { transition } from '../case/transition.ts'
 import { diff, renderHtml } from '../checks/text.ts'
+import { pageVersions } from '../deliver/run.ts'
 import type { Ledger } from '../ledger/ledger.ts'
 import type { Job, Outcome } from '../model/invoke.ts'
 import { deleteKey, setKey } from '../model/keys.ts'
 import type { Isolation } from '../model/sandbox.ts'
 import { createConversation } from '../roles/conversation.ts'
 import { createEntrance, currentSet, entranceView, writeApproval, writeAtomic } from '../roles/entrance.ts'
-import { reviewsOf } from '../roles/judge.ts'
+import { OUTPUT_FILES, reviewsOf } from '../roles/judge.ts'
 import { draftNames, pastedCount, pastedName, versionDir, versionsOf, workDir } from '../roles/maker.ts'
 import { createRuns } from '../runs.ts'
 import { createHub, type SseMessage } from './sse.ts'
@@ -220,6 +221,16 @@ export function createServer(o: ServerOptions) {
   })
   app.get('/api/home', (c) => c.json(homeView(ledger, { ...status })))
 
+  // 一覧（5.2）。完了した依頼（/done）が使う。新しく変わった順
+  app.get('/api/cases', (c) => {
+    const states = z
+      .array(CaseState)
+      .min(1)
+      .safeParse(c.req.queries('state') ?? [])
+    if (!states.success) return c.json({ reason: 'invalid' }, 400)
+    return c.json(ledger.listCases(states.data).map((r) => toCard(ledger, r)))
+  })
+
   app.get('/api/cases/:id', (c) => {
     const rec = ledger.getCase(c.req.param('id'))
     if (!rec) return c.json({ reason: 'not_found' }, 404)
@@ -252,7 +263,12 @@ export function createServer(o: ServerOptions) {
         'content-type': 'text/html; charset=utf-8',
         'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'",
       })
-    // ponytail: paste は仕立ての Issue（12）
+    // 仕立てた貼り付け用の文。仕立ての前は無い（6.2.8 (5)）
+    if (format === 'paste') {
+      const path = join(versionDir(home, rec.caseId, Number(c.req.param('n'))), 'outputs', OUTPUT_FILES.paste)
+      if (!existsSync(path)) return c.json({ reason: 'not_found' }, 404)
+      return c.body(readFileSync(path, 'utf-8'), 200, { 'content-type': 'text/plain; charset=utf-8' })
+    }
     return c.json({ reason: 'invalid' }, 400)
   })
   app.get('/api/cases/:id/diff', (c) => {
@@ -449,8 +465,22 @@ export function createServer(o: ServerOptions) {
   // 3. 版のあるページ（Cookie 必須）
   app.get('/cases/:id/page', (c) => {
     if (!paired(c)) return c.html('<p>この端末はまだつながっていません。</p>', 401)
-    // ponytail: 本体は版のあるページの Issue（12）
-    return c.html('<p>まだありません。</p>', 404)
+    // 出せるのは page に保存した版。v が無ければその最新（6.2.8 (4)）
+    const rec = ledger.getCase(c.req.param('id'))
+    const saved = rec ? pageVersions(ledger, rec.caseId) : []
+    const raw = c.req.query('v')
+    const n = raw === undefined ? saved.at(-1) : Number(raw)
+    if (!rec || n === undefined || !saved.includes(n))
+      return c.html('<p>このバージョンのページはまだありません。</p>', 404)
+    const body = readFileSync(join(versionDir(home, rec.caseId, n), 'outputs', OUTPUT_FILES.page))
+    const headers: Record<string, string> = {
+      'content-type': 'text/html; charset=utf-8',
+      'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'",
+      'x-content-type-options': 'nosniff',
+      'cache-control': 'no-store',
+    }
+    if (c.req.query('download') === '1') headers['content-disposition'] = attachment(rec.title, n)
+    return c.body(body, 200, headers)
   })
 
   // 4. 静的ファイル、5. 画面の殻（Cookie 不要。データは /api/* だけが持つ）
@@ -464,6 +494,14 @@ export function createServer(o: ServerOptions) {
   })
 
   return { app, hub, runs, stop, status, issuePairing, conversation, entrance, runner, caseChanged }
+}
+
+// ダウンロードの名前（6.2.8 (4)）。ASCII の名前と、題を百分率符号化した名前
+export function attachment(title: string, n: number) {
+  const safe = [...title].map((ch) => ((ch.codePointAt(0) ?? 0) < 0x20 || '\u007f/\\'.includes(ch) ? '_' : ch))
+  const name = `${safe.join('')}-第${n}版.html`
+  const encoded = encodeURIComponent(name).replace(/['()*]/g, (ch) => `%${ch.charCodeAt(0).toString(16).toUpperCase()}`)
+  return `attachment; filename="page-v${n}.html"; filename*=UTF-8''${encoded}`
 }
 
 // T7b は入口待ち以外からの entrance.revise（動いている仕事がある）
