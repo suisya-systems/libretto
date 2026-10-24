@@ -198,7 +198,8 @@ export const ownCheckable = (c: Check) =>
 
 export type GatheredVoice = { voice: ChecksVoice; samples?: string }
 type Fetch = (url: string, o: { signal: AbortSignal }) => Promise<Fetched | FetchFailure>
-type RunCode = (c: Check, md: string) => Promise<boolean>
+// 合格なら true、落ちたら false、決まらなかった（打ち切った）なら undefined
+type RunCode = (c: Check, md: string) => Promise<boolean | undefined>
 export async function gatherVoice(
   samples: readonly z.infer<typeof MaterialRef>[],
   checks: readonly Check[],
@@ -217,13 +218,18 @@ export async function gatherVoice(
   })
   const texts = docs.filter((d) => d.usable).map((d) => d.md)
   const own = checks.filter(ownCheckable)
+  // 1 本でも落ちれば fail。落ちずに決まらない文書があれば、確かめていないものとして ownChecked に入れない
+  const ownChecked: string[] = []
   const ownFails: string[] = []
   for (const c of own) {
-    for (const md of texts)
-      if (!(await run(c, md))) {
-        ownFails.push(c.id)
-        break
-      }
+    const rs: (boolean | undefined)[] = []
+    for (const md of texts) {
+      const r = await run(c, md)
+      rs.push(r)
+      if (r === false) break
+    }
+    if (rs.includes(false)) ownFails.push(c.id)
+    if (texts.length && (rs.includes(false) || rs.every((r) => r === true))) ownChecked.push(c.id)
   }
   const picked = texts.length ? pickVoiceSamples(texts) : []
   const samplesText = picked.length ? renderSamples(picked) : undefined
@@ -232,7 +238,7 @@ export async function gatherVoice(
       docs: docs.map(({ md: _, ...d }) => d),
       ...(texts.length && { card: extractVoice(texts) }),
       ...(samplesText && { samplesFingerprint: sha256Hex(samplesText) }),
-      ownChecked: texts.length ? own.map((c) => c.id) : [],
+      ownChecked,
       ownFails,
     },
     ...(samplesText && { samples: samplesText }),

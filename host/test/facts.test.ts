@@ -291,6 +291,12 @@ describe('取り寄せ（6.3.1 (5)）', () => {
     expect(t.paragraphs).toEqual(['見出し', '本文です。', '項目 1', '項目 2'])
   })
 
+  it('md: 項目の中に段落があっても箇条書きのまま', () => {
+    expect(htmlText('<ul><li><p>中に段落のある項目</p></li></ul><p>本文です。</p>').md).toBe(
+      '- 中に段落のある項目\n\n本文です。',
+    )
+  })
+
   let http: Server
   let base: string
   let hits = 0

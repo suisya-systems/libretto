@@ -139,6 +139,16 @@ describe('本人の過去文書での点検（6.3.2 (5)）', () => {
     )
     expect(g.voice.docs).toEqual([{ title: '記事', url: 'https://example.com/a', fingerprint: 'f', usable: true }])
     expect(g.voice.ownChecked).toEqual(['C01', 'C02'])
+    // 打ち切った（決まらない）項目は確かめたものに入れない
+    const timedOut = await gatherVoice(
+      [{ id: 'V1', kind: '声の見本', title: '記事', where: 'https://example.com/a' }],
+      checks,
+      new AbortController().signal,
+      async (c) => (c.id === 'C02' ? undefined : true),
+      fetch,
+    )
+    expect(timedOut.voice.ownChecked).toEqual(['C01'])
+    expect(timedOut.voice.ownFails).toEqual([])
     expect(g.voice.ownFails).toEqual(['C01'])
     expect(g.voice.card?.main).toBe('です・ます')
     // 段落が 80 字未満なので読み比べの段落は無い

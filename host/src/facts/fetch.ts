@@ -72,15 +72,21 @@ export function htmlText(html: string): { title: string; paragraphs: string[]; m
   const text = (s: string) => textParagraphs(decode(s.replace(BLOCK, '\n\n').replace(/<[^>]*>/g, '')))
   // 見出しと項目の開きタグに印を置いてから同じように段落に分ける
   const marked = kept.replace(/<h[1-6]\b[^>]*>/gi, '\n\n\uE000').replace(/<li\b[^>]*>/gi, '\n\n\uE001')
-  const md = text(marked)
-    .map((p) =>
-      p
-        .replace(/^\uE000\s*/, '# ')
-        .replace(/^\uE001\s*/, '- ')
-        .replace(/[\uE000\uE001]/g, ''),
-    )
-    .filter((p) => p !== '#' && p !== '-' && p !== '# ' && p !== '- ')
-    .join('\n\n')
+  // 印だけの段落（<li><p>…</p></li> のように中にブロックがある形）は、次の段落に印を持ち越す
+  const out: string[] = []
+  let carry = ''
+  for (const p of text(marked)) {
+    const m = /^([\uE000\uE001]\s*)+/.exec(p)
+    const mark = m ? (m[0].includes('\uE000') ? '# ' : '- ') : ''
+    const rest = p.replace(/[\uE000\uE001]/g, '').trim()
+    if (!rest) {
+      carry = mark || carry
+      continue
+    }
+    out.push(`${mark || carry}${rest}`)
+    carry = ''
+  }
+  const md = out.join('\n\n')
   return { title, paragraphs: text(kept), md }
 }
 

@@ -622,7 +622,7 @@ export function createEntrance(d: Deps) {
             signal,
             async (x, md) => {
               const r = await runCode(x, { md })
-              return !!r.timedOut || verdictOf(x.pass, r.units) === 'pass'
+              return r.timedOut ? undefined : verdictOf(x.pass, r.units) === 'pass'
             },
             d.fetch,
           )
