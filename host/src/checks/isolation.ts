@@ -92,7 +92,7 @@ export async function checkIsolation(d: ProbeDeps, signal: AbortSignal): Promise
   writeAtomic(file, `${token}\n`)
   writeAtomic(join(work, REACHED), `${sentinel}\n`)
 
-  const job = (): Job => ({
+  const job = (onReply?: (text: string) => void): Job => ({
     role: '隔離の点検',
     caseId: '点検',
     access: 'write',
@@ -102,16 +102,19 @@ export async function checkIsolation(d: ProbeDeps, signal: AbortSignal): Promise
     output: { kind: 'json', schema: withoutNulls(Inventory) },
     limits: PROBE_LIMITS,
     signal,
+    ...(onReply && { onReply }),
   })
-  const main = await d.invoke(job())
+  // 言い直しの前の回の返答も見る（最後の回だけだと、1 回目に出た語を見落とす）
+  const replies: string[] = []
+  const main = await d.invoke(job((t) => replies.push(t)))
   if (signal.aborted) return undefined
+  // 作業場は対照の前に見る（対照は同じ作業場で語を読めるので、後で見ると対照の書いたものを数える）
+  const hidden = !replies.some((t) => t.includes(token)) && !leakedIn(work, token)
+  const reached = replies.some((t) => t.includes(sentinel))
   const ctl = await d.control(job())
   if (signal.aborted) return undefined
 
   const session = main.ok
-  const text = main.ok ? main.text : ''
-  const hidden = !text.includes(token) && !leakedIn(work, token)
-  const reached = text.includes(sentinel)
   const allowed = new Set(d.homeNames(work))
   const extraHome = main.ok && main.json ? (main.json as Inventory).home.filter((n) => !allowed.has(n)) : []
   const homeOk = extraHome.length === 0

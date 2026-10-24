@@ -31,6 +31,7 @@ const reply =
       file: o.seen ? token() : '開けない',
       home: o.home ?? ['.claude'],
     }
+    job.onReply?.(JSON.stringify(json))
     return { ok: true, text: JSON.stringify(json), json, ...meta }
   }
 const run = (
@@ -70,6 +71,18 @@ describe('checkIsolation の判定', () => {
     ['ホームに許していない名前があった', reply({ home: ['.claude', '.ssh'] }), { extraHome: ['.ssh'] }],
   ])('%s → visible', async (_, main, more) => {
     expect(await run(main)).toMatchObject({ verdict: 'visible', ...more })
+  })
+
+  it('言い直しの前の回にだけ語が出ても visible', async () => {
+    const main = async (j: Job) => {
+      j.onReply?.(`{broken ${token()}`)
+      return reply()(j)
+    }
+    expect((await run(main))?.verdict).toBe('visible')
+  })
+
+  it('対照が作業場に書いた語は、本番の漏れに数えない', async () => {
+    expect((await run(reply(), reply({ seen: true, writeToken: true })))?.verdict).toBe('hidden')
   })
 
   it('見えた証拠は対照が死んでいても visible', async () => {
