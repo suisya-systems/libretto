@@ -639,6 +639,7 @@ export function createEntrance(d: Deps) {
         checks: withHostItems(drafted, c.destination, token(), brief.sources, {
           card: !!gathered?.voice.card,
           samples: !!gathered?.samples,
+          firstPerson: gathered?.voice.card?.firstPerson !== 'なし',
         }),
         ...(gathered && { voice: gathered.voice }),
         ...family,

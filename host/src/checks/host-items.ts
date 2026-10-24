@@ -122,7 +122,8 @@ const READ_ALIKE = {
   hidden: true,
   selfReport: '書いていない' as const,
 }
-export type VoiceItems = { card: boolean; samples: boolean }
+// firstPerson = カードに一人称がある（「なし」なら一人称の項目は足さない。6.3.2 (6)）
+export type VoiceItems = { card: boolean; samples: boolean; firstPerson?: boolean }
 
 function itemsFor(t: DeliveryTarget): Item[] {
   switch (t.kind) {
@@ -162,7 +163,9 @@ export function withHostItems(
       selfReport: '書いていない',
       canary: true,
     },
-    ...(voice.card ? VOICE_CODE : []).map((v) => ({ ...v, phase: '本文' as const })),
+    ...(voice.card ? VOICE_CODE : [])
+      .filter((v) => voice.firstPerson !== false || v.judge.fn !== 'voiceFirstPerson')
+      .map((v) => ({ ...v, phase: '本文' as const })),
     ...(voice.samples ? [{ ...READ_ALIKE, phase: '本文' as const }] : []),
     ...(sources === '出典付き' ? FACTS : []).map((f) => ({
       ...f,

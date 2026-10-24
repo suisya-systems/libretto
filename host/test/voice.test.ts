@@ -217,6 +217,12 @@ describe('ホストの項目と判定（6.3.2 (6)(7)(9)）', () => {
     ])
     expect(v.at(-1)).toMatchObject({ hidden: true, judge: { question: READ_ALIKE_QUESTION } })
     expect(withHostItems([], [], 'x').some((c) => c.category === '声')).toBe(false)
+    // カードの一人称が「なし」なら一人称の項目は足さない
+    const noFp = withHostItems([], [], 'x', '出典なし', { card: true, samples: false, firstPerson: false })
+    expect(noFp.filter((c) => c.category === '声').map((c) => c.judge.by === 'code' && c.judge.fn)).toEqual([
+      'voiceEndings',
+      'voiceSentenceLength',
+    ])
   })
 
   it('読み比べに見本を渡し、voiceMatch にカードと本文の値を並べる', async () => {
@@ -259,5 +265,6 @@ describe('ホストの項目と判定（6.3.2 (6)(7)(9)）', () => {
   it('描写の指示の例は型に通る', () => {
     expect(Portrait.parse(PORTRAIT_EXAMPLE)).toEqual(PORTRAIT_EXAMPLE)
     expect(PORTRAIT_INSTRUCTION).toContain(JSON.stringify(PORTRAIT_EXAMPLE))
+    expect(PORTRAIT_INSTRUCTION).toContain('一文の長さ・文末の割合は数値に従う')
   })
 })
