@@ -26,11 +26,19 @@ import {
 
 type PassKind = Check['pass']['kind']
 // 判定の材料。page / paste は仕立ての成果物（形式の phase だけ。6.2.5 (5)）。facts は版の事実（6.3.1 (7)）。
-// voice は承認した組の文体カードの数値（6.3.2 (6)）
-export type FnInput = { md: string; page?: string; paste?: string; facts?: FactsFile; voice?: VoiceNumbers }
+// brief は作り手が読む依頼書の文（目標を添えてよいかの照合。6.2.9 (2)）。voice は承認した組の文体カードの数値（6.3.2 (6)）
+export type FnInput = {
+  md: string
+  page?: string
+  paste?: string
+  facts?: FactsFile
+  brief?: string
+  voice?: VoiceNumbers
+}
 // units は単位ごとの「はい」。timedOut は打ち切った（verdict は unable）。
-// measured.gap は合格までの距離（6.2.7 (1)）。範囲で測る関数だけが書き、ほかは judge が裏返す単位の数で埋める
-export type FnResult = { units: boolean[]; measured?: Record<string, number>; timedOut?: true }
+// measured.gap は合格までの距離（6.2.7 (1)）。範囲で測る関数と sourcesReachable が書き、ほかは judge が裏返す単位の数で埋める。
+// told は落ちたとき作り手に返す要約に添える行（目標と今の値・本文の文だけ。6.2.9）
+export type FnResult = { units: boolean[]; measured?: Record<string, number>; timedOut?: true; told?: string[] }
 
 type Fn<A> = {
   args: z.ZodType<A>
@@ -54,7 +62,42 @@ const norm = (s: string) => s.normalize('NFKC').toLowerCase()
 // 見出しも段落も Markdown の記号を外して比べる（**社外**秘 も「社外秘」として数える）
 const allBlocks = (md: string) =>
   blocks(md).map((b) => (b.kind === 'heading' ? plain(b.text) : b.lines.map(plain).join('\n')))
-const counted = (units: boolean[]) => ({ units, measured: { hits: units.filter(Boolean).length } })
+const counted = (units: boolean[], told: string[] = []) => ({
+  units,
+  measured: { hits: units.filter(Boolean).length },
+  ...(told.length && { told }),
+})
+// 字面の 10 進の数（NFKC・桁区切りを外す）
+export const numbersIn = (s: string) =>
+  [
+    ...s
+      .normalize('NFKC')
+      .replace(/(\d),(?=\d{3})/g, '$1')
+      .matchAll(/\d+(?:\.\d+)?/g),
+  ].map((m) => Number(m[0]))
+
+// --- 要約に添える行（6.2.9）。目標は数が全部依頼書の文にあるときだけ。無ければ今の値だけ
+const fmt = (n: number) => n.toLocaleString('ja-JP')
+function told(subject: string, r: Range, unit: string, now: number, brief = '') {
+  const known = numbersIn(brief)
+  const ns = [r.min, r.max].filter((x) => x !== undefined)
+  if (!ns.every((x) => known.includes(x))) return [`${subject}今 ${fmt(now)} ${unit}です`]
+  const want =
+    r.min !== undefined && r.max !== undefined
+      ? r.min === r.max
+        ? `${fmt(r.min)} ${unit}`
+        : `${fmt(r.min)}〜${fmt(r.max)} ${unit}`
+      : r.min !== undefined
+        ? `${fmt(r.min)} ${unit}以上`
+        : `${fmt(r.max as number)} ${unit}以下`
+  return [`${subject}${r.max === 0 ? '置かないで' : ` ${want}にして`}ください（今は ${fmt(now)} ${unit}）`]
+}
+// 主張は本文の字面と場所だけ。改行が入っても 1 行に
+const one = (s: string) => s.replace(/\s+/g, ' ').trim()
+const claimLine = (f: FactsFile, id: string) => {
+  const c = f.claims.find((x) => x.id === id)
+  return c ? [`「${one(c.text)}」（${one(c.where)}）`] : []
+}
 const need = <T>(v: T | undefined, name: string) => {
   if (v === undefined) throw new Error(`no ${name} output`)
   return v
@@ -114,9 +157,13 @@ export const FNS: Partial<Record<CodeFn, Fn<unknown>>> = {
     yes: '字数（記号と空白を除く）が min 以上 max 以下',
     pass: ['all'],
     phase: '本文',
-    run: (a, { md }) => {
+    run: (a, { md, brief }) => {
       const chars = charCount(md)
-      return { units: [inRange(chars, a)], measured: { chars, gap: outside(chars, a) } }
+      return {
+        units: [inRange(chars, a)],
+        measured: { chars, gap: outside(chars, a) },
+        ...(!inRange(chars, a) && { told: told('字数は', a, '字', chars, brief) }),
+      }
     },
   }),
   headingCount: fn({
@@ -126,9 +173,19 @@ export const FNS: Partial<Record<CodeFn, Fn<unknown>>> = {
     yes: '見出しの数が範囲内（level を書けばそのレベルだけ数える。書かなければ題と小見出しを除いた見出し）',
     pass: ['all'],
     phase: '本文',
-    run: (a, { md }) => {
+    run: (a, { md, brief }) => {
       const headings = headingCount(md, a.level)
-      return { units: [inRange(headings, a)], measured: { headings, gap: outside(headings, a) } }
+      // 数えた範囲を言う（level 3 だけの項目で見出しを全部消させない）
+      const subject = a.level
+        ? `\`${'#'.repeat(a.level)}\` の見出しは`
+        : a.max === 0
+          ? '見出しは'
+          : '見出し（題と小見出しを除く）は'
+      return {
+        units: [inRange(headings, a)],
+        measured: { headings, gap: outside(headings, a) },
+        ...(!inRange(headings, a) && { told: told(subject, a, '個', headings, brief) }),
+      }
     },
   }),
   paragraphsPerHeading: fn({
@@ -184,11 +241,15 @@ export const FNS: Partial<Record<CodeFn, Fn<unknown>>> = {
     yes: '文の長さ（字数）の中央値が max 以下',
     pass: ['all'],
     phase: '本文',
-    run: (a, { md }) => {
+    run: (a, { md, brief }) => {
       const ls = sentences(md).map(sentenceLength)
       if (!ls.length) return { units: [false], measured: { gap: 1 } }
       const m = median(ls)
-      return { units: [m <= a.max], measured: { median: m, gap: Math.max(0, m - a.max) } }
+      return {
+        units: [m <= a.max],
+        measured: { median: m, gap: Math.max(0, m - a.max) },
+        ...(m > a.max && { told: told('文の長さは中央値で', { max: a.max }, '字', m, brief) }),
+      }
     },
   }),
   firstPersonOnly: fn({
@@ -233,7 +294,14 @@ export const FNS: Partial<Record<CodeFn, Fn<unknown>>> = {
     phase: '本文',
     host: true,
     facts: true,
-    run: (_, { facts }) => counted(need(facts, 'facts').verdicts.map((v) => v.kind === '出典なし' && !v.mark)),
+    run: (_, { facts }) => {
+      const f = need(facts, 'facts')
+      const bad = f.verdicts.filter((v) => v.kind === '出典なし' && !v.mark)
+      return counted(
+        f.verdicts.map((v) => bad.includes(v)),
+        bad.flatMap((v) => claimLine(f, v.claimId)),
+      )
+    },
   }),
   sourcesReachable: fn({
     args: CodeArgs.sourcesReachable,
@@ -246,11 +314,14 @@ export const FNS: Partial<Record<CodeFn, Fn<unknown>>> = {
     facts: true,
     run: (_, { facts }) => {
       const f = need(facts, 'facts')
-      return counted(
-        f.sources.map(
-          (s) => !s.opened || f.verdicts.some((v) => v.sourceRef === s.url && v.excerptFingerprint === undefined),
-        ),
+      const lost = (url: string) => f.verdicts.filter((v) => v.sourceRef === url && v.excerptFingerprint === undefined)
+      const units = f.sources.map((s) => !s.opened || lost(s.url).length > 0)
+      // gap は出典でなく主張で数える（同じ出典の主張を直した分が測れるように。6.2.9 (4)）
+      const gap = f.sources.reduce((n, s) => n + (s.opened ? lost(s.url).length : 1), 0)
+      const lines = f.sources.flatMap((s) =>
+        s.opened ? lost(s.url).flatMap((v) => claimLine(f, v.claimId)) : [`開けなかった出典: ${s.url}`],
       )
+      return { units, measured: { hits: units.filter(Boolean).length, gap }, ...(lines.length && { told: lines }) }
     },
   }),
   numbersMatch: fn({
@@ -265,10 +336,11 @@ export const FNS: Partial<Record<CodeFn, Fn<unknown>>> = {
     run: (_, { facts }) => {
       const f = need(facts, 'facts')
       const hasNumber = (id: string) => /\d/.test(f.claims.find((c) => c.id === id)?.text.normalize('NFKC') ?? '')
+      const vs = f.verdicts.filter((v) => v.kind === '材料由来' && hasNumber(v.claimId))
+      const bad = (v: (typeof vs)[number]) => (v.mismatched?.length ?? 0) > 0
       return counted(
-        f.verdicts
-          .filter((v) => v.kind === '材料由来' && hasNumber(v.claimId))
-          .map((v) => (v.mismatched?.length ?? 0) > 0),
+        vs.map(bad),
+        vs.filter(bad).flatMap((v) => claimLine(f, v.claimId)),
       )
     },
   }),

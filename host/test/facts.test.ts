@@ -5,7 +5,7 @@ import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { type Check, MARK, Review } from '@libretto/shared/checks'
-import type { BriefFile } from '@libretto/shared/ledger'
+import type { BriefFile, FactsFile } from '@libretto/shared/ledger'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { type Input, transition } from '../src/case/transition.ts'
 import { SUPPORT_PROPOSITION, withHostItems } from '../src/checks/host-items.ts'
@@ -232,6 +232,50 @@ describe('分類と照合（6.3.1 (3)(4)）', () => {
     expect(withHostItems([], [], 'x'.repeat(32), '出典なし').some((c) => c.category === '事実')).toBe(false)
   })
 
+  it('落ちた事実の 3 関数は、本文の主張の字面と場所・開けなかった出典の URL を全部添える（6.2.9 (3)）', async () => {
+    const all = withHostItems([], [], 'x'.repeat(32), '出典付き').filter((c) => c.category === '事実')
+    const run = async (fn: string, f = facts.file) =>
+      runCode(all.find((x) => x.judge.by === 'code' && x.judge.fn === fn) as Check, { md, facts: f })
+    const line = (id: string, f = facts.file) => {
+      const c = f.claims.find((x) => x.id === id) as { text: string; where: string }
+      return `「${c.text}」（${c.where}）`
+    }
+    expect((await run('claimsInventoried')).told).toEqual([line('K05')])
+    expect((await run('sourcesReachable')).told).toEqual([`開けなかった出典: ${URL_B}`])
+    expect((await run('numbersMatch')).told).toEqual([line('K03')])
+    // 出典の抜粋・資料の段落（食い違った数の相手）は添えない
+    const told = JSON.stringify(
+      await Promise.all(['claimsInventoried', 'sourcesReachable', 'numbersMatch'].map((fn) => run(fn))),
+    )
+    expect(told).not.toContain('2025 年の利用者')
+    expect(told).not.toContain('3000')
+
+    // 同じ出典の主張を直した分が gap に出る（出典の数で数えると 1 → 1 で「直らない」になる。6.2.9 (4)）
+    const shared = (n: number): FactsFile => ({
+      version: 1,
+      claims: Array.from({ length: n }, (_, i) => ({
+        id: `K${i}`,
+        text: i ? `主張 ${i}` : '改行を\n- 含む主張',
+        kind: '断定' as const,
+        range: [0, 1] as [number, number],
+        where: '見出し『一』の 1 段落目',
+      })),
+      verdicts: Array.from({ length: n }, (_, i) => ({
+        claimId: `K${i}`,
+        kind: '出典あり' as const,
+        sourceRef: URL_A,
+      })),
+      sources: [{ ref: 'r', url: URL_A, opened: true }],
+    })
+    const many = await run('sourcesReachable', shared(11))
+    expect(many.units).toEqual([true])
+    expect(many.measured?.gap).toBe(11)
+    // 件数の上限は置かない。字面の改行は 1 つの空白にして 1 行に
+    expect(many.told).toHaveLength(11)
+    expect(many.told?.[0]).toBe('「改行を - 含む主張」（見出し『一』の 1 段落目）')
+    expect((await run('sourcesReachable', shared(1))).measured?.gap).toBe(1)
+  })
+
   it('出典ごとの集計: 開けない / 未判定 / 支持 / 一部支持 / 支持しない', () => {
     const f = structuredClone(facts.file)
     expect(sourceRows(f).map((r) => r.verdict)).toEqual(['未判定', '開けない'])
@@ -387,7 +431,20 @@ describe('取り寄せ（6.3.1 (5)）', () => {
 })
 
 describe('判定への組み込み（6.3.1 (7)(8)）', () => {
-  const brief = { sources: '出典付き', audience: 'a', mustNot: [] } as unknown as BriefFile
+  const brief: BriefFile = {
+    docType: '記事',
+    subject: 's',
+    wanted: [],
+    audience: 'a',
+    destinations: [{ kind: 'page', shared: false }],
+    shape: '短く',
+    materials: [],
+    voice: '合わせない',
+    sources: '出典付き',
+    mustNot: [],
+    assumptions: [],
+    decisions: [],
+  }
   const length: Check = {
     id: 'C01',
     category: '分量',

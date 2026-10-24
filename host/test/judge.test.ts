@@ -56,7 +56,8 @@ const code = (fn: string, args: Record<string, unknown>, pass: Check['pass'], ph
     hidden: false,
     selfReport: '依頼に書いてある',
   }) as Check
-const run = (c: Check, md: string, extra: { page?: string; paste?: string } = {}) => runCode(c, { md, ...extra })
+const run = (c: Check, md: string, extra: { page?: string; paste?: string; brief?: string } = {}) =>
+  runCode(c, { md, ...extra })
 
 const DOC = `# 題
 
@@ -147,6 +148,43 @@ describe('機械判定（6.2.5 (2)）', () => {
     expect((await run(code('headingCount', { min: 2, max: 2 }, { kind: 'all' }), DOC)).units).toEqual([true])
     expect(FNS.headingCount?.args.safeParse({ max: 0 }).success).toBe(true)
     expect((await run(code('headingCount', { max: 0 }, { kind: 'all' }), '本文だけ。')).units).toEqual([true])
+  })
+
+  it('数える 3 項目は落ちたときだけ、目標（依頼書にあるときだけ）と今の値を 1 行添える（6.2.9 (2)）', async () => {
+    const brief = '- 分量・形: 1,800〜2,200 字、見出し 4〜6、文は 45 字以内'
+    const told = async (fn: string, args: Record<string, unknown>, md: string, b = brief) =>
+      (await run(code(fn, args, { kind: 'all' }), md, { brief: b })).told
+    const long = 'あ'.repeat(3628)
+    expect(await told('charCount', { min: 1800, max: 2200 }, long)).toEqual([
+      '字数は 1,800〜2,200 字にしてください（今は 3,628 字）',
+    ])
+    // 依頼書に無い数の目標は書かず、今の値だけ
+    expect(await told('charCount', { min: 1900, max: 2200 }, long)).toEqual(['字数は今 3,628 字です'])
+    expect(await told('charCount', { min: 1800 }, 'あ')).toEqual(['字数は 1,800 字以上にしてください（今は 1 字）'])
+    expect(await told('charCount', { max: 2200 }, long)).toEqual(['字数は 2,200 字以下にしてください（今は 3,628 字）'])
+    // 通っていれば何も添えない
+    expect(await told('charCount', { max: 2200 }, 'あ')).toBeUndefined()
+    const seven = Array.from({ length: 7 }, (_, i) => `## 見出し${i}\n\n段落。`).join('\n\n')
+    expect(await told('headingCount', { min: 4, max: 6 }, `# 題\n\n${seven}\n\n### 小見出し`)).toEqual([
+      '見出し（題と小見出しを除く）は 4〜6 個にしてください（今は 7 個）',
+    ])
+    expect(await told('headingCount', { min: 6, max: 6 }, seven)).toEqual([
+      '見出し（題と小見出しを除く）は 6 個にしてください（今は 7 個）',
+    ])
+    // level を書いた項目はそのレベルを言う（level 3 の項目で見出しを全部消させない）
+    expect(await told('headingCount', { max: 0, level: 3 }, `${seven}\n\n### 小`, '見出し 0')).toEqual([
+      '`###` の見出しは置かないでください（今は 1 個）',
+    ])
+    expect(await told('headingCount', { max: 0 }, seven, '見出しは 0')).toEqual([
+      '見出しは置かないでください（今は 7 個）',
+    ])
+    expect(await told('sentenceLengthMedian', { max: 45 }, `${'あ'.repeat(51)}。`)).toEqual([
+      '文の長さは中央値で 45 字以下にしてください（今は 52 字）',
+    ])
+    // 文が無ければ中央値が無いので添えない
+    expect(await told('sentenceLengthMedian', { max: 45 }, '# 題だけ')).toBeUndefined()
+    // 依頼書が無ければ（judge の外から流したとき）今の値だけ
+    expect((await run(code('charCount', { max: 2 }, { kind: 'all' }), 'あいう')).told).toEqual(['字数は今 3 字です'])
   })
 
   it('禁止語は「含む」を数えて count の max 0（反転しない）: 含む段落 3 → 不合格、0 → 合格', async () => {
@@ -385,7 +423,11 @@ describe('judge() の段取り（7.3）', () => {
       ['C05', 'skipped'],
       ['C06', 'skipped'],
     ])
-    expect(r.failedSummaries).toEqual(['分量が依頼の範囲から外れています', '見出しの数が依頼と合っていません'])
+    // 機械判定の要約には今の値を添える（依頼書の「短く」に数が無いので目標は書かない。6.2.9 (2)）
+    expect(r.failedSummaries).toEqual([
+      '分量が依頼の範囲から外れています\n  - 字数は今 2 字です',
+      '見出しの数が依頼と合っていません\n  - 見出し（題と小見出しを除く）は今 0 個です',
+    ])
     expect(r.familyNote).toBe(FAMILY_NOTE)
     expect(r.jevNote).toBe(JEV_NOTE)
     expect(() =>
@@ -424,6 +466,21 @@ describe('judge() の段取り（7.3）', () => {
     expect(r.results.find((x) => x.id === 'C06')?.verdict).toBe('unable')
     expect(r.pass).toBe(false)
     expect(out.judged.reasons.C05).toContain('することができる')
+    // モデル判定の要約は 1 行のまま、unable は返さない（6.2.9 (3)・6.2.7 (3)）
+    const c05 = goodChecks.find((c) => c.id === 'C05')?.summary
+    expect(r.failedSummaries).toEqual([c05])
+  })
+
+  it('目標の数が依頼書にあれば、機械判定の要約に目標と今の値を添える（6.2.9 (2)）', async () => {
+    const { invoke } = setup([])
+    const out = await judge(
+      { ...input, brief: { ...brief, shape: '2,200〜2,800 字' }, checks: goodChecks, input: { md: '# 短い' } },
+      invoke,
+    )
+    if (!out.ok) throw new Error('not ok')
+    expect(out.judged.body.failedSummaries[0]).toBe(
+      '分量が依頼の範囲から外れています\n  - 字数は 2,200〜2,800 字にしてください（今は 2 字）',
+    )
   })
 
   it('Claude の出力の受け入れ規則と、指示の例', () => {

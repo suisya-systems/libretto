@@ -263,7 +263,9 @@ describe('runner と作り手', () => {
     const id = await approved()
     await waitState(id, '検品中')
     const summaries = ['分量が依頼の範囲から外れています', '見出しの数が依頼と合っていません']
-    judged(id, false, summaries)
+    // 機械判定の要約には目標と今の値が字下げで付く（6.2.9）
+    const added = '  - 見出し（題と小見出しを除く）は 4〜6 個にしてください（今は 7 個）'
+    judged(id, false, [summaries[0] as string, `${summaries[1]}\n${added}`])
     server.runner.kick(id)
     await vi.waitFor(() => expect(ledger.getCase(id)).toMatchObject({ state: '検品中', version: 2 }))
     const fb = readFileSync(work(id, 'feedback.md'), 'utf-8')
@@ -272,6 +274,7 @@ describe('runner と作り手', () => {
       .filter((l) => l.startsWith('- '))
       .map((l) => l.slice(2))
     expect(new Set(lines)).toEqual(new Set(summaries))
+    expect(fb.split('\n').filter((l) => l.startsWith('  '))).toEqual([added])
     expect(fb).not.toContain('1,200 字')
     expect(fb).not.toContain('C01')
     expect(makerCalls()[1]?.instruction).toContain('feedback.md')

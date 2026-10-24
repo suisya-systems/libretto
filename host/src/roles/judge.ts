@@ -241,6 +241,8 @@ export async function judge(
   const plainCode = checks.filter((x) => x.judge.by === 'code' && !needsFacts(x))
   const factCode = checks.filter(needsFacts)
   let facts: Facts | undefined
+  const brief = renderBrief(j.brief)
+  const told = new Map<string, string[]>()
   for (const c of [...plainCode, ...factCode]) {
     if (needsFacts(c) && !facts) {
       if (!j.facts) throw new Error(`no facts for ${c.id}`)
@@ -253,8 +255,9 @@ export async function judge(
       results.set(c.id, { id: c.id, verdict: 'unable', by: 'code', reasonRef: c.id })
       continue
     }
-    const r = await runCode(c, { ...j.input, ...(facts && { facts: facts.file }) })
+    const r = await runCode(c, { ...j.input, brief, ...(facts && { facts: facts.file }) })
     if (r.timedOut) reasons[c.id] = TOO_HEAVY
+    if (r.told?.length) told.set(c.id, r.told)
     results.set(c.id, {
       id: c.id,
       verdict: r.timedOut ? 'unable' : verdictOf(c.pass, r.units),
@@ -414,8 +417,11 @@ export async function judge(
       body: {
         results: ordered,
         pass: ordered.every((r) => r.verdict === 'pass'),
-        // unable は作り手には直せないので返さない（本人にだけ見せる。6.2.7 (3)）
-        failedSummaries: ordered.filter((r) => r.verdict === 'fail').map((r) => summaryOf.get(r.id) as string),
+        // unable は作り手には直せないので返さない（本人にだけ見せる。6.2.7 (3)）。
+        // 機械判定の項目は要約の下に目標と今の値・本文の文を字下げして添える（6.2.9）
+        failedSummaries: ordered
+          .filter((r) => r.verdict === 'fail')
+          .map((r) => [summaryOf.get(r.id) as string, ...(told.get(r.id) ?? []).map((t) => `  - ${t}`)].join('\n')),
         marks: marksOf(j.input.md),
         sources: sourcesOf(facts?.file, j.input.md),
         ...(j.family === '同系統' && { familyNote: FAMILY_NOTE }),
