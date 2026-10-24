@@ -169,6 +169,8 @@ export async function inventoryClaims(
     limits: INVENTORY_LIMITS,
     signal: d.signal,
   })
+  // 言い直しても本文から写せなければ、モデルの答えを使わず数字の文の下限だけで棚卸しする（止めない。6.3.1 (2)）
+  if (!out.ok && out.kind === 'invalid_output') return { ok: true, claims: claimsFrom(md, []) }
   if (!out.ok) return { ok: false, out }
   const inv = out.json as Inventory
   return { ok: true, claims: claimsFrom(md, inv.claims, inv.notClaims) }

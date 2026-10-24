@@ -435,6 +435,18 @@ describe('判定への組み込み（6.3.1 (7)(8)）', () => {
     ).not.toThrow()
   })
 
+  it('言い直しても本文から写せなければ、数字の文の下限だけで棚卸しする（止めない）', async () => {
+    const bad = say({ claims: [{ text: '本文に無い主張', kind: '断定' }] })
+    const { facts, fake } = setup([
+      { role: '事実係・抜き出し', nth: 1, reply: bad },
+      { role: '事実係・抜き出し', nth: 2, reply: bad },
+    ])
+    const got = await facts()
+    if (!got.ok) throw new Error('not ok')
+    expect(fake.unused()).toEqual([])
+    expect(got.facts.file.claims.map((c) => c.kind)).toEqual(['数値', '数値'])
+  })
+
   it('出典ありの主張が無い版は、支持の項目が単位 0 個で合格', async () => {
     const body = '# 題\n\n今日は良い天気だと思う。'
     const { invoke, facts, signal } = setup([{ role: '事実係・抜き出し', nth: 1, reply: say({ claims: [] }) }], body)

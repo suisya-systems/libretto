@@ -1,4 +1,4 @@
-// 撮る状態の定義。状態を足すときはここに 1 つ足す（preview.ts と shoot.sh は触らない）
+// 撮る状態の定義。状態を足すときはここに 1 つ足す（preview.ts と shoot.sh は触らない。State の欄は preview.ts がそのまま使う）
 // どの状態も、会話で依頼を 1 つ出して入口待ち（本人の番）に着いたところから始まる（preview.ts）
 import type { CaseAction, CaseView, HostStatus, IsolationCause } from '@libretto/shared/api'
 import { MARK } from '@libretto/shared/checks'

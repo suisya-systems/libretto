@@ -98,6 +98,7 @@ Windows の Chrome は窓を約 500px より狭くできない。`--window-size=
   path: (caseId) => `/cases/${caseId}`,                       // 任意。開く画面（既定は案件の面）
   openaiKey: true,                                            // 任意。会話の前に偽の OpenAI の API キーを入れる（別系統・設定済み）
   sameFirst390: true,                                         // 任意。違いが下の方にだけあり、390 の 1 画面目が他の状態と同じになる
+  fetch: async (url) => ({ ok: true, url, title: '…', paragraphs: ['…'], fingerprint: 'x' }), // 任意。出典の取り寄せの偽物（網に出ない）
 },
 ```
 
