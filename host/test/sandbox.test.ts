@@ -1,6 +1,16 @@
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs'
 import { createServer } from 'node:http'
 import { homedir, tmpdir } from 'node:os'
 import { join, relative, resolve, sep } from 'node:path'
@@ -8,6 +18,7 @@ import { fileURLToPath } from 'node:url'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createClaudeCli } from '../src/model/claude-cli.ts'
 import type { Call } from '../src/model/invoke.ts'
+import { setKey } from '../src/model/keys.ts'
 import {
   checkSandbox,
   createSandbox,
@@ -416,4 +427,32 @@ describe.skipIf(win)('ホストが落ちたら作り手が残らない（8.9 (6)
     expect(alive(pids.leader)).toBe(false)
     expect(alive(pids.grandchild)).toBe(false)
   }, 20_000)
+})
+
+describe('API キーのファイルと隔離（6.1.3 (4)）', () => {
+  it('keys.ts が実際に書くファイルは、作り手の denyRead と拒否規則で塞がれている', () => {
+    const KEY = 'sk-test-linking-0123456789'
+    const home = join(dir, 'libretto')
+    mkdirSync(home)
+    setKey(home, 'openai', KEY)
+    // 鍵の値を含むファイルを、ホームの下から実際に探す（keys.ts の置き場が変わっても見つける）
+    const found = readdirSync(home, { recursive: true, encoding: 'utf8' })
+      .map((f) => join(home, f))
+      .filter((p) => statSync(p).isFile() && readFileSync(p, 'utf8').includes(KEY))
+    expect(found).toHaveLength(1)
+    const file = found[0] as string
+    const s = srtSettings({
+      home,
+      userHome: dir,
+      configDir: join(dir, '.claude'),
+      work: join(home, 'cases', 'c1', 'work'),
+      tmp: join(dir, 'tmp'),
+      claude: join(dir, 'claude'),
+      node: process.execPath,
+      srtVendor: join(dir, 'vendor'),
+    })
+    expect(s.filesystem.denyRead.some((d) => under(d, file))).toBe(true)
+    expect(s.filesystem.allowRead.some((a) => under(a, file))).toBe(false)
+    expect(denyRules(home, join(dir, '.claude'))).toContain(`Read(${rulePath(file)})`)
+  })
 })
