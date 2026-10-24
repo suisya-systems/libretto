@@ -9,7 +9,7 @@ import { decode } from '../checks/text.ts'
 export type Fetched = { ok: true; url: string; title: string; paragraphs: string[]; fingerprint: string }
 export type FetchFailure = {
   ok: false
-  why: 'network' | 'timeout' | 'refused' | 'too_large' | 'unsupported' | 'blocked'
+  why: 'network' | 'timeout' | 'refused' | 'unsupported' | 'blocked'
 }
 
 export const FETCH_LIMITS = { timeoutMs: 10_000, maxBytes: 2 * 1024 * 1024, redirects: 3 }
@@ -52,7 +52,11 @@ const sha256 = (s: string) => createHash('sha256').update(s).digest('hex')
 
 // --- HTML → 題と段落。ponytail: 正規表現の簡易な取り出し。ナビやフッターも段落に残る。困ったら本文の抽出を入れる
 
-const DROP = /<(script|style|noscript|template|svg|head|title|iframe|object|select|textarea)\b[\s\S]*?<\/\1\s*>/gi
+const DROPPED = 'script|style|noscript|template|svg|head|title|iframe|object|select|textarea'
+const DROP = new RegExp(`<(${DROPPED})\\b[\\s\\S]*?<\\/\\1\\s*>`, 'gi')
+// 先頭 2 MB で切ったとき、閉じていない要素は末尾まで捨てる（中身を段落にしない。6.3.3 (5)）。
+// head は閉じタグを省けるので入れない
+const DROP_OPEN = new RegExp(`<(${DROPPED.replace('|head', '')})\\b[\\s\\S]*$`, 'i')
 const BLOCK =
   /<\/?(p|div|br|li|ul|ol|h[1-6]|tr|td|th|table|section|article|header|footer|nav|aside|main|blockquote|pre|dd|dt|figcaption)\b[^>]*>/gi
 
@@ -61,8 +65,9 @@ export function htmlText(html: string): { title: string; paragraphs: string[] } 
     .replace(/\s+/g, ' ')
     .trim()
   const body = html
-    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/<!--[\s\S]*?(?:-->|$)/g, '') // 先頭 2 MB で切れた閉じていない注釈も捨てる
     .replace(DROP, '')
+    .replace(DROP_OPEN, '')
     .replace(BLOCK, '\n\n')
     .replace(/<[^>]*>/g, '')
   return { title, paragraphs: textParagraphs(decode(body)) }
@@ -184,16 +189,7 @@ function onResponse(res: IncomingMessage, resolve: (o: Once) => void) {
   const charset = /charset=["']?([\w-]+)/i.exec(type)?.[1] ?? 'utf-8'
   const chunks: Buffer[] = []
   let size = 0
-  res.on('data', (c: Buffer) => {
-    size += c.length
-    if (size > FETCH_LIMITS.maxBytes) {
-      res.destroy()
-      return resolve({ kind: 'fail', why: 'too_large' })
-    }
-    chunks.push(c)
-  })
-  res.on('error', () => resolve({ kind: 'fail', why: 'network' }))
-  res.on('end', () => {
+  const done = () => {
     let decoder: TextDecoder
     try {
       decoder = new TextDecoder(charset)
@@ -201,5 +197,16 @@ function onResponse(res: IncomingMessage, resolve: (o: Once) => void) {
       decoder = new TextDecoder('utf-8')
     }
     resolve({ kind: 'body', body: decoder.decode(Buffer.concat(chunks)), html })
+  }
+  // 上限を超えたら先頭の 2 MB だけを読んで切る（公式の更新履歴は大きく、新しいものが頭にある。6.3.3 (5)）
+  res.on('data', (c: Buffer) => {
+    const room = FETCH_LIMITS.maxBytes - size
+    size += c.length
+    if (size <= FETCH_LIMITS.maxBytes) return void chunks.push(c)
+    chunks.push(c.subarray(0, room))
+    res.destroy()
+    done()
   })
+  res.on('error', () => resolve({ kind: 'fail', why: 'network' }))
+  res.on('end', done)
 }

@@ -74,7 +74,8 @@ export function caseView(
   entrance?: Entrance,
   versions: CaseView['versions'] = [],
   reviews: Pick<CaseView, 'review' | 'formatReview'> = {},
-  fetched: { title: string; url: string }[] = [],
+  fetched: { title: string; url: string; gathered?: boolean }[] = [],
+  gatherFailed = false,
 ): CaseView {
   const approvals = ledger.listApprovals(c.caseId).filter((a) => !a.supersededBy)
   const approved = approvals.findLast((a) => a.gate === '入口')
@@ -87,7 +88,7 @@ export function caseView(
     ...(approved && {
       entranceApproval: { gate: '入口', by: approved.by, at: approved.at },
     }),
-    // 本人が貼った文と、T11 で取り寄せた出典（6.2.4 (3)・6.3.1 (5)）。閉じて消した後は貼った文の行だけ残る
+    // 本人が貼った文と、T11 で取り寄せた出典（6.2.4 (3)・6.3.1 (5)。libretto が集めたものは印付き。6.3.3 (7)）。閉じて消した後は貼った文の行だけ残る
     materials: [
       ...Array.from({ length: pastedCount(ledger, c.caseId) }, (_, i) => ({
         id: `M${nn(i + 1)}`,
@@ -102,8 +103,10 @@ export function caseView(
         title: s.title,
         where: s.url,
         status: '取り寄せ済み' as const,
+        ...(s.gathered && { gathered: true }),
       })),
     ],
+    ...(gatherFailed && { gatherFailed: true as const }),
     versions,
     ...reviews,
     rounds: { series: c.series, used: c.round, max: MAX_ROUNDS },

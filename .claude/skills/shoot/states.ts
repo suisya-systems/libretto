@@ -174,13 +174,20 @@ const toDone = async (ctx: Ctx) => {
 }
 // 出典付きの依頼: 出典のリンクの付いた主張と、【要確認】の付いた（出典が見つからなかった）文を 1 つずつ（6.3.1 (1)）
 const SURVEY = 'https://example.com/survey'
+// libretto がウェブで集めるものがある依頼（6.3.3 (1)）
+const gatherBrief = {
+  ...briefDraft,
+  brief: { ...briefDraft.brief, sources: '出典付き', gather: ['記事の読了率についての公開の調査'] },
+}
 const factBody = body(2).replace(
   '\n\n## なぜそう決めたか',
   `\n\n社内の調査では、記事を最後まで読んだ人の割合は 2025 年に 38% でした（[記事の読了率の調査](${SURVEY})）。同じ進め方は、ほかの編集部でも広がっています。${MARK}\n\n## なぜそう決めたか`,
 )
 const CLAIM = '記事を最後まで読んだ人の割合は 2025 年に 38% でした'
 const factRows: Row[] = [
-  ...entrance({ ...briefDraft, brief: { ...briefDraft.brief, sources: '出典付き' } }),
+  // 出典付きは資料の出どころが要る（6.3.3 (1)）。調査は libretto がウェブで集めた
+  ...entrance(gatherBrief),
+  ['事実係・集め', say({ sources: [{ url: SURVEY, why: '公式の調査' }] })],
   [
     '作り手',
     {
@@ -302,6 +309,35 @@ export const STATES: Record<string, State> = {
     },
     expect: (v) => v.state === '材料待ち' && v.turn === '本人',
     mark: W['materials.lead'],
+  },
+  // 入口: libretto がウェブで集めるものがある（6.3.3 (7)）
+  'entrance-gather': {
+    script: entrance(gatherBrief),
+    expect: (v) => v.state === '入口待ち' && v.turn === '本人' && !!v.entrance?.brief.gather.length,
+    mark: W['entrance.gatherNote'],
+  },
+  // 進行: libretto が集めた出典を資料に足し、下書きを書いている
+  gathered: {
+    script: [...entrance(gatherBrief), ['事実係・集め', say({ sources: [{ url: SURVEY, why: '公式の調査' }] })], hang],
+    fetch: fakeSurvey,
+    sameFirst390: true, // 違いは資料の欄で、390 の 1 画面目には入らない
+    drive: async (ctx) => {
+      await approve(ctx)
+      await ctx.until((v) => v.state === '下書き中')
+    },
+    expect: (v) => v.state === '下書き中' && v.materials.some((m) => m.gathered),
+    mark: W['progress.materialGathered'],
+  },
+  // 進行: ウェブで資料を見つけられなかったが、止めずに下書きを書いている
+  'gather-failed': {
+    script: [...entrance(gatherBrief), ['事実係・集め', say({ sources: [] })], hang],
+    sameFirst390: true, // 違いは資料の欄の 1 行で、390 の 1 画面目には入らない
+    drive: async (ctx) => {
+      await approve(ctx)
+      await ctx.until((v) => v.state === '下書き中')
+    },
+    expect: (v) => v.state === '下書き中' && !!v.gatherFailed,
+    mark: W['progress.gatherFailed'],
   },
   // 進行: 下書きを書いている（作り手は返らない）
   drafting: {

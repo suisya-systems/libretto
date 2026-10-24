@@ -296,7 +296,9 @@ describe('取り寄せ（6.3.1 (5)）', () => {
       if (req.url === '/loop') return res.writeHead(302, { location: '/loop' }).end()
       if (req.url === '/json') return res.writeHead(200, { 'content-type': 'application/json' }).end('{}')
       if (req.url === '/big')
-        return res.writeHead(200, { 'content-type': 'text/plain' }).end('a'.repeat(3 * 1024 * 1024))
+        return res
+          .writeHead(200, { 'content-type': 'text/plain' })
+          .end(`頭の段落\n\n${'a'.repeat(3 * 1024 * 1024)}\n\n末尾の段落`)
       if (req.url === '/hang') return
       res.writeHead(404).end()
     })
@@ -333,7 +335,17 @@ describe('取り寄せ（6.3.1 (5)）', () => {
     expect(await fetchSource(`${base}/move`, open)).toMatchObject({ ok: true, url: `${base}/page` })
     expect(await fetchSource(`${base}/loop`, open)).toEqual({ ok: false, why: 'refused' })
     expect(await fetchSource(`${base}/json`, open)).toEqual({ ok: false, why: 'unsupported' })
-    expect(await fetchSource(`${base}/big`, open)).toEqual({ ok: false, why: 'too_large' })
+    // 2 MB を超えたら先頭だけを読む（6.3.3 (5)）
+    const big = await fetchSource(`${base}/big`, open)
+    expect(big).toMatchObject({ ok: true })
+    const paras = big.ok ? big.paragraphs : []
+    expect(paras[0]).toBe('頭の段落')
+    expect(paras.join('').length).toBeLessThanOrEqual(2 * 1024 * 1024)
+    expect(paras).not.toContain('末尾の段落')
+    // HTML の切れ目が script の中なら、その中身は段落にしない。閉じタグの無い head は捨てない
+    expect(htmlText(`<p>本文</p><script>var data = "${'x'.repeat(50)}`).paragraphs).toEqual(['本文'])
+    expect(htmlText('<html><head><meta charset="utf-8"><body><p>本文</p>').paragraphs).toEqual(['本文'])
+    expect(htmlText('<p>本文</p><!-- 隠した段落 <p>古い文</p>').paragraphs).toEqual(['本文'])
     expect(await fetchSource(`${base}/hang`, { ...open, timeoutMs: 200 })).toEqual({ ok: false, why: 'timeout' })
     expect(await fetchSource(`${base}/nothing`, open)).toEqual({ ok: false, why: 'refused' })
   })

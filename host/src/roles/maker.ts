@@ -37,7 +37,8 @@ export const filesFingerprint = (files: VersionManifest['files']) => sha256(JSON
 // 出典付きの依頼の、出典と「要確認」の約束（6.3.1 (1)）
 export const SOURCES_RULE = `出典と要確認の印（この依頼は出典付き）:
 - 事実の主張（数・日付・名前・比べた言い方・言い切り）に出典があるときは、その主張と同じ文の中に Markdown のリンク [題](https://…) を置く。HTML の版では同じリンクを <a href="https://…">題</a> で書く
-- materials/ の資料から取った主張は、資料の言い方と数のまま書く（リンクは要らない）
+- materials/ の source-01.md などは、ウェブから取り寄せた出典（1 行目が題、3 行目が URL）。そこから取った主張は、数・名前・版を資料のまま書き（英語の資料は日本語に訳してよい）、同じ文の中にその題と URL でリンクを置く
+- materials/ の pasted-01.md などは、本人が貼った資料。そこから取った主張は、資料の言い方と数のまま書く（リンクは要らない）
 - 出典を示せない事実の主張は、その文の終わり（句点の後）に ${MARK} を付ける。出典をこしらえない`
 
 export function makerInstruction(work: string, n: number, feedback: boolean, sources = false) {

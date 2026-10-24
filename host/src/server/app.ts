@@ -27,6 +27,7 @@ import { transition } from '../case/transition.ts'
 import { type IsolationRecord, readIsolation, writeIsolation } from '../checks/isolation.ts'
 import { diff, renderHtml } from '../checks/text.ts'
 import { pageVersions } from '../deliver/run.ts'
+import { readGathered } from '../facts/gather.ts'
 import { type Fetch, fetchedSources, materialsDir } from '../facts/inventory.ts'
 import { CLOSED, purge } from '../facts/purge.ts'
 import type { Ledger } from '../ledger/ledger.ts'
@@ -306,6 +307,8 @@ export function createServer(o: ServerOptions) {
   app.get('/api/cases/:id', (c) => {
     const rec = ledger.getCase(c.req.param('id'))
     if (!rec) return c.json({ reason: 'not_found' }, 404)
+    const g = readGathered(home, rec.caseId)
+    const gathered = new Set(g?.state === '済み' ? g.sources.map((s) => s.url) : [])
     return c.json(
       caseView(
         ledger,
@@ -313,7 +316,8 @@ export function createServer(o: ServerOptions) {
         entranceView(home, ledger, rec),
         versionsOf(home, ledger, rec),
         reviewsOf(home, ledger, rec),
-        fetchedSources(home, rec.caseId),
+        fetchedSources(home, rec.caseId).map((s) => ({ ...s, gathered: gathered.has(s.url) })),
+        g?.state === '集められなかった',
       ),
     )
   })

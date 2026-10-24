@@ -21,7 +21,8 @@ type Opts = {
 }
 
 // access ごとの道具（6.1.2 (4)）
-const TOOLS = { none: '', read: 'Read,Glob,Grep', write: 'Read,Write,Edit,Glob,Grep' } as const
+// search は WebSearch だけ。WebFetch は手元から取りに行くので渡さない（6.3.3 (2)）
+const TOOLS = { none: '', read: 'Read,Glob,Grep', write: 'Read,Write,Edit,Glob,Grep', search: 'WebSearch' } as const
 
 // 子に渡す環境変数の許可一覧（6.1.2 (1)）
 const ENV_COMMON = [
@@ -81,7 +82,7 @@ export function stdinText(call: Pick<Call, 'instruction' | 'materials' | 'access
       parts.push(`<材料 name="${m.name}">\n${m.text}\n</材料>`)
       continue
     }
-    if (call.access === 'none' || !call.workdir || !inside(call.workdir, m.file))
+    if (call.access === 'none' || call.access === 'search' || !call.workdir || !inside(call.workdir, m.file))
       throw new Error(`claude-cli: file material ${m.name} must be inside workdir with access read/write`)
     parts.push(`<ファイル name="${m.name}" path="${resolve(m.file)}" mime="${m.mime}" />`)
   }
@@ -315,8 +316,9 @@ export function createClaudeCli(opts: Opts): Backend {
       '--setting-sources',
       '',
     ]
-    // none は空の一時ディレクトリで起こす（cwd から上の CLAUDE.md を読ませない）
-    const cwd = call.access === 'none' ? await mkdtemp(join(tmpdir(), 'libretto-')) : call.workdir
+    // none・search は空の一時ディレクトリで起こす（cwd から上の CLAUDE.md を読ませない）
+    const scratch = call.access === 'none' || call.access === 'search'
+    const cwd = scratch ? await mkdtemp(join(tmpdir(), 'libretto-')) : call.workdir
     if (!cwd) throw new Error(`claude-cli: access ${call.access} needs workdir`)
     let boxed: Awaited<ReturnType<Sandbox['prepare']>> | undefined
     if (call.access === 'write' && opts.sandbox) {
@@ -345,7 +347,7 @@ export function createClaudeCli(opts: Opts): Backend {
       return { ...reply, files: [...after].filter(([k, v]) => before.get(k) !== v).map(([k]) => k) }
     } finally {
       await boxed?.cleanup()
-      if (call.access === 'none') await rm(cwd, { recursive: true, force: true })
+      if (scratch) await rm(cwd, { recursive: true, force: true })
     }
   }
 }

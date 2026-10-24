@@ -52,7 +52,10 @@ export const MaterialRef = z.object({
   title: z.string(),
   where: z.string(),
 })
-export const Material = MaterialRef.extend({ status: z.enum(['取り寄せ済み', '待ち', '開けない']) })
+export const Material = MaterialRef.extend({
+  status: z.enum(['取り寄せ済み', '待ち', '開けない']),
+  gathered: z.boolean().optional(), // libretto がウェブで集めた出典（6.3.3 (7)）
+})
 
 // 表 4-1 のうち仮定・モード・由来は入れない（仮定は Assumption、モードと由来は案件の行が正本。5.3.3）
 export const Brief = z.object({
@@ -60,6 +63,8 @@ export const Brief = z.object({
   subject: z.string().min(1), // 書く内容（何について・何を入れるか）。表 4-1 に足した（6.2.3 (0)）
   // 本人に渡してほしいもの。あれば T8 で本人の番の材料待ちに入る。前の版のファイルで欄が無ければ []（6.2.4 (1)）
   wanted: z.array(z.string().trim().min(1).max(80)).max(5).default([]),
+  // libretto がウェブで集める公開の情報。前の版のファイルで欄が無ければ []（6.3.3 (1)）
+  gather: z.array(z.string().trim().min(1).max(80)).max(3).default([]),
   audience: z.string().min(1),
   destinations: z.array(DeliveryTarget).min(1),
   shape: z.string().min(1),
@@ -258,6 +263,7 @@ export const CaseView = CaseCard.extend({
   entrance: Entrance.optional(),
   entranceApproval: Approval.optional(),
   materials: z.array(Material),
+  gatherFailed: z.literal(true).optional(), // ウェブで集められなかった（6.3.3 (5)(7)）
   versions: z.array(Version),
   review: ReviewSummary.optional(), // 今の版の本文の判定（6.2.5 (6)）
   formatReview: ReviewSummary.optional(), // 今の版の形式の判定のうち最後のもの

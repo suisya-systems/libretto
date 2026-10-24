@@ -16,6 +16,7 @@ export const INVENTORY_LIMITS = { maxYen: 30, timeoutMs: 300_000 }
 const EXCERPT_CHARS = 1200
 const MATERIAL_MIN = 0.6 // 材料由来とみなす 2-gram の含有率
 const SOURCE_MIN = 0.3 // 出典の中に該当箇所があるとみなす含有率
+const WORD_MIN = 0.5 // 2-gram で外れたとき、英字の語と数の含有率（英語の出典。6.3.3 (3)）
 
 const sha256 = (s: string) => createHash('sha256').update(s).digest('hex')
 const nn = (n: number) => String(n).padStart(2, '0')
@@ -222,25 +223,58 @@ export function containment(claim: string, para: string): number {
   return hit / c.size
 }
 // 隣り合う 2 段落を繋いだものも相手の候補にする（ウェブのページは 1 つの話を短い段落に分けて書くことが多い）
-function best(claim: string, paras: readonly string[]): { para: string; score: number } | undefined {
+type Score = (claim: string, para: string) => number
+function best(claim: string, paras: readonly string[], score_: Score = containment) {
   let top: { para: string; score: number } | undefined
   const pairs = paras.slice(1).map((p, i) => `${paras[i]}\n${p}`)
   for (const para of [...paras, ...pairs]) {
-    const score = containment(claim, para)
+    const score = score_(claim, para)
     if (!top || score > top.score) top = { para, score }
   }
   return top
 }
 // 長い段落は主張の当たりの多い 1,200 字に切る（Jev の state 2,000 字に収める。7.4）
-export function excerptOf(claim: string, para: string): string {
+export function excerptOf(claim: string, para: string, score_: Score = containment): string {
   if (para.length <= EXCERPT_CHARS) return para
   let top = { at: 0, score: -1 }
   for (let at = 0; at < para.length; at += 200) {
-    const score = containment(claim, para.slice(at, at + EXCERPT_CHARS))
+    const score = score_(claim, para.slice(at, at + EXCERPT_CHARS))
     if (score > top.score) top = { at, score }
     if (at + EXCERPT_CHARS >= para.length) break
   }
   return para.slice(top.at, top.at + EXCERPT_CHARS)
+}
+
+// 英字の語（2 字以上）と数。訳しても残る製品名・版・数で英語の出典の相手を探す（6.3.3 (3)）
+// ponytail: 英字の語の無い訳した主張は当たらない。困ったら Haiku に相手の段落を選ばせる
+const words = (s: string) =>
+  new Set(
+    [
+      ...s
+        .normalize('NFKC')
+        .toLowerCase()
+        .matchAll(/[a-z][a-z0-9_.+-]*[a-z0-9]|\d+(?:\.\d+)*/g),
+    ].map((m) => m[0]),
+  )
+export function wordShare(claim: string, para: string): number {
+  const c = words(claim)
+  if (!c.size) return 0
+  const p = words(para)
+  let hit = 0
+  for (const x of c) if (p.has(x)) hit++
+  return hit / c.size
+}
+// 出典の中の相手: 2-gram で 0.3 に届かなければ英字の語と数で。当たれば score は SOURCE_MIN 以上
+function sourceMatch(
+  claim: string,
+  paras: readonly string[],
+): { para: string; score: number; score_: Score } | undefined {
+  const top = best(claim, paras)
+  if (!top || top.score >= SOURCE_MIN) return top && { ...top, score_: containment }
+  const w = best(claim, paras, wordShare)
+  return w && w.score >= WORD_MIN
+    ? { para: w.para, score: SOURCE_MIN, score_: wordShare }
+    : { ...top, score_: containment }
 }
 
 // --- compareNumbers（6.3.1 (4)）。ponytail: 「1.2万」のような漢数字の位は数として読まない
@@ -279,11 +313,11 @@ export function buildFacts(
     if (links.length) {
       const scored = links.map((url) => {
         const src = sources.get(url)
-        return { url, top: src?.ok ? best(text, src.paragraphs) : undefined }
+        return { url, top: src?.ok ? sourceMatch(text, src.paragraphs) : undefined }
       })
       const { url, top } = scored.reduce((a, b) => ((b.top?.score ?? -1) > (a.top?.score ?? -1) ? b : a))
       if (!top || top.score < SOURCE_MIN) return { claimId: c.id, kind: '出典あり', sourceRef: url, ...mark }
-      const ex = excerptOf(text, top.para)
+      const ex = excerptOf(text, top.para, top.score_)
       excerpts.set(c.id, ex)
       return { claimId: c.id, kind: '出典あり', sourceRef: url, excerptFingerprint: sha256(ex), ...mark }
     }
@@ -321,11 +355,12 @@ export function buildFacts(
 export const materialsDir = (home: string, caseId: string) => join(caseDir(home, caseId), 'materials')
 export const excerptsDir = (home: string, caseId: string) => join(caseDir(home, caseId), 'facts-excerpts')
 
+// 材料由来の相手は本人が貼った文だけ。ウェブの資料（source-NN.md）は出典で、文の中のリンクで結ぶ（6.3.3 (3)）
 export function readMaterials(home: string, caseId: string): string[] {
   const dir = materialsDir(home, caseId)
   if (!existsSync(dir)) return []
   return readdirSync(dir)
-    .filter((f) => f.endsWith('.md'))
+    .filter((f) => /^pasted-\d+\.md$/.test(f))
     .sort()
     .flatMap((f) => textParagraphs(readFileSync(join(dir, f), 'utf-8')))
 }
