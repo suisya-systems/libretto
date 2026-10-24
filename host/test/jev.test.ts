@@ -80,7 +80,7 @@ const backend = (key: () => string | undefined = () => KEY) =>
   createJev({ key, usdJpy: () => 150, baseUrl: base, log: (l) => logs.push(l) })
 
 describe('jev の中身（7.6 (1)）', () => {
-  it('state と noul の questions で送り、答えを qid ごとに返す。費用は送る前の見積もり', async () => {
+  it('state と noul の questions で送り、答えを qid ごとに返す。usage が無ければ送る前の見積もりで精算', async () => {
     answer(() => 0.82)
     const r = await backend()(call())
     expect(seen).toHaveLength(1)
@@ -95,6 +95,16 @@ describe('jev の中身（7.6 (1)）', () => {
     expect(JSON.parse(r.text)).toEqual({ answers: { 'C01:0': 0.82 } })
     expect(r.costYen).toBeCloseTo(estimateYen(JSON.stringify(seen[0]?.body), 1, 150), 10)
     expect(r.costYen).toBeLessThan(0.01)
+  })
+
+  it('usage があれば実額（input_tokens + output_tokens）で精算する', async () => {
+    reply(200, {
+      model: 'jev-1.14.0',
+      answers: { 'C01:0': { type: 'noul', noul: 0.25 } },
+      usage: { input_tokens: 351, output_tokens: 23 },
+    })
+    const r = await backend()(call())
+    expect(r).toMatchObject({ costYen: expect.closeTo((374 * 0.042 * 150) / 1e6, 10) })
   })
 
   it.each([

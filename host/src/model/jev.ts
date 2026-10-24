@@ -16,9 +16,16 @@ const OVERHEAD_TOKENS = 256
 const ANSWER_TOKENS = 32 // 質問 1 つの答えの枠
 
 const obj = (v: unknown) => (v && typeof v === 'object' ? (v as Record<string, unknown>) : {})
+const count = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : undefined)
+// usage（input_tokens / output_tokens。2026-10-24 に本物で確かめた形）→ 円。欠ければ undefined（見積もりで精算する）
+const usageYen = (usage: unknown, rate: number) => {
+  const u = obj(usage)
+  const i = count(u.input_tokens)
+  const o = count(u.output_tokens)
+  return i === undefined || o === undefined ? undefined : ((i + o) * USD_PER_MTOK * rate) / 1e6
+}
 
-// 送る前の見積もり。1 トークンは 1 バイト以上なので上に倒れる（7.6 (1)）
-// ponytail: 使用量の欄を本物で確かめていないので見積もりで精算する。欄が分かったらそれを読む
+// 送る前の見積もり。1 トークンは 1 バイト以上なので上に倒れる（7.6 (1)。本物で実額の 1.64 倍）。予約を超えないかの検査と、usage が無いときの精算に使う
 export const estimateYen = (body: string, questions: number, rate: number) =>
   ((Buffer.byteLength(body, 'utf8') + OVERHEAD_TOKENS + ANSWER_TOKENS * questions) * USD_PER_MTOK * rate) / 1e6
 
@@ -78,8 +85,11 @@ export function createJev(opts: Opts): Backend {
     const noul = qids.map((q) => obj(answers[q]).noul)
     if (noul.some((n) => typeof n !== 'number' || !(n >= 0 && n <= 1))) {
       log('jev: answers are missing or out of range')
-      return { fail: 'unavailable', costYen: yen }
+      return { fail: 'unavailable', costYen: usageYen(json?.usage, rate) ?? yen }
     }
-    return { text: JSON.stringify({ answers: Object.fromEntries(qids.map((q, i) => [q, noul[i]])) }), costYen: yen }
+    return {
+      text: JSON.stringify({ answers: Object.fromEntries(qids.map((q, i) => [q, noul[i]])) }),
+      costYen: usageYen(json?.usage, rate) ?? yen,
+    }
   }
 }
