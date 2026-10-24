@@ -18,6 +18,8 @@ let conn: ConnectionsView
 let jev: ApiKeyStatus
 let respond: (method: string) => Response
 const sent: { method: string; path: string; body?: unknown }[] = []
+let samples: { id: string; kind: '声の見本'; title: string; where: string }[]
+let voiceStatus: number
 
 beforeEach(() => {
   sent.length = 0
@@ -25,9 +27,25 @@ beforeEach(() => {
   jev = { kind: 'jev', set: true, last4: 'WXYZ', savedAt: '2026-10-24T17:00:00+09:00' }
   conn = { isolation: { level: 'strong', running: false } }
   respond = () => new Response('{}')
+  samples = []
+  voiceStatus = 200
   vi.stubGlobal('fetch', async (path: string, init: RequestInit = {}) => {
     if (path === '/api/settings/keys') return new Response(JSON.stringify({ openai: keys, jev }))
     if (path === '/api/connections') return new Response(JSON.stringify(conn))
+    if (path === '/api/settings/voice-samples') {
+      if (init.method === 'PUT') {
+        const body = JSON.parse(String(init.body))
+        sent.push({ method: 'PUT', path, body })
+        if (voiceStatus !== 200) return new Response('{}', { status: voiceStatus })
+        samples = body.samples.map((x: { title: string; url: string }, i: number) => ({
+          id: `V${i + 1}`,
+          kind: '声の見本',
+          title: x.title,
+          where: x.url,
+        }))
+      }
+      return new Response(JSON.stringify({ samples }))
+    }
     if (path === '/api/checks/run' && init.method) {
       sent.push({ method: init.method, path })
       conn = { isolation: { ...conn.isolation, running: true } }
@@ -49,7 +67,7 @@ async function render() {
   await act(async () => root.render(<Settings />))
   const button = (label: string) =>
     [...el.querySelectorAll('button')].find((b) => b.textContent?.trim() === label) as HTMLButtonElement | undefined
-  const input = () => el.querySelector('input') as HTMLInputElement | null
+  const input = () => el.querySelector('.key-form input') as HTMLInputElement | null
   return {
     el,
     text: () => el.textContent ?? '',
@@ -197,5 +215,58 @@ describe('Jev の API キーの行（7.6 (10)）', () => {
     await r.click(r.button(W['settings.key.save']))
     expect(sent).toEqual([{ method: 'PUT', path: '/api/settings/keys/jev', body: { value: KEY } }])
     r.done()
+  })
+})
+
+describe('あなたの文体の見本（6.3.2 (10)）', () => {
+  const field = (el: HTMLElement, caption: string) =>
+    [...el.querySelectorAll('label')]
+      .find((l) => l.textContent?.includes(caption))
+      ?.querySelector('input') as HTMLInputElement
+  const typeIn = async (i: HTMLInputElement, v: string) => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(i, v)
+    await act(async () => i.dispatchEvent(new Event('input', { bubbles: true })))
+  }
+
+  it('題と URL を登録すると一覧の全体を保存し、外すと除いた一覧を保存する', async () => {
+    const v = await render()
+    expect(v.text()).toContain(W['settings.voiceHeading'])
+    expect(v.text()).toContain(W['settings.voice.empty'])
+    expect(v.button(W['settings.voice.add'])?.disabled).toBe(true)
+    await typeIn(field(v.el, W['settings.voice.title']), '振り返りの話')
+    await typeIn(field(v.el, W['settings.voice.url']), 'https://example.com/a')
+    await v.click(v.button(W['settings.voice.add']))
+    expect(sent.at(-1)).toEqual({
+      method: 'PUT',
+      path: '/api/settings/voice-samples',
+      body: { samples: [{ title: '振り返りの話', url: 'https://example.com/a' }] },
+    })
+    expect(v.text()).toContain(W['settings.voice.saved'])
+    expect(v.text()).toContain('https://example.com/a')
+    const remove = v.el.querySelector(`[aria-label="${w('settings.voice.removeLabel', { title: '振り返りの話' })}"]`)
+    await v.click(remove)
+    expect(sent.at(-1)?.body).toEqual({ samples: [] })
+    v.done()
+  })
+
+  it('形の誤りは入れ直しを促し、5 件あれば登録の欄を出さない', async () => {
+    voiceStatus = 400
+    const v = await render()
+    await typeIn(field(v.el, W['settings.voice.title']), 't')
+    await typeIn(field(v.el, W['settings.voice.url']), 'ftp://example.com')
+    await v.click(v.button(W['settings.voice.add']))
+    expect(v.el.querySelector('[role="alert"]')?.textContent).toBe(W['settings.voice.invalid'])
+    v.done()
+
+    samples = Array.from({ length: 5 }, (_, i) => ({
+      id: `V${i + 1}`,
+      kind: '声の見本' as const,
+      title: `t${i}`,
+      where: `https://example.com/${i}`,
+    }))
+    const full = await render()
+    expect(full.text()).toContain(W['settings.voice.max'])
+    expect(full.button(W['settings.voice.add'])).toBeUndefined()
+    full.done()
   })
 })

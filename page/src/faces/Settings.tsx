@@ -1,7 +1,8 @@
 // 設定の面（画面 7）。API キーの節（docs/implementation.md 6.1.3 (6)。値は画面のどこにも出さない。設計書 D17）と
 // 動作環境の確認の節（8.10 (6)）
-import { type ApiKeyStatus, ConnectionsView, Settings as SettingsSchema } from '@libretto/shared/api'
+import { type ApiKeyStatus, ConnectionsView, MaterialRef, Settings as SettingsSchema } from '@libretto/shared/api'
 import { useId, useState } from 'react'
+import { z } from 'zod'
 import { send, useLoad } from '../load.ts'
 import { Confirm } from '../parts/Dialog.tsx'
 import { W, type WKey, w } from '../wording.ts'
@@ -167,6 +168,129 @@ function KeyRow({ status, reload }: { status: ApiKeyStatus; reload: () => void }
   )
 }
 
+// あなたの文体の見本（6.3.2 (10)）。足す・外すたびに一覧の全体を保存する
+const Samples = z.object({ samples: z.array(MaterialRef) })
+type Sample = z.infer<typeof MaterialRef>
+const MAX_SAMPLES = 5
+type VoiceNotice = 'saved' | 'invalid' | 'failed'
+async function putSamples(samples: { title: string; url: string }[]): Promise<'saved' | 'invalid' | 'failed'> {
+  try {
+    const res = await fetch('/api/settings/voice-samples', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', accept: 'application/json' },
+      body: JSON.stringify({ samples }),
+    })
+    return res.ok ? 'saved' : res.status === 400 ? 'invalid' : 'failed'
+  } catch {
+    return 'failed'
+  }
+}
+
+function VoiceSection({ samples, reload }: { samples: Sample[]; reload: () => void }) {
+  const id = useId()
+  const [title, setTitle] = useState('')
+  const [url, setUrl] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [notice, setNotice] = useState<VoiceNotice>()
+  const save = async (next: { title: string; url: string }[], added: boolean) => {
+    setBusy(true)
+    setNotice(undefined)
+    const r = await putSamples(next)
+    setBusy(false)
+    setNotice(r)
+    if (r === 'saved') {
+      if (added) {
+        setTitle('')
+        setUrl('')
+      }
+      reload()
+    }
+  }
+  const current = samples.map((x) => ({ title: x.title, url: x.where }))
+  const full = samples.length >= MAX_SAMPLES
+  return (
+    <section aria-labelledby="h-voice" className="card pad">
+      <h2 id="h-voice">{W['settings.voiceHeading']}</h2>
+      <p className="muted small">{W['settings.voice.use']}</p>
+      {samples.length ? (
+        <ul className="voice-list">
+          {samples.map((x, i) => (
+            <li key={x.id} className="voice-row">
+              <div className="grow">
+                <p className="strong">{x.title}</p>
+                <a className="muted small voice-url" href={x.where} target="_blank" rel="noopener noreferrer">
+                  {x.where}
+                </a>
+              </div>
+              <button
+                type="button"
+                className="btn btn-quiet btn-sm"
+                disabled={busy}
+                aria-label={w('settings.voice.removeLabel', { title: x.title })}
+                onClick={() =>
+                  void save(
+                    current.filter((_, k) => k !== i),
+                    false,
+                  )
+                }
+              >
+                {W['settings.voice.remove']}
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="muted small">{W['settings.voice.empty']}</p>
+      )}
+      {full ? (
+        <p className="muted small">{W['settings.voice.max']}</p>
+      ) : (
+        <form
+          className="voice-form"
+          onSubmit={(e) => {
+            e.preventDefault()
+            if (title.trim() && url.trim()) void save([...current, { title, url }], true)
+          }}
+        >
+          <label className="voice-field">
+            <span className="small strong">{W['settings.voice.title']}</span>
+            <input value={title} maxLength={80} onChange={(e) => setTitle(e.target.value)} />
+          </label>
+          <label className="voice-field grow">
+            <span className="small strong">{W['settings.voice.url']}</span>
+            <input
+              type="url"
+              inputMode="url"
+              spellCheck={false}
+              placeholder="https://"
+              aria-describedby={notice ? `${id}-n` : undefined}
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+            />
+          </label>
+          <button
+            type="submit"
+            className="btn btn-primary"
+            disabled={busy || !title.trim() || !url.trim()}
+            aria-busy={busy || undefined}
+          >
+            {W['settings.voice.add']}
+          </button>
+        </form>
+      )}
+      {notice && (
+        <p
+          id={`${id}-n`}
+          className={notice === 'saved' ? 'muted small' : 'note-alert small'}
+          role={notice === 'saved' ? 'status' : 'alert'}
+        >
+          {W[`settings.voice.${notice}`]}
+        </p>
+      )}
+    </section>
+  )
+}
+
 type Isolation = ConnectionsView['isolation']
 const LEVEL: Record<Isolation['level'], [string, WKey]> = {
   strong: ['b-done', 'settings.isolation.strong'],
@@ -257,6 +381,7 @@ function EnvSection({ v, reload }: { v: Isolation; reload: () => void }) {
 export function Settings() {
   const keys = useLoad('/api/settings/keys', Keys, (s) => s.event === 'settings.changed')
   const env = useLoad('/api/connections', ConnectionsView, (s) => s.event === 'connections.changed')
+  const voice = useLoad('/api/settings/voice-samples', Samples, (s) => s.event === 'settings.changed')
   return (
     <section className="face">
       <h1 className="face-title">{W['nav.settings']}</h1>
@@ -273,6 +398,7 @@ export function Settings() {
           </section>
         )
       )}
+      {voice.data && <VoiceSection samples={voice.data.samples} reload={voice.reload} />}
       {env.data && <EnvSection v={env.data.isolation} reload={env.reload} />}
     </section>
   )

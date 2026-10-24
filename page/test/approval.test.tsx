@@ -207,6 +207,40 @@ describe('承認の面', () => {
     r.done()
   })
 
+  it('文体の比べ: 文末・一文の長さ・一人称・読み比べを、あなたとこの版で並べる（6.3.2 (9)）', async () => {
+    const r = await render({
+      ...base,
+      review: {
+        ...review(),
+        voiceMatch: {
+          endings: { main: 'です・ます', you: 0.92, draft: 0.5, ok: false },
+          sentenceLength: { you: 38, draft: 41.5, ok: true },
+          firstPerson: { you: '私', draft: '私', ok: true },
+          readAlike: null,
+        },
+      },
+    })
+    expect(r.text()).toContain(W['approval.voiceHeading'])
+    const rows = [...r.el.querySelectorAll('.voice-match tbody tr')].map((tr) =>
+      [...tr.children].map((c) => c.textContent),
+    )
+    expect(rows).toEqual([
+      [w('approval.voice.endings', { main: 'です・ます' }), '92%', '50%', W['approval.voice.ok.false']],
+      [
+        W['approval.voice.sentenceLength'],
+        w('approval.voice.chars', { n: 38 }),
+        w('approval.voice.chars', { n: 42 }),
+        W['approval.voice.ok.true'],
+      ],
+      [W['approval.voice.firstPerson'], '私', '私', W['approval.voice.ok.true']],
+      [W['approval.voice.readAlike'], W['approval.voice.readAlikeNote'], W['approval.voice.ok.null']],
+    ])
+    r.done()
+    const plain = await render(base)
+    expect(plain.text()).not.toContain(W['approval.voiceHeading'])
+    plain.done()
+  })
+
   it('「これで承認する」は見ている版の指紋を approval.ok に添えて送る', async () => {
     const r = await render(base)
     await r.click(r.button(W['approval.ok']))

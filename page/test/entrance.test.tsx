@@ -5,7 +5,7 @@ import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { EntranceFace } from '../src/faces/Entrance.tsx'
-import { W } from '../src/wording.ts'
+import { W, w } from '../src/wording.ts'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -210,6 +210,23 @@ describe('依頼の確認', () => {
     expect(other.text()).toContain(W['entrance.otherFamily'])
     expect(other.el.querySelector('a[href="/settings"]')).toBeNull()
     other.done()
+  })
+
+  it('文体: 見本から読み取ったこと、読めなかったときの設定への道、過去の文章で確かめた結果（6.3.2 (2)(5)）', async () => {
+    const items = entrance.checks.items.map((x) => (x.id === 'C01' ? { ...x, own: 'fail' as const } : x))
+    const at = (voice: { docs: number; card: boolean }) =>
+      render({ ...base, entrance: { ...entrance, checks: { ...entrance.checks, family: '別系統', items, voice } } })
+    const made = await at({ docs: 2, card: true })
+    expect(made.text()).toContain(w('entrance.voice.made', { n: 2 }))
+    expect(made.el.querySelector('a[href="/settings"]')).toBeNull()
+    await made.click(made.button(W['entrance.checksShow']))
+    expect(made.text()).toContain(W['entrance.own.fail'])
+    expect(made.text()).not.toContain(W['entrance.own.pass'])
+    made.done()
+    const none = await at({ docs: 0, card: false })
+    expect(none.text()).toContain(W['entrance.voice.none'])
+    expect(none.el.querySelector('a[href="/settings"]')?.textContent).toBe(W['entrance.voice.link'])
+    none.done()
   })
 
   it('渡してほしいものがあれば依頼書の表に出し、進めると貼り付けてもらうことを書く', async () => {

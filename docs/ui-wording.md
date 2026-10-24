@@ -287,6 +287,11 @@ libretto の画面に出す言葉の正本。設計書（[`docs/design.md`](./de
 | `entrance.fallback.no_key` | 設定で API キーを入れると、別の種類の AI が作ります。 |
 | `entrance.fallback.unavailable` | 別の種類の AI につながりませんでした。設定の API キーを確かめてください。 |
 | `entrance.fallback.link` | 設定を開く |
+| `entrance.voice.made` | 見本 {n} 件から、あなたの文体を読み取りました。ライターはこの文体で書きます。 |
+| `entrance.voice.none` | あなたの文体の見本を読めなかったので、文体は合わせません。 |
+| `entrance.voice.link` | 設定で見本を登録する |
+| `entrance.own.pass` | あなたの過去の文章は通ります |
+| `entrance.own.fail` | あなたの過去の文章も通りません |
 | `entrance.checksShow` | すべての項目を見る |
 | `entrance.checksHide` | 閉じる |
 | `entrance.ifNg` | NG のときライターに返す一言: |
@@ -467,6 +472,20 @@ libretto の画面に出す言葉の正本。設計書（[`docs/design.md`](./de
 | `approval.source.開けない` | 開けませんでした |
 | `approval.source.未判定` | まだチェックしていません |
 | `approval.sourceClaims` | 主張 {n} 件 |
+| `approval.voiceHeading` | あなたの文体と比べました |
+| `approval.voice.item` | 比べたこと |
+| `approval.voice.you` | あなた |
+| `approval.voice.draft` | この版 |
+| `approval.voice.result` | 結果 |
+| `approval.voice.endings` | 文末（{main}の割合） |
+| `approval.voice.sentenceLength` | 一文の長さ（中ほどの値） |
+| `approval.voice.firstPerson` | 一人称 |
+| `approval.voice.chars` | {n} 字 |
+| `approval.voice.readAlike` | 過去の文章との読み比べ |
+| `approval.voice.readAlikeNote` | 並べて読み、同じ人が書いたように読めるか |
+| `approval.voice.ok.true` | 合っています |
+| `approval.voice.ok.false` | 違います |
+| `approval.voice.ok.null` | まだです |
 | `approval.sourceOpens` | 別のタブで開く |
 
 **送付の面（画面 5。実装設計書 6.2.8 (6)）**
@@ -544,6 +563,18 @@ libretto の画面に出す言葉の正本。設計書（[`docs/design.md`](./de
 | `settings.key.deleted` | 削除しました。 |
 | `settings.key.invalid` | 8 文字以上の半角の英数字と記号で入れてください。空白は入れられません。 |
 | `settings.key.failed` | 保存できませんでした。もう一度お試しください。 |
+| `settings.voiceHeading` | あなたの文体の見本 |
+| `settings.voice.use` | あなたが書いた文章のページを登録すると、依頼で「あなたの文体に合わせる」を選んだときに、ライターがその文体で書きます。 |
+| `settings.voice.empty` | まだ登録していません。 |
+| `settings.voice.title` | 題 |
+| `settings.voice.url` | ページの URL |
+| `settings.voice.add` | 登録 |
+| `settings.voice.remove` | 外す |
+| `settings.voice.removeLabel` | 「{title}」を外す |
+| `settings.voice.max` | 登録できるのは 5 件までです。足すときは、どれかを外してください。 |
+| `settings.voice.saved` | 保存しました。次の依頼から使います。 |
+| `settings.voice.invalid` | 題と、http か https で始まる URL を入れてください。 |
+| `settings.voice.failed` | 保存できませんでした。もう一度お試しください。 |
 | `settings.envHeading` | 動作環境の確認 |
 | `settings.isolation.label` | チェック項目をライターから隠す仕組み |
 | `settings.isolation.use` | ライターには、チェック項目のファイルが見えない場所で下書きを書かせます。 |

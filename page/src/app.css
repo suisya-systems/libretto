@@ -2042,6 +2042,36 @@ input:disabled {
   margin: -10px 0;
   line-height: 1.5;
 }
+/* 文体カードとの比べ（6.3.2 (9)）: 項目 / あなた / この版 / 合っているか */
+.voice-match {
+  width: 100%;
+  border-collapse: collapse;
+}
+.voice-match th,
+.voice-match td {
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+  vertical-align: top;
+  border-top: 1px solid var(--color-line);
+  overflow-wrap: anywhere;
+}
+.voice-match thead th {
+  border-top: 0;
+  padding-top: 0;
+  font-weight: 700;
+  color: var(--color-muted);
+}
+.voice-match tbody th {
+  font-weight: 500;
+}
+.voice-match td {
+  font-variant-numeric: tabular-nums;
+}
+.voice-match td:last-child {
+  width: 1px;
+  white-space: nowrap;
+  text-align: right;
+}
 @media (max-width: 720px) {
   .segment {
     align-self: stretch;
@@ -2501,9 +2531,55 @@ input:disabled {
   font-weight: 500;
   overflow-wrap: anywhere;
 }
+/* 設定（あなたの声の見本）。見本の行は API キーの行と同じ作り、追加の枡は key-form と同じ沈んだ面 */
+.voice-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.voice-row {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  padding: var(--space-3) 0;
+}
+.voice-row + .voice-row {
+  border-top: 1px solid var(--color-line);
+}
+.voice-row p {
+  margin: 0;
+}
+.voice-row .btn {
+  flex: none;
+}
+.voice-url {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.voice-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-3);
+  border-radius: var(--radius);
+  background: var(--color-sunken);
+}
+.voice-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  flex: 1 1 200px;
+  min-width: 0;
+}
+.voice-form input {
+  font-size: var(--text-base);
+}
 @media (max-width: 720px) {
   .key-form .btn,
-  .key-actions .btn {
+  .key-actions .btn,
+  .voice-form .btn {
     flex: 1 1 auto;
   }
 }
