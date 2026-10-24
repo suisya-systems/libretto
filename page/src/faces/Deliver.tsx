@@ -183,7 +183,7 @@ export function ResultFace({ c }: { c: CaseView }) {
   }
 
   return (
-    <section className="face progress result">
+    <section className="face progress result-face">
       <Link href="/" className="back">
         ← {W['case.back']}
       </Link>

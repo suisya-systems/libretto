@@ -2142,3 +2142,183 @@ input:disabled {
     padding: 10px 12px;
   }
 }
+
+/* 送付の面（画面 5。6.2.8 (6)）・成果の面（6.2.8 (7)）・完了した依頼（6.2.8 (9)） */
+/* ゲート③「何を・どこへ・誰に見えるか」: 白い面に 3 行、左に項目・右に値。確認の要約として一目で読める */
+.gate {
+  margin: var(--space-1) 0 0;
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  box-shadow: inset 4px 0 0 var(--color-turn);
+  overflow: hidden;
+}
+.now .gate > div {
+  display: grid;
+  grid-template-columns: 8em minmax(0, 1fr);
+  gap: var(--space-1) var(--space-4);
+  align-items: baseline;
+  padding: var(--space-3) 18px;
+}
+.now .gate > div + div {
+  border-top: 1px solid var(--color-line);
+}
+.gate dt {
+  font-size: var(--text-sm);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--color-muted);
+}
+.gate dd {
+  margin: 0;
+  font-size: var(--text-lg);
+  overflow-wrap: anywhere;
+}
+.gate .strong {
+  font-size: var(--text-xl);
+}
+.gate-targets {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-weight: 700;
+}
+.now .gate .gate-targets li {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+.now .gate .gate-targets li::before {
+  content: "";
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 2px solid var(--color-turn);
+  transform: translateY(-1px);
+}
+/* 形のチェックが通った 1 行: 承認の面の ✓ と同じ描き方 */
+.deliver-checked {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-done);
+  font-weight: 700;
+}
+.deliver-checked::before {
+  content: "✓";
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-done);
+  color: var(--color-action-ink);
+  font-size: var(--text-sm);
+  line-height: 1;
+}
+/* 届け先ごとの見え方 / 受け取り口 */
+.target-title {
+  font-family: var(--font-body);
+  font-size: 17px;
+  line-height: 1.4;
+}
+.target .row-gap {
+  gap: var(--space-3);
+}
+/* 貼り付け用の文: 等幅にせず本文の字で、改行を保ち、長ければ欄の中で送る */
+.paste-preview {
+  margin: 0;
+  max-height: 360px;
+  overflow: auto;
+  padding: 14px 18px;
+  border-radius: var(--radius);
+  background: var(--color-sunken);
+  border: 1px solid var(--color-line);
+  font: inherit;
+  font-size: var(--text-base);
+  line-height: 1.8;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* 完了: 緑の枠（琥珀の「あなたの番」・青の「動いている」と並べても取り違えない） */
+.now-done {
+  border: 2px solid color-mix(in srgb, var(--color-done) 55%, var(--color-line));
+  background: color-mix(in srgb, var(--color-done-bg) 55%, var(--color-surface));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-done) 10%, transparent);
+}
+.now-eyebrow-done {
+  color: var(--color-done);
+}
+.now-eyebrow-done::before {
+  content: "✓";
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-done);
+  color: var(--color-action-ink);
+  font-size: var(--text-xs);
+  line-height: 1;
+}
+.now-done .approval-actions {
+  margin-top: var(--space-3);
+}
+/* 完了した依頼の一覧: 題と完了日を左、「開く」を右 */
+.done-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.done-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3) var(--space-4);
+  padding: 14px var(--space-6);
+  overflow-wrap: anywhere;
+}
+.done-row + .done-row {
+  border-top: 1px solid var(--color-line);
+}
+.done-row .grow {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.done-row .strong {
+  font-size: 17px;
+}
+.done-row time {
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 720px) {
+  .now .gate > div {
+    padding: var(--space-3) 14px;
+  }
+  .paste-preview {
+    max-height: 280px;
+    padding: 12px 14px;
+  }
+  .target .row-gap .btn {
+    flex: 1 1 100%;
+  }
+  .done-row {
+    padding: 14px 18px;
+  }
+}
+/* 390px: 項目と値を縦に */
+@media (max-width: 390px) {
+  .now .gate > div {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+}

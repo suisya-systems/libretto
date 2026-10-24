@@ -156,11 +156,11 @@ const STYLE = `
 @media (prefers-color-scheme:dark){:root{--ink:#ecebe6;--muted:#a8a49b;--line:#3a3833;--page:#191816;--accent:#9fb4ea}}
 *{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%}
-body{margin:0;background:var(--page);color:var(--ink);font-family:"Hiragino Sans","Hiragino Kaku Gothic ProN","Yu Gothic","YuGothic","Noto Sans JP",sans-serif;font-size:17px;line-height:1.95;letter-spacing:.02em;font-feature-settings:"palt" 0}
+body{margin:0;background:var(--page);color:var(--ink);font-family:"Hiragino Sans","Hiragino Kaku Gothic ProN","Yu Gothic","YuGothic","Noto Sans JP",sans-serif;font-size:17px;line-height:1.95;letter-spacing:.02em;font-feature-settings:"palt" 0;overflow-wrap:anywhere}
 main{max-width:40rem;margin:0 auto;padding:4.5rem 1.5rem 3.5rem}
 article>:first-child{margin-top:0}
 h1,h2,h3{font-family:"Hiragino Mincho ProN","Yu Mincho","YuMincho","Noto Serif JP",serif;font-weight:600;line-height:1.5;letter-spacing:.03em}
-h1{font-size:1.9rem;margin:0 0 2.25rem;padding-bottom:1.25rem;border-bottom:1px solid var(--line)}
+h1{font-size:1.9rem;text-wrap:balance;margin:0 0 2.25rem;padding-bottom:1.25rem;border-bottom:1px solid var(--line)}
 h2{font-size:1.35rem;margin:3rem 0 1rem}
 h3{font-size:1.1rem;margin:2.25rem 0 .75rem}
 p{margin:0 0 1.35em}
