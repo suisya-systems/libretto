@@ -676,6 +676,31 @@ describe('文体カード（6.3.2）', () => {
     expect(p?.materials.map((m) => m.name)).toEqual(['文体カード', '本人の文章'])
   })
 
+  it('前の組み立てで取った出典は書き直す（今の組の見本になった本文を作業場に残さない）', async () => {
+    makers.length = 0
+    await setup(script(...rows, ['事実係・描写', portrait]), hangMaker)
+    await putSamples([{ title: '振り返りの話', url: VOICE_URL }])
+    await postJson('/api/conversation/messages', { requestId: uuid(), lastSeq: 0, text: '記事にして' })
+    await server.conversation.settled()
+    const id = ledger.lastMessage('lobby')?.caseId as string
+    await vi.waitFor(() => expect(ledger.getCase(id)?.turn).toBe('本人'), { timeout: 2000, interval: 5 })
+    const old = `# 過去の記事\n\n${VOICE_URL}\n\n${VOICE_PARA_1}\n`
+    for (const dir of [join(caseDir(home, id), 'materials'), work(id, 'materials')]) {
+      mkdirSync(dir, { recursive: true })
+      writeFileSync(join(dir, 'source-01.md'), old)
+    }
+    const v = await caseView(id)
+    await act(id, {
+      type: 'entrance.approve',
+      answers: { U01: ['b'] },
+      mode: '確認しながら',
+      setFingerprint: v.entrance?.setFingerprint,
+    })
+    await vi.waitFor(() => expect(makers).toHaveLength(1), { timeout: 2000, interval: 5 })
+    expect(readdirSync(join(caseDir(home, id), 'materials'))).toEqual([])
+    expect(allWorkText(id)).not.toContain(VOICE_PARA_1.slice(0, 20))
+  })
+
   it('見本が 1 つも開けなければカードを作らず、ホストの声の項目も足さない', async () => {
     makers.length = 0
     await setup(script(...rows), hangMaker)

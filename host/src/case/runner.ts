@@ -93,6 +93,11 @@ export function createRunner(d: Deps) {
     ].filter((u) => !voiceUrls.has(sameUrl(u)))
     const got = await fetchCached(home, c.caseId, urls, signal, d.fetch)
     if (signal.aborted) return false
+    // 取り寄せた出典は組み立てのたびに書き直す（前の組で取った出典が、今の組の見本になっていても残さない）
+    const work = workDir(home, c.caseId)
+    for (const dir of [src, join(work, 'materials')])
+      if (existsSync(dir))
+        for (const f of readdirSync(dir)) if (/^source-\d+\.md$/.test(f)) rmSync(join(dir, f), { force: true })
     let k = 0
     for (const url of urls) {
       const f = got.get(url)
@@ -104,7 +109,6 @@ export function createRunner(d: Deps) {
       )
     }
     // 作業場の materials/ は写し。照合は正本だけを読む（作り手は作業場に書ける）
-    const work = workDir(home, c.caseId)
     mkdirSync(join(work, 'materials'), { recursive: true, mode: 0o700 })
     // gathered.json（集め役の出力）は写さない。作り手が読むのは資料の本文だけ（6.3.3 (6)）
     for (const f of readdirSync(src)) if (f.endsWith('.md')) copyFileSync(join(src, f), join(work, 'materials', f))
