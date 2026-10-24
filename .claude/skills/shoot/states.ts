@@ -172,7 +172,7 @@ const toDone = async (ctx: Ctx) => {
   await ctx.act({ type: 'delivery.send', planFingerprint: (await ctx.view()).deliveryPlan.fingerprint })
   await ctx.until((v) => v.state === '完了')
 }
-// 出典付きの依頼: 出典のリンクの付いた主張と、要確認の印の付いた主張を 1 つずつ（6.3.1 (1)）
+// 出典付きの依頼: 出典のリンクの付いた主張と、【要確認】の付いた（出典が見つからなかった）文を 1 つずつ（6.3.1 (1)）
 const SURVEY = 'https://example.com/survey'
 const factBody = body(2).replace(
   '\n\n## なぜそう決めたか',
@@ -357,7 +357,7 @@ export const STATES: Record<string, State> = {
     mark: w('approval.judgeModel', { units: paragraphUnits(body(2)).length }),
     selector: '.doc-body',
   },
-  // 承認: 出典付きの依頼で、要確認の印が 1 つと、裏付けのある出典が 1 つ（6.3.1 (11)）
+  // 承認: 出典付きの依頼で、出典が見つからなかった文が 1 つと、裏付けのある出典が 1 つ（6.3.1 (11)）
   'approval-facts': {
     script: factRows,
     fetch: fakeSurvey,

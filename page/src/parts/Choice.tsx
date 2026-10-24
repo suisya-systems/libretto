@@ -43,7 +43,7 @@ export function Choose(p: {
   )
 }
 
-// 小さな二択（承認の面の「印のまま出す / 削る」）。押せる幅は 44px 以上
+// 小さな二択（承認の面の「【要確認】を付けて残す / この文を削る」）。押せる幅は 44px 以上
 export function Segment(p: {
   label: string
   value: string
