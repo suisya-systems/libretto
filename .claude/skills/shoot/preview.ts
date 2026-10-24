@@ -11,13 +11,23 @@ import { CaseView } from '@libretto/shared/api'
 import { initHome } from '../../../host/src/ledger/db.ts'
 import { createFake, type ScriptEntry } from '../../../host/src/model/fake.ts'
 import { createInvoke } from '../../../host/src/model/invoke.ts'
+import { setKey } from '../../../host/src/model/keys.ts'
 import { createServer } from '../../../host/src/server/app.ts'
 import { W } from '../../../page/src/wording.ts'
-import { type Ctx, STATES } from './states.ts'
+import { type Ctx, SHOOT_KEY, STATES } from './states.ts'
 
 const [name = '', port = ''] = process.argv.slice(2)
 if (name === '--list') {
   console.log(Object.keys(STATES).join('\n'))
+  process.exit(0)
+}
+if (name === '--same-first-390') {
+  console.log(
+    Object.entries(STATES)
+      .filter(([, s]) => s.sameFirst390)
+      .map(([k]) => k)
+      .join('\n'),
+  )
   process.exit(0)
 }
 const def = STATES[name]
@@ -35,10 +45,11 @@ const script: ScriptEntry[] = def.script.map(([role, reply]) => {
 
 const home = mkdtempSync(join(tmpdir(), `libretto-shoot-${name}-`))
 const ledger = initHome(home)
+if (def.openaiKey) setKey(home, 'openai', SHOOT_KEY)
 const fake = createFake(script)
 const invoke = createInvoke({
   ledger,
-  backends: { claude: fake.backend },
+  backends: { claude: fake.backend, openai: fake.backend },
   caps: () => ({ caseCapYen: 1500, monthCapYen: null }),
   onCostCap: () => {},
   log: () => {},

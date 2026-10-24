@@ -283,6 +283,13 @@ function EntranceSet(p: {
           </h2>
           <p className={e.checks.family === '同系統' ? 'note-warn small' : 'muted small'}>
             {e.checks.family === '同系統' ? W['entrance.sameFamily'] : W['entrance.otherFamily']}
+            {e.checks.fallback && (
+              <>
+                {' '}
+                {W[`entrance.fallback.${e.checks.fallback}`]}{' '}
+                <Link href="/settings">{W['entrance.fallback.link']}</Link>
+              </>
+            )}
           </p>
           <ul className="cats">
             {cats.map(([k, n]) => (

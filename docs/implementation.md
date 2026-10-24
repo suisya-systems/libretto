@@ -305,6 +305,7 @@ stateDiagram-v2
 | `GET /api/settings` / `PUT /api/settings` | 接続と合図 | `Settings`（5.3） | `Settings` |
 | `PUT /api/settings/keys/:kind` | API キーを入れる・入れ直す（`kind` = `openai` / `jev`。オーナーが設定の面で入れる。設計書 D17） | `{ value: string }`（前後の空白を落とす。8 文字未満・空白や改行入りは `400`。5.7 (7)） | `ApiKeyStatus`（`{ kind, set: true, last4, savedAt }`）。**値は返さない** |
 | `DELETE /api/settings/keys/:kind` | API キーを削除する | — | `ApiKeyStatus`（`{ kind, set: false }`）。以後は設計書 D17 の落ち方（別系統 → 同系統、Jev → Claude） |
+| `GET /api/settings/keys` | API キーの状態（設定の面の API キー欄。`GET /api/settings` ができたらその `apiKeys` に移して消す。6.1.3 (6)） | — | `Record<ApiKeyKind, ApiKeyStatus>`。**値は返さない** |
 | `POST /api/connections/:kind/start` | 接続する（`google` / `slack`） | — | `{ url }`（本人がブラウザで開く） |
 | `POST /api/devices` | 「別の端末を追加する」（新しいペアリング URL を 1 回分出す。5.4） | `{ label }` | `{ url, expiresAt }` |
 | `DELETE /api/devices/:sessionId` | 端末を外す | — | — |
@@ -919,6 +920,78 @@ type Outcome =                         // costYen は全部の呼び出しの精
 - ここで確かめたのは**CLI 単体の旗と結果の形**まで。`srt` の設定の生成（8.3 の案件ごとの `filesystem` / `network`）、`srt` で包んだ起動、隔離の点検（8.4）、素の Windows の読み取り拒否の規則（8.5）は Issue 14・15（S2）で確かめる。中身は起こす命令を `command`（先頭の引数の並び）で受けるので、S2 はそこに `srt --settings <設定>` を前置する。
 - `--setting-sources ''` は上の短い `-p` で受け付けたので、8.3 の切り替え先（`--setting-sources user` ＋ libretto 専用のホーム）は使わない。
 
+### 6.1.3 `openai` と別系統の確認項目の決め事（Issue 16 の着手前の設計レビューで決めたこと）
+
+6.1・6.1.1・6.2.2 (3)・10.2 だけでは決まらない点を決める。中身は `host/src/model/openai.ts` の 1 つで、`createOpenai({ key, usdJpy, baseUrl?, log? })` が `Backend` を返す。v1 で openai を使う役割は `下書き役・確認項目`（`access: none`）だけ。
+
+**(1) 呼び方と JSON 出力**
+
+決めたこと:
+- `POST https://api.openai.com/v1/responses` を `fetch` で。本文は `{ model, input, text: { format: { type: 'json_object' } }, max_output_tokens, store: false, service_tier: 'default', prompt_cache_options: { mode: 'explicit' } }`。`input` は claude-cli と同じ文書（指示の全文と材料の枠。6.1.2 (4)）。`service_tier: 'default'` は、鍵のプロジェクトの既定が高い層（優先処理など）でも標準の単価で呼ぶため（費用の計算と予約は標準の単価で行う）。
+- **JSON モード（`json_object`）にし、`json_schema` の strict は使わない**。理由: `Check.judge` の `args` は自由な形のオブジェクトで、`minority` のような任意の欄もあり、strict の制約（全欄必須・`additionalProperties: false`）では表せない。strict でない `json_schema` は形を保証しない。型の検査は他の系統と同じく `invoke` の zod＋受け入れ規則＋言い直し 1 回（6.1.1 (4)）で受ける。
+- `store: false` は応答をあとから取り出せる形で OpenAI に残させないだけで、不正利用の監視のための保存は残る。0 日保存は v1 の前提にしない（要るならオーナーのアカウント側の設定）。
+- ファイルの材料と `access: none` 以外は受けない（例外 → `unavailable`）。
+- モデル: 役割の表の `model: 'codex'` を `openai.ts` の表で API の名前と単価に直す。v1 は `gpt-6-astra`（入力 10・キャッシュ読み 1・キャッシュ書き 12.5（30 分）/ 25（12 時間）・出力 50 ドル / 100 万トークン。2026-10-24 に OpenAI の価格表で確認）。理由: 設計書の「Codex」は Codex が使う最上位のモデルのこと。確認項目の下書きは 1 案件 1 回で、入力 1 万・出力 4 千トークンなら約 45 円。差し替えは表の 1 行。
+
+**(2) 予約額を実際の上限にする**
+
+決めたこと:
+- 送る前に入力の上限を見積もる: (`input` の UTF-8 のバイト数＋要求の枠の 256) トークン × 入力の最も高い単価（キャッシュ書き 30 分の 12.5）。1 トークンは 1 バイト以上なので、字の種類によらず上に倒れる（文字数だと、珍しい漢字のように 1 字が複数トークンになる文で下回る）。
+- `max_output_tokens = floor((maxYen ÷ usdJpy − 入力の上限) ÷ 出力単価 × 10^6)`。推論のトークンもこの中に入るので、1 回の費用は `maxYen` を超えない。2,000 未満なら送らずに `unavailable`（0 円）。
+- `status: 'incomplete'`（上限に当たった）は `unavailable`（usage の額）。**openai は `budget` を返さない**。理由: `budget` は `cost.cap` で案件を止める（6.1.1 (1)）。確認項目は同系統で書き直せるので、止めるより (4) で落とす。
+
+理由: `invoke` は中身が返した額をそのまま精算するので、中身が上限を守らなければ予約は上限にならない（claude-cli は `--max-budget-usd` で守る）。入力の上限で 272K トークンの長文の単価にも届かない。
+
+**(3) 費用と応答の読み方**
+
+決めたこと:
+- 費用 = 非キャッシュの入力 × 10 ＋ `input_tokens_details.cached_tokens` × 1 ＋ `cache_write_tokens_details.ttl_30m_tokens` × 12.5 ＋ `ttl_12h_tokens` × 25 ＋ `output_tokens` × 50（ドル / 100 万トークン）× `usdJpy`（呼び出しの頭で 1 回だけ読む。6.1.2 (5)）。非キャッシュの入力 = `input_tokens − cached − 書き込み`。`prompt_cache_options` の explicit で区切りを置かないのでキャッシュは使わない見込みだが、載った分は数える。usage が欠ける・数でない・負なら `null`（予約の全額）。
+- 応答の表（上から当てる）:
+
+| 条件 | `Reply` | 費用 |
+|---|---|---|
+| 呼ぶときに鍵が無い | `{ fail: 'unavailable' }` | 0（送っていない） |
+| 入力の上限で出力の枠が 2,000 トークン未満 | `{ fail: 'unavailable' }` | 0 |
+| 網の失敗（止めた・時間切れ以外の `fetch` の例外） | 例外 → `unavailable` | `null` |
+| `429` で `error.code = 'insufficient_quota'` | `{ fail: 'unavailable' }`（待っても直らない） | 0 |
+| `429` / `500` / `503` | `{ fail: 'unavailable', why: 'rate_limited' }`（`invoke` が 60 秒後に 1 回再試行。6.1.2 (3)） | 0 |
+| その他の 4xx / 5xx（`401` の鍵の誤り・失効を含む） | `{ fail: 'unavailable' }` | 0 |
+| `200` で本文が読めない・`status` が `completed` でない・出力の文が無い | `{ fail: 'unavailable' }` | usage の額か `null` |
+| `200`・`completed` | `{ text }`（`output` の `message` の `output_text` を順に連結） | usage の額 |
+
+- **`why: 'auth_expired'` は付けない**。理由: その印は runner が「Claude のログインし直し待ち」に入る合図（6.1.2 (3)）で、OpenAI の鍵の誤りで Claude の呼び出しを止めてはいけない。
+- 失敗の要求は OpenAI が課金しないので 0 円。
+- **結果のファイル（9.4 (7)）は書かない**。理由: 応答はホストのプロセスが受け取るので、ホストが途中で落ちれば応答はどこにも残らない。書いても 1 行目しか残らず、ファイルが無いときと同じく予約の額で確定する。
+
+**(4) 鍵の取り出しと、鍵を漏らさない形**
+
+決めたこと:
+- 鍵は**呼び出しのたびに** `keys.ts` の `readKey` で読む（入れ直し・削除が次の呼び出しから効く）。値を置くのは `Authorization` の見出しの 1 か所だけで、`Call`・`Reply`・log・開発用の出力（`debugDir`）に入れない。
+- log に書くのは状態コードと `error.code` / `error.type` だけ。OpenAI の `error.message` は書かない。理由: `401` の文は鍵の頭と末尾を伏せ字にして返すので、末尾の文字が log に残る。
+- 中身の例外は `new Error('openai: <種類>')` に包み直して投げる（元の例外も `cause` も付けない）。理由: `invoke` は中身の例外のスタックを log に書く（6.1.1 (6)）。`fetch` の見出しの例外は値をそのまま文に載せる。
+- `ApiKeyInput` は印字できる ASCII（`0x21〜0x7e`）だけを受ける（5.7 (7) を狭めた）。理由: 制御文字を含む鍵は見出しに置けず、その例外の文に鍵の全体が載る。OpenAI と TypeSafe の鍵は ASCII なので、正しい鍵を拒むことは無い。
+- 子プロセスの環境変数は許可一覧のまま（6.1.2 (1)。`OPENAI_API_KEY` は入らない）。`api-keys.json` が作り手のセッションから読めないことは srt（Issue 14）の `denyRead` で守り、srt 越しのテストは Issue 14 が入ってから足す（Issue 14 より先に取り込まない）。
+
+**(5) 入口の落ち方（6.2.2 (3) を直した）**
+
+決めたこと:
+- 確認項目の下書きを 2 段にする。(i) `keyStatus(home, 'openai').set` が真なら `fallback` 無しで呼ぶ（別系統）。指示は少数派の決まりを外した版、受け入れ規則は少数派を求めない。(ii) (i) が `ok` なら `family: '別系統'`。鍵が無い、または (i) が `unavailable` / `timeout` / `invalid_output` なら、`fallback: true`（Claude の別セッション）で少数派の決まり付きの指示を呼ぶ（S1 と同じ）。`family: '同系統'`。(iii) (i) が `stopped` / `budget` なら落とさず、今までどおり入口の失敗にする（止めた・上限に達した案件で別の呼び出しを始めない）。
+- 鍵の有無は呼ぶ前に `keyStatus`（値は取り出さない）で見る。理由: 鍵が無いのに呼ぶと、送らない呼び出しの予約が台帳に立つ。
+- `invalid_output` でも落とす理由: 別系統の出力が 2 回とも型か 7.2 に通らなかったとき、入口を失敗（T6b）にするより、同系統で書いて「同系統」と表示する方が本人の手が止まらない。どちらで書いたかは `family` と表示で必ず分かる。
+- 落ちた理由を `ChecksFile.fallback?: 'no_key' | 'unavailable'`（`同系統` のときだけ）に残し、`ChecksSummary.fallback` で画面に渡す。値は識別子で、画面は `wording.ts` で引く。
+- 別系統の失敗のあとの同系統の呼び出しは別の `invoke`（別の予約・精算）。
+
+**(6) 表示と設定の面**
+
+決めたこと:
+- 入口の面の確認項目の 1 行: `別系統` は今の文。`同系統` の `no_key` は「設定で API キーを入れると、別の種類の AI が作ります」、`unavailable` は「別の種類の AI につながりませんでした。設定の API キーを確かめてください」を足し、設定へのリンクを付ける（本人ができるのは設定を見ることだけ）。承認の面の注記（`familyNote`）は今のまま。
+- **`GET /api/settings/keys`**（応答は `Settings.apiKeys` の形）を足し、`GET /api/settings` はまだ作らない。理由: `Settings` の他の欄を読む `settings.json` がまだ無く、既定の値で埋めて返すと、効いていない設定を今の設定として見せる。設定の Issue が `GET /api/settings` を作るとき、この欄はその応答の `apiKeys` に移り、この経路は消す。
+- 画面 7（設定）には「API キー」の節だけを出す。OpenAI の 1 行（Jev の行は Issue 17 が同じ部品で足す）: 未設定なら入力欄と「保存」、設定済みなら「設定済み（末尾 1a2b）」と保存した日、「入れ直す」「削除」（確かめのダイアログ付き）。値は画面のどこにも出さない。
+
+**(7) 10.2 の再試行の回数**
+
+10.2 の OpenAI の行の「`rate_limited`（2 回再試行後）」を「1 回再試行後」に直した。理由: 再試行は依存ごとに 1 か所（10.1）で、`invoke` が 1 回を持つ（6.1.2 (3)）。この依存だけ別の回数を持たせない。
+
 ### 6.2 役割ごとの入出力
 
 受け取るものと返すものを型で決める。「渡さないもの」は型に無いことで守り、ファイルを読む役割（作り手）だけは 8 章の作業場で守る。
@@ -1087,7 +1160,7 @@ S1 で作らないもの: openai アダプタと「鍵があれば別系統」�
 
 決めたこと:
 - 役割 `下書き役・確認項目`、`access: none`、`maxYen = 160`、`timeoutMs = 600_000`。
-- **S1 は必ず同系統（Claude の別セッション）に「少数派を選ぶ」指示を足して流す**（設計書 5.8.1 の「Codex が無い」列）。`host/src/model/roles.ts` に「別系統が使えないときの受け皿」の表 `FALLBACK`（`下書き役・確認項目` → Claude の Opus）を置き、`Job` に `fallback?: true` を足して、`invoke` はそのときこの表の行で呼ぶ。`checks.json` の `family` は `'同系統'`。鍵の有無で別系統を選ぶのは Issue 16。
+- **S1 は必ず同系統（Claude の別セッション）に「少数派を選ぶ」指示を足して流す**（設計書 5.8.1 の「Codex が無い」列）。`host/src/model/roles.ts` に「別系統が使えないときの受け皿」の表 `FALLBACK`（`下書き役・確認項目` → Claude の Opus）を置き、`Job` に `fallback?: true` を足して、`invoke` はそのときこの表の行で呼ぶ。`checks.json` の `family` は `'同系統'`。鍵の有無で別系統を選ぶのは Issue 16（6.1.3 (5) で決めた）。
 - 材料: `依頼`（`summary` と `heard`）、`依頼書の形` = `{ docType, destinations, shape, voice, sources }`、出し直しなら `前のチェック項目` と `本人の指示`。**依頼書の audience・mustNot・deadline と仮定は渡さない**（設計書 5.1）。
   - 6.2 の `briefShape` の `length` / `headings` は、`Brief.shape` が「2,500 字前後、見出し 4〜5」の 1 つの文なので、数に分けず `shape` の文のまま渡す。`voice` と `sources` を足すのは、7.2 の「最低限の顔ぶれ」（声・事実が要るか）を下書き役が満たせるようにするため（満たしようのない指示で言い直しを使い切らない）。どちらも 2 値の形で、依頼の中身の解釈ではない。
 - 出力 `ChecksDraft = { checks: Check[] }`（7.1）。受け入れ規則は (4)。
@@ -2383,7 +2456,7 @@ CREATE UNIQUE INDEX conversation_one_per_request ON conversation_messages(reques
 - **起動処理（#6）との境界**: 精算するのは `settleOrphans(ledger, callsDir)` の 1 つ（#33）。起動処理（`host/src/index.ts`）は台帳を開いた直後、`STOP` の確認（5.7 (3)）・HTTP・runner より**前に**これを呼んで終わるまで待つ。この時点で新しい呼び出しはまだ無いので、未精算の `hold` は全部、前のホストの呼び出しになる。精算が例外で終われば起動しない（台帳に書けない状態で呼び出しを始めない）。精算が済んだら `calls/` に残ったファイルを全部消す（生きている呼び出しは無いので、残りは精算済みの呼び出しで消し損ねたもの）。
 - **残った子プロセス**: v1 は探さず、止めもしない（pid を記録していない。6.1.2 (2) の限界）。起動のときにまだ動いていれば、ファイルは書きかけで「結果が無い」になり、予約の額で確定する。後で子が終わって実額が分かっても直さない（多めに数える側に倒す）。子は `--max-budget-usd` で予約額の近くで止まる。作り手の子が作業場に書き足す競合は、4.4 の書きかけの改名と同じく runner（Issue 10）が扱う。
 - **本文の扱い**: CLI の標準出力には役割の出力の本文が入る。`calls/` のファイルは精算までの間だけ置き、精算したら消す（9.1 の「`logs/` に本文を書かない」とは別の場所で、作り手のセッションから読めない場所にある）。
-- **系統**: v1 で結果のファイルを書くのは `claude-cli` だけ。`openai` / `jev`（Issue 16・17）は同じ置き場所と同じ 1 行目で書き、2 行目から先の読み方を `hold` の `family` で分ける。それまでは、ほかの系統の `hold` は予約の額で確定する。
+- **系統**: 結果のファイルを書くのは `claude-cli` だけ。`openai` は書かない（応答はホストのプロセスが受け取るので、落ちれば応答は残らない。6.1.3 (3)）。`jev`（Issue 17）も同じ理由で書かない見込み。結果のファイルが無い系統の `hold` は予約の額で確定する。
 
 理由: 結果がメモリにしか無いと、再起動の後に「どの予約の呼び出しが実際にいくらかかったか」が分からない。呼び出しごとに `callId` の名前でファイルに残せば、再起動の後でも突き合わせられる。子の標準出力を直接ファイルにするのは、ホストが落ちたあとも子が最後まで書けるようにするため（パイプだと読み手が消えて結果が失われる。落ちる場面で多いのは、作り手の長い呼び出しの途中）。為替を一緒に残すのは、再起動までに設定の率が変わっても、予約と精算の換算をずらさないため（6.1.2 (5) の「1 回だけ読む」と同じ理由）。結果が無いものを予約の額で確定するのは、落ちた呼び出しも CLI は動いていて費用がかかっているため。外すと使った額を少なく見せ、上限（T29）が効かなくなる（オーナーの決定）。精算と記録を同じトランザクションにするのは、片方だけをコミットしたあとで落ちると、次の起動で拾う範囲から外れて本人への説明が失われるか、説明だけが残って額と合わなくなるため。全部の未精算を拾うのは、4.4 の runner は turn=libretto の案件しか見ず、止めた案件や推測の呼び出しの `hold` が全額のまま残り続けるため。起動処理で runner より前に済ませるのは、新しい呼び出しの `hold` と前のホストの `hold` が混ざらないようにするため。
 
@@ -2410,7 +2483,7 @@ type Unavailable = { ok: false, dep: 'claude'|'openai'|'jev'|'gmail'|'slack'|'dr
 | 依存 | 使う場面 | 失敗の種類 → 振る舞い | 画面に出すこと |
 |---|---|---|---|
 | **Claude CLI**（`claude -p`） | 話し相手・下書き役・作り手・判定役・事実係 | `timeout`（役割ごとの上限: 話し相手 2 分、下書き役 10 分、作り手 30 分、判定役 10 分）→ セッションを終了し、`fail.system(時間切れ)` で **停止**（T27b）。`budget`（CLI が上限で止めた）→ `cost.cap` と同じ。`auth_expired` → 全案件を止めず、新しい呼び出しを**起こさない**（runner が待つ）。`rate_limited` → 60 秒後に 1 回だけ再試行（`invoke` が別の呼び出しとして予約・精算する）、だめなら停止。CLI の JSON からの読み取り・通知口・再試行の持ち主は 6.1.2 (3)(5) | 会話欄に 1 行。「接続と合図」の「別の目での検品」欄に Claude の状態 |
-| **OpenAI**（確認項目の下書き） | 入口 | `no_key` / `auth_expired` / `network` / `rate_limited`（2 回再試行後）→ **同系統に落ちる**（設計書 5.8。`family: '同系統'` を `checks.json` に記録、入口と承認の面に表示） | 「確認項目は、作り手と同じ系統の AI が書きました」 |
+| **OpenAI**（確認項目の下書き） | 入口 | `no_key` / `auth_expired` / `network` / `rate_limited`（1 回再試行後。6.1.3 (7)）・`timeout`・`invalid_output` → **同系統に落ちる**（6.1.3 (5)）（設計書 5.8。`family: '同系統'` を `checks.json` に記録、入口と承認の面に表示） | 「確認項目は、作り手と同じ系統の AI が書きました」 |
 | **Jev**（TypeSafe） | 判定・項目の点検・分類・「AI への指示」 | `timeout`（10 秒）/ `rate_limited`（`429`/`529` を 2 回再試行）/ `network` → **その項目だけ Claude に回す**。`no_key` → 全項目を Claude に回し `jevNote`。1 日の上限 → 同じ | 「判定専用モデルは使っていません」（`jevNote`）。「接続と合図」に上限到達 |
 | **Gmail** | 合図の検索・推測の読み取り・ラベル付け | `auth_expired` → 拾い上げの Gmail 部分を止め、「接続と合図」に「つなぎ直してください」。`rate_limited` → この周期は飛ばす。ラベル付け（`libretto/見た`）の失敗は候補を**出した上で**次回に付け直す | 接続欄に状態。候補カードは出る |
 | **Slack** | `reactions.list`・履歴・検索 | 同上。トークンの失効は `invalid_auth` を `auth_expired` に写す | 同上 |

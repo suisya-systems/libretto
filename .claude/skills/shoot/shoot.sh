@@ -11,6 +11,8 @@ CHECK=0
 [ "${1:-}" = --check ] && { CHECK=1; shift; }
 PREVIEW=(node --experimental-strip-types --no-warnings "$HERE/preview.ts")
 if [ $# -gt 0 ]; then STATES=("$@"); else mapfile -t STATES < <("${PREVIEW[@]}" --list); fi
+# 390 の 1 画面目が他と同じでよい状態（states.ts の sameFirst390）。重複の検査から外す
+mapfile -t SAME390 < <("${PREVIEW[@]}" --same-first-390)
 OUT="${SHOOT_OUT:-$ROOT/.worker-scratch/shots}"
 PORT="${SHOOT_PORT:-7930}"
 PREFIX="${SHOOT_PREFIX:-}"
@@ -121,7 +123,10 @@ done
 # 同じ幅・同じ明暗で状態の違う PNG が同じ中身なら、別の状態を撮れていない。ライトとダークが同じなら明暗が効いていない
 for K in 1440 390 390full; do
   for L in light dark; do
-    D=$(for S in "${STATES[@]}"; do md5sum "$OUT/$PREFIX$S-$K-$L.png" 2>/dev/null; done | awk '{print $1}' | sort | uniq -d)
+    D=$(for S in "${STATES[@]}"; do
+      [ "$K" = 390 ] && printf '%s\n' "${SAME390[@]}" | grep -qxF "$S" && continue
+      md5sum "$OUT/$PREFIX$S-$K-$L.png" 2>/dev/null
+    done | awk '{print $1}' | sort | uniq -d)
     [ -n "$D" ] && { echo "duplicate across states: $K-$L"; FAIL=1; }
   done
   for S in "${STATES[@]}"; do

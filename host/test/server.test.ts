@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { CaseView, HomeView } from '@libretto/shared/api'
+import { CaseView, HomeView, Settings } from '@libretto/shared/api'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { transition } from '../src/case/transition.ts'
 import { initHome } from '../src/ledger/db.ts'
@@ -410,8 +410,19 @@ describe('API キー（5.2・5.7 (7)(9)）', () => {
     // 0600 は POSIX だけ。素の Windows はプロファイルの既定の権限に任せる（9.2）
     if (!win) expect(statSync(join(home, 'api-keys.json')).mode & 0o777).toBe(0o600)
   })
-  it('8 文字未満・空白入りは 400 で保存しない。応答に値を入れない', async () => {
-    for (const value of ['', 'abcdefg', 'abcd efgh']) {
+  it('GET は両方の状態を末尾 4 文字だけで返す。Cookie が無ければ通さない', async () => {
+    await send('PUT', '/api/settings/keys/openai', { value: KEY })
+    const res = await send('GET', '/api/settings/keys')
+    const text = await res.text()
+    expect(Settings.shape.apiKeys.parse(JSON.parse(text))).toEqual({
+      openai: { kind: 'openai', set: true, last4: '5678', savedAt: expect.any(String) },
+      jev: { kind: 'jev', set: false },
+    })
+    expect(text).not.toContain(KEY)
+    expect((await server.app.request('/api/settings/keys')).status).toBe(401)
+  })
+  it('8 文字未満・空白入り・印字できない文字入りは 400 で保存しない。応答に値を入れない', async () => {
+    for (const value of ['', 'abcdefg', 'abcd efgh', 'abcd\u0000efgh', 'abcdefgh\u3042']) {
       const res = await send('PUT', '/api/settings/keys/jev', { value })
       expect(res.status).toBe(400)
       expect(await res.text()).not.toContain(value || '""')

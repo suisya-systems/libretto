@@ -25,8 +25,11 @@ export type State = {
   mark: string // この状態で画面に必ず出る文言。出るまで撮らない
   selector?: string // mark に加えて、あるまで撮らない要素（本文など）
   path?: (caseId: string) => string // 開く画面。既定は案件の面
+  openaiKey?: true // 会話の前に OpenAI の API キーを入れておく（別系統で書く・設定済みの面）
+  sameFirst390?: true // 390 の 1 画面目が他の状態と同じでよい（違いが下の方にだけある）。重複の検査から外す
 }
 
+export const SHOOT_KEY = 'sk-shoot-0000000000001a2b' // 撮影用の偽の API キー（送らない。fake が答える）
 const say = (v: unknown) => ({ text: JSON.stringify(v) })
 const done = {
   text: '「先週のブレストのまとめ」として受け付けました。',
@@ -146,6 +149,29 @@ export const STATES: Record<string, State> = {
     script: entrance(),
     expect: (v) => v.state === '入口待ち' && v.turn === '本人' && !!v.entrance,
     mark: W['entrance.undecidedHeading'],
+  },
+  // 入口: API キーがあり、チェック項目を別の種類の AI が作った
+  'entrance-other': {
+    script: entrance(),
+    openaiKey: true,
+    sameFirst390: true, // 違いはチェック項目の欄の 1 行だけで、390 の 1 画面目には入らない
+    expect: (v) => v.state === '入口待ち' && v.entrance?.checks.family === '別系統',
+    mark: W['entrance.otherFamily'],
+  },
+  // 設定: API キーが未設定
+  'settings-unset': {
+    script: entrance(),
+    expect: (v) => v.state === '入口待ち',
+    mark: W['settings.key.unsetNote'],
+    path: () => '/settings',
+  },
+  // 設定: API キーが設定済み
+  'settings-set': {
+    script: entrance(),
+    openaiKey: true,
+    expect: (v) => v.state === '入口待ち',
+    mark: w('settings.key.set', { last4: SHOOT_KEY.slice(-4) }),
+    path: () => '/settings',
   },
   // 進行: 渡してほしいものを待っている（本人の番）
   materials: {

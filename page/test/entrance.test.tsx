@@ -196,6 +196,21 @@ describe('依頼の確認', () => {
     r.done()
   })
 
+  it('同じ種類の AI が作った理由と、設定への道を出す。別の種類なら出さない（6.1.3 (6)）', async () => {
+    const at = (checks: Partial<typeof entrance.checks>) =>
+      render({ ...base, entrance: { ...entrance, checks: { ...entrance.checks, ...checks } } })
+    for (const why of ['no_key', 'unavailable'] as const) {
+      const r = await at({ family: '同系統', fallback: why })
+      expect(r.text()).toContain(W[`entrance.fallback.${why}`])
+      expect(r.el.querySelector('a[href="/settings"]')?.textContent).toBe(W['entrance.fallback.link'])
+      r.done()
+    }
+    const other = await at({ family: '別系統' })
+    expect(other.text()).toContain(W['entrance.otherFamily'])
+    expect(other.el.querySelector('a[href="/settings"]')).toBeNull()
+    other.done()
+  })
+
   it('渡してほしいものがあれば依頼書の表に出し、進めると貼り付けてもらうことを書く', async () => {
     const r = await render({
       ...base,

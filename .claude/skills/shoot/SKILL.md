@@ -96,6 +96,8 @@ Windows の Chrome は窓を約 500px より狭くできない。`--window-size=
   mark: W['progress.redoLater'],                              // この状態で画面に必ず出る文言。wording.ts から引く
   selector: '.doc-body',                                      // 任意。mark に加えて、あるまで撮らない要素
   path: (caseId) => `/cases/${caseId}`,                       // 任意。開く画面（既定は案件の面）
+  openaiKey: true,                                            // 任意。会話の前に偽の OpenAI の API キーを入れる（別系統・設定済み）
+  sameFirst390: true,                                         // 任意。違いが下の方にだけあり、390 の 1 画面目が他の状態と同じになる
 },
 ```
 
