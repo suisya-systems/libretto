@@ -57,6 +57,7 @@ export type DriveFile = {
   docx: Buffer
   mimeType: string
   trashed?: boolean
+  shared?: boolean // 本人が共有した（フォルダを共有されたら使わない）
 }
 
 // multipart/related の 2 つの部分（メタデータの JSON と中身）。中身はバイト列のまま
@@ -150,6 +151,7 @@ export async function startFakeGoogle() {
     if (!auth || !state.valid.has(auth.replace(/^Bearer /, ''))) return json(401, { error: { code: 401 } })
     const pick = (f: DriveFile) => ({
       id: f.id,
+      ...((url.searchParams.get('fields') ?? '').includes('shared') && { shared: !!f.shared }),
       ...((url.searchParams.get('fields') ?? '').includes('webViewLink') && {
         webViewLink: `https://docs.google.com/document/d/${f.id}/edit`,
       }),
@@ -197,7 +199,7 @@ export async function startFakeGoogle() {
     const one = /^\/drive\/v3\/files\/([^/]+)$/.exec(url.pathname)
     if (one) {
       const f = files.get(decodeURIComponent(one[1] as string))
-      return f ? json(200, { id: f.id, trashed: !!f.trashed }) : json(404, { error: { code: 404 } })
+      return f ? json(200, { id: f.id, trashed: !!f.trashed, shared: !!f.shared }) : json(404, { error: { code: 404 } })
     }
     const ex = /^\/drive\/v3\/files\/([^/]+)\/export$/.exec(url.pathname)
     if (ex) {

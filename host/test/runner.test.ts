@@ -1505,7 +1505,7 @@ describe('Google ドキュメントの届け先（6.5）', () => {
 })
 
 describe('libretto のフォルダ（6.5 (3)）', () => {
-  it('覚えた id を使い回し、ゴミ箱に入った・消された・別のアカウントなら libretto が作ったものを探すか作り直す', async () => {
+  it('覚えた id を使い回し、ゴミ箱に入った・消された・共有された・別のアカウントなら libretto が作った共有されていないものを探すか作り直す。同時でも 1 つ', async () => {
     const g = await startFakeGoogle()
     try {
       const h = mkdtempSync(join(tmpdir(), 'libretto-folder-'))
@@ -1544,6 +1544,21 @@ describe('libretto のフォルダ（6.5 (3)）', () => {
       writeFileSync(join(h, 'drive-folder.json'), JSON.stringify({ account: 'other@example.com', id: 'zzz' }))
       expect(await libFolder({ home: h, google: gg }, signal)).toBe('folder-x')
       expect(g.seen.some((x) => x.path.startsWith('/drive/v3/files/zzz'))).toBe(false)
+      // 本人が共有したフォルダは使わず、共有されていないものを新しく作る（あなただけで承認したものを共有の中に置かない）
+      const x = g.files.get('folder-x')
+      if (x) x.shared = true
+      const c = await libFolder({ home: h, google: gg }, signal)
+      expect(c).not.toBe('folder-x')
+      expect(g.files.get(c as string)?.shared).toBeFalsy()
+      // 同時に初めて呼んでもフォルダは 1 つ
+      g.files.clear()
+      const before = posts()
+      const both = await Promise.all([
+        libFolder({ home: h, google: gg }, signal),
+        libFolder({ home: h, google: gg }, signal),
+      ])
+      expect(both[0]).toBe(both[1])
+      expect(posts() - before).toBe(1)
     } finally {
       await g.close()
     }

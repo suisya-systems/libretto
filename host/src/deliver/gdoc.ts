@@ -24,7 +24,7 @@ export const GDOC_SAY = {
     `保存した文書の本文が元の本文と食い違っています（欠けた段落 ${missing}・増えた段落 ${extra}）`,
 } as const
 
-type File = { id: string; webViewLink?: string }
+type File = { id: string; webViewLink?: string; shared?: boolean }
 type Marker = { fileId?: string; link?: string }
 type Deps = { home: string; ledger: Ledger; google: Google }
 type Base = { caseId: string; by: 'libretto'; attemptId: string }
@@ -53,27 +53,45 @@ const quote = (s: string) => s.replace(/['\\]/g, '\\$&')
 const byProp = (key: string, value: string) =>
   `appProperties has { key='${key}' and value='${quote(value)}' } and trashed=false`
 
-async function search(g: Google, q: string, signal: AbortSignal): Promise<File | undefined | GoogleFail> {
+async function search(
+  g: Google,
+  q: string,
+  signal: AbortSignal,
+  keep: (f: File) => boolean = () => true,
+): Promise<File | undefined | GoogleFail> {
   let page: string | undefined
   do {
-    const p = new URLSearchParams({ q, spaces: 'drive', fields: 'nextPageToken,files(id,webViewLink)' })
+    const p = new URLSearchParams({ q, spaces: 'drive', fields: 'nextPageToken,files(id,webViewLink,shared)' })
     if (page) p.set('pageToken', page)
     const r = await within(signal, (s) =>
       g.drive<{ files?: File[]; nextPageToken?: string }>(`/drive/v3/files?${p}`, {}, s),
     )
     if (!r.ok) return r
-    const f = r.json.files?.[0]
+    const f = r.json.files?.find(keep)
     if (f) return f
     page = r.json.nextPageToken
   } while (page)
   return undefined
 }
 
-// 保存先のフォルダ「libretto」（6.5 (3)）。覚えた id が今の連携のアカウントのもので、消されていなければそれを使い、
-// 無ければ libretto が作ったフォルダを印で探し、それも無ければ作る。drive.file では本人が手で作った同名のフォルダは見えない
+// 保存先のフォルダ「libretto」（6.5 (3)）。覚えた id が今の連携のアカウントのもので、消されておらず共有もされていなければ
+// それを使い、無ければ libretto が作った共有されていないフォルダを印で探し、それも無ければ作る。
+// 共有されたフォルダの中に作ると「あなただけ」で承認したものがほかの人に見える。drive.file では本人が手で作った同名のフォルダは見えない
 const FOLDER = 'application/vnd.google-apps.folder'
 export const FOLDER_NAME = 'libretto'
-export async function libFolder(d: Pick<Deps, 'home' | 'google'>, signal: AbortSignal): Promise<string | GoogleFail> {
+// 案件をまたいで同時に初めて保存してもフォルダが 2 つにならないよう、アカウントごとに 1 本にまとめる。
+// まとめた仕事は呼んだ案件の停止に巻き込まない（呼び出しごとの時間切れだけ）
+const resolving = new Map<string, Promise<string | GoogleFail>>()
+export function libFolder(d: Pick<Deps, 'home' | 'google'>, signal: AbortSignal): Promise<string | GoogleFail> {
+  const key = `${d.home}\n${d.google.status().email ?? ''}`
+  let p = resolving.get(key)
+  if (!p) {
+    p = findOrMakeFolder(d, new AbortController().signal).finally(() => resolving.delete(key))
+    resolving.set(key, p)
+  }
+  return signal.aborted ? Promise.reject(signal.reason) : p
+}
+async function findOrMakeFolder(d: Pick<Deps, 'home' | 'google'>, signal: AbortSignal): Promise<string | GoogleFail> {
   const path = join(d.home, 'drive-folder.json')
   const account = d.google.status().email ?? ''
   const saved = existsSync(path)
@@ -81,12 +99,21 @@ export async function libFolder(d: Pick<Deps, 'home' | 'google'>, signal: AbortS
     : undefined
   if (saved?.account === account) {
     const r = await within(signal, (s) =>
-      d.google.drive<{ trashed?: boolean }>(`/drive/v3/files/${encodeURIComponent(saved.id)}?fields=id,trashed`, {}, s),
+      d.google.drive<{ trashed?: boolean; shared?: boolean }>(
+        `/drive/v3/files/${encodeURIComponent(saved.id)}?fields=id,trashed,shared`,
+        {},
+        s,
+      ),
     )
-    if (r.ok && !r.json.trashed) return saved.id
+    if (r.ok && !r.json.trashed && !r.json.shared) return saved.id
     if (!r.ok && r.why !== 'rejected') return r // 404（消された）だけ作り直す。届かないときは次の周期
   }
-  const found = await search(d.google, `${byProp('librettoFolder', '1')} and mimeType='${FOLDER}'`, signal)
+  const found = await search(
+    d.google,
+    `${byProp('librettoFolder', '1')} and mimeType='${FOLDER}'`,
+    signal,
+    (f) => !f.shared,
+  )
   let id = found && 'id' in found ? found.id : undefined
   if (found && !('id' in found)) return found
   if (!id) {
