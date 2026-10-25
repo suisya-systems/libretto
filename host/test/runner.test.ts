@@ -745,7 +745,8 @@ describe('文体カード（6.3.2）', () => {
   })
 })
 
-const verdicts = (ok: boolean): ScriptReply =>
+// c06 = C06 の 2 段落のうち「いいえ」の数（モデル判定の項目が近づいたかを作る。6.2.11 (2)）
+const verdicts = (ok: boolean, c06 = 0): ScriptReply =>
   say({
     results: [
       {
@@ -757,8 +758,8 @@ const verdicts = (ok: boolean): ScriptReply =>
       {
         id: 'C06',
         units: [
-          { index: 0, yes: true },
-          { index: 1, yes: true },
+          { index: 0, yes: c06 < 1 },
+          { index: 1, yes: c06 < 2 },
         ],
         reason: 'どの段落も次にすることが分かります。',
       },
@@ -824,10 +825,11 @@ describe('判定役', () => {
     await setup(
       script(
         ...upToEntrance,
+        // 2 回目は C06 が近づいたので 3 回目に進む（同じ形で 2 回続けて落ちると早めに上げる。6.2.11 (2)）
         ['作り手', draft(1)],
-        ['判定役・文章', verdicts(false)],
+        ['判定役・文章', verdicts(false, 2)],
         ['作り手', draft(2)],
-        ['判定役・文章', verdicts(false)],
+        ['判定役・文章', verdicts(false, 1)],
         ['作り手', draft(3)],
         ['判定役・文章', verdicts(false)],
       ),
@@ -854,7 +856,7 @@ describe('判定役', () => {
     expect(fake.unused()).toEqual([])
   })
 
-  it('T17 おまかせ: 3 回目の不合格で停止（往復上限）', async () => {
+  it('モデル判定の同じ項目が同じ形で 2 回続けて落ちたら、3 回目を待たずに承認待ち（6.2.11 (2)）', async () => {
     await setup(
       script(
         ...upToEntrance,
@@ -862,6 +864,25 @@ describe('判定役', () => {
         ['判定役・文章', verdicts(false)],
         ['作り手', draft(2)],
         ['判定役・文章', verdicts(false)],
+      ),
+      real,
+    )
+    const id = await approved()
+    await waitState(id, '承認待ち')
+    expect(ledger.getCase(id)).toMatchObject({ version: 2, round: 2, approvalKind: '完成稿' })
+    expect((await caseView(id)).review?.escalate).toEqual({ why: '直らない', checkIds: ['C02'] })
+    expect(fake.unused()).toEqual([])
+  })
+
+  it('T17 おまかせ: 3 回目の不合格で停止（往復上限）', async () => {
+    await setup(
+      script(
+        ...upToEntrance,
+        // 2 回目は C06 が近づいたので 3 回目に進む（同じ形で 2 回続けて落ちると早めに上げる。6.2.11 (2)）
+        ['作り手', draft(1)],
+        ['判定役・文章', verdicts(false, 2)],
+        ['作り手', draft(2)],
+        ['判定役・文章', verdicts(false, 1)],
         ['作り手', draft(3)],
         ['判定役・文章', verdicts(false)],
       ),

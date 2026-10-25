@@ -32,7 +32,7 @@ import {
 import type { Fetched, FetchFailure } from '../facts/fetch.ts'
 import { type Inspection, inspectChecks } from '../facts/inspect.ts'
 import { markerCheck } from '../facts/markers.ts'
-import { type Classified, classifyJob, toUndecided } from '../facts/undecided.ts'
+import { type Classified, classifyJob, neededOf, toUndecided } from '../facts/undecided.ts'
 import { gatherVoice } from '../facts/voice.ts'
 import { caseDir } from '../ledger/db.ts'
 import type { Ledger } from '../ledger/ledger.ts'
@@ -62,7 +62,7 @@ const answerText = (i: Undecided, a: Answer) =>
 // wanted・gather は出力では必須（書き落としを [] と読むと素通りする。6.2.4 (1)・6.3.3 (1)）
 export const BriefDraft = z.object({
   brief: Brief.omit({ docType: true, destinations: true, materials: true }).extend({
-    wanted: Brief.shape.wanted.unwrap(),
+    wanted: Brief.shape.wanted.unwrap().max(5),
     gather: Brief.shape.gather.unwrap(),
   }),
   assumptions: z.array(z.object({ id: z.string().min(1), text: z.string().min(1), why: z.string().min(1) })),
@@ -226,6 +226,9 @@ export const CHECK_EXAMPLES: Check[] = [
   },
 ]
 
+// 節ごとの項目で、対象でない節（表紙・まとめ）でも成り立つ問いの例（6.2.11 (3)）
+export const SCOPED_EXAMPLE = 'この節が機能を紹介しているなら、使う人にとって何が変わるかを示している'
+
 // minority は同系統で書くとき。少数派の項目を 3 件以上求める（設計書 5.8.1。6.1.3 (5)）
 export const checksInstruction = (
   minority: boolean,
@@ -255,6 +258,7 @@ ${fnLines}
 - title・proposition・question に否定語を使わない。「ない」「無い」「ません」「なし」「無し」「せず」は、「少ない」「足りない」「できない」のような語の中にあっても使えない。言い換えの例: 「専門用語が少ない」→「専門用語に説明が付いている」、「電話番号が載っていない」→「電話番号を含む段落を数える（pass は count の max 0）」
 - summary には、judge に書いた語や数を入れない。依頼の題材の名前（依頼に出てくる語）は入れてよい
 - 見た目の項目は by "claude"
+- 節・段落ごと（scope が section・paragraph）に確かめる項目では、表紙・目次・まとめ・問い合わせ先のような、その観点の対象でない節や段落も 1 単位に数える。pass が all なら、対象でない単位でも成り立つ問いにする（例 ${JSON.stringify(SCOPED_EXAMPLE)}）。count なら、対象でない単位では成り立たない問いにする。ratio は対象でない単位も割合の分母に入るので、対象が一部の単位だけなら all か count で書く。本文全体（document）の項目も、どこを見るか（全部の節か、機能を紹介する節だけか）を問いに書く
 ${minority ? '- 依頼が決めていない点について、書く人が選びそうな答えではなく、筋の通る別の答えを確かめる少数派の項目を 3 件以上入れる\n' : ''}- 前提知識の無い人が読んで分かる、ふだんの日本語で書く
 
 3 つの形の例（形だけの例。中身は依頼に合わせて書く）:
@@ -688,9 +692,12 @@ export function createEntrance(d: Deps) {
     const u = await d.invoke(classifyJob(brief, bd.assumptions, drafted, caseId, signal, inspection?.notDerivable))
     if (!u.ok) return failed(c, u)
     if (signal.aborted) return
+    const classified = u.json as Classified
 
+    // 資料が無いと満たせない項目の材料は「渡してほしいもの」に足し、本人が組と一緒に承認する（6.2.11 (1)）
+    const wanted = neededOf(classified, drafted, brief.wanted)
     const set: EntranceSet = {
-      brief: { ...brief, assumptions: bd.assumptions as Assumption[], decisions: [] },
+      brief: { ...brief, wanted, assumptions: bd.assumptions as Assumption[], decisions: [] },
       checks: {
         checks: withHostItems(drafted, c.destination, token(), brief.sources, {
           card: !!gathered?.voice.card,
@@ -702,7 +709,7 @@ export function createEntrance(d: Deps) {
         ...(inspection && { inspected: true as const }),
         ...(inspection?.shapeOnly.length && { shapeOnly: inspection.shapeOnly }),
       },
-      undecided: toUndecided(u.json as Classified, drafted),
+      undecided: toUndecided(classified, drafted),
     }
     // ファイルはトランザクションの前に（4.1）。読み比べの段落は作り手から読めない checks/ に（6.3.2 (2)）
     const samplesPath = voiceSamplesPath(home, caseId)
