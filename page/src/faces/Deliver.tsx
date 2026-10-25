@@ -322,7 +322,8 @@ export function ResultFace({ c, reload, stopped }: { c: CaseView; reload: () => 
         <section aria-labelledby="h-undo" className="card pad stack">
           <h2 id="h-undo">{W['deliver.undoHeading']}</h2>
           {now.map((d) =>
-            d.target.kind === 'page' || d.target.kind === 'paste' || d.target.kind === 'gdoc' ? (
+            // 共有したページには「ほかの人には見えません」を出さない
+            (d.target.kind === 'page' && !d.target.shared) || d.target.kind === 'paste' || d.target.kind === 'gdoc' ? (
               <p key={d.attemptId} className="small">
                 {destLabel(d.target)}: {W[`deliver.undo.${d.target.kind}`]}
               </p>

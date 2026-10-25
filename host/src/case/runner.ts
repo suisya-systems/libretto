@@ -232,7 +232,15 @@ export function createRunner(d: Deps) {
     }
     const c = ledger.getCase(caseId)
     // おまかせでホストが本人の代わりに出す入口の承認と送付（6.11 (2)）。遷移したら続きを起こす
-    const auto = c && autoStep(home, ledger, c)
+    let auto: ReturnType<typeof autoStep>
+    try {
+      auto = c && autoStep(home, ledger, c)
+    } catch (e) {
+      // 普通の仕事と同じく、書けなければ帯を出して続けない（起動の resume を落とさない）
+      d.log(`runner ${caseId} auto: ${e instanceof Error ? e.stack : String(e)}`)
+      if (isStorageError(e)) d.storage(false)
+      return
+    }
     if (auto && emit(caseId, auto)) return kick(caseId)
     if (c?.turn !== 'libretto') return
     if (c.state === '入口待ち') return d.entrance.kick(caseId) // 入口は自分の 1 本を持ち、同じ関門を通る
