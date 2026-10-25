@@ -141,6 +141,34 @@ describe('ホーム', () => {
     p.done()
   })
 
+  it('つながっていない端末: ほかの起点の同じページへのリンクと、追加のしかたを出す（6.12 (9)）', async () => {
+    const here = location.origin
+    history.replaceState(null, '', '/cases/c1?v=2#draft')
+    const other = 'https://pc.example.ts.net'
+    replies = {
+      '/api/host': json({ reason: 'not_paired', origins: [here, other, 'javascript:alert(1)'] }, 401),
+      '/api/home': json({ reason: 'not_paired' }, 401),
+    }
+    const p = await render()
+    const links = [...p.el.querySelectorAll('.pair-links a')].map((a) => a.getAttribute('href'))
+    expect(links).toEqual([`${other}/cases/c1?v=2#draft`])
+    expect(p.text()).toContain(W['pair.elsewhere'])
+    expect(p.text()).toContain(W['pair.add'])
+    p.done()
+    history.replaceState(null, '', '/')
+  })
+
+  it('つながっていない端末: 起点が今のものだけか読めなければ、リンクの段を出さない', async () => {
+    for (const body of [{ reason: 'not_paired', origins: [location.origin] }, { reason: 'not_paired' }]) {
+      replies = { '/api/host': json(body, 401), '/api/home': json({ reason: 'not_paired' }, 401) }
+      const p = await render()
+      expect(p.el.querySelector('.pair-links')).toBeNull()
+      expect(p.text()).not.toContain(W['pair.elsewhere'])
+      expect(p.text()).toContain(W['pair.body'])
+      p.done()
+    }
+  })
+
   it('ホストにつながらない: 空の一覧ではなく、つながらないことともう一度読み込むを出す', async () => {
     replies = { '/api/host': json(host), '/api/home': () => Promise.reject(new TypeError('network')) }
     const p = await render()

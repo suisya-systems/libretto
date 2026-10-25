@@ -463,7 +463,8 @@ export function createServer(o: ServerOptions) {
     // GET 以外は JSON・multipart・PUT・DELETE を区別せず完全一致（5.4）
     if (c.req.method !== 'GET' && c.req.method !== 'HEAD' && !o.origins.includes(c.req.header('origin') ?? ''))
       return c.json({ reason: 'origin' }, 403)
-    if (!paired(c)) return c.json({ reason: 'not_paired' }, 401)
+    // 起点の一覧は、つながっていない面の「ほかのアドレスで開く」に使う（6.12 (9)）
+    if (!paired(c)) return c.json({ reason: 'not_paired', origins: o.origins }, 401)
     await next()
   })
 

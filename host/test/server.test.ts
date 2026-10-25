@@ -206,7 +206,8 @@ describe('経路の順（5.7 (6)）と Origin（5.4）', () => {
   it('Cookie が無い /api/* は 401 の JSON', async () => {
     const res = await get('/api/home', '')
     expect(res.status).toBe(401)
-    expect(await res.json()).toEqual({ reason: 'not_paired' })
+    // 起点の一覧だけを足し、ホストの状態は出さない（6.12 (9)）
+    expect(await res.json()).toEqual({ reason: 'not_paired', origins: [ORIGIN] })
   })
   it('画面の殻と静的ファイルは Cookie 無しで返す', async () => {
     expect(await (await get('/', '')).text()).toBe('<div id="app"></div>')

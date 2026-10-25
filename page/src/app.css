@@ -823,6 +823,12 @@ select:disabled {
   line-height: 1.35;
 }
 
+.pair-links {
+  margin: 0;
+  padding-left: var(--space-5);
+  overflow-wrap: anywhere;
+}
+
 /* 確かめる窓（Base UI AlertDialog） */
 .dialog-backdrop {
   position: fixed;
