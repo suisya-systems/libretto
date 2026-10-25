@@ -611,24 +611,27 @@ libretto の画面に出す言葉の正本。設計書（[`docs/design.md`](./de
 | `settings.probe.run` | 今すぐ確認 |
 | `settings.probe.failed` | 確認を始められませんでした。もう一度お試しください。 |
 
-**ホームの依頼の候補（ラベルを付けたメールのカード。実装設計書 6.4 (7)）**
+**ホームの依頼の候補（ラベルを付けたメールと、リアクションを付けた Slack の投稿のカード。実装設計書 6.4 (7)・6.6 (7)）**
 
-`cand.reason.*` は見送りの理由。ラベルのカードでは「この人・この場所からは拾わなくてよい」を出さない（実装設計書 6.4 (5)）。
+`cand.reason.*` は見送りの理由。ラベルとリアクションのカードでは「この人・この場所からは拾わなくてよい」を出さない（実装設計書 6.4 (5)）。`cand.othersPost` は他人の Slack の投稿のカードにだけ出す 1 行（設計書 10.3。画面では「材料」を「資料」と言う）。
 
 | キー | 文 |
 |---|---|
 | `home.candHeading` | 依頼の候補 |
 | `home.candRefresh` | 今すぐ取り込む |
 | `home.candRefreshing` | 取り込んでいます |
-| `home.candEmpty` | 依頼の候補はありません。メールにラベル libretto を付けると、ここに出ます |
+| `home.candEmpty` | 依頼の候補はありません。メールにラベル libretto を、Slack の投稿にリアクション :memo: を付けると、ここに出ます |
 | `home.candLast` | {at} に取り込み |
 | `cand.mark.gmail` | ラベル libretto |
+| `cand.mark.slack` | リアクション :memo: |
 | `cand.from` | {from}・{at} |
 | `cand.askLabel` | 頼まれていそうなこと |
 | `cand.make` | 作るもの: {doc}　保存先: {dest} |
 | `cand.attach` | 添付「{names}」の中身は読んでいません。進めたあと、資料として貼り付けてください |
 | `cand.aiNote` | プロンプトインジェクションの疑いがある文章が入っています。libretto はその文章を無視して作業します |
 | `cand.open` | メールを開く |
+| `cand.openSlack` | Slack で開く |
+| `cand.othersPost` | {from}さんの投稿を資料にします。引用するときは {from}さんに一言伝えてください |
 | `cand.proceed` | 進める |
 | `cand.dismiss` | 見送る |
 | `cand.dismissTitle` | この候補を見送りますか |
@@ -678,3 +681,24 @@ libretto の画面に出す言葉の正本。設計書（[`docs/design.md`](./de
 | `settings.google.result.failed` | 連携できませんでした。もう一度お試しください。 |
 | `settings.google.startFailed` | 連携を始められませんでした。もう一度お試しください。 |
 | `settings.google.disconnectFailed` | 連携を解除できませんでした。もう一度お試しください。 |
+
+**設定の面の連携（Slack。実装設計書 6.6 (2)(7)）**
+
+`settings.slack.missing` の {scopes} は足りない権限の名前（`reactions:read` など）をそのまま並べる。オーナーが Slack アプリの設定画面で探す名前なので、言い換えない。連携する・解除のボタンは無い（トークンは `.env.local` に置く。実装設計書 6.6 (2)）。
+
+| キー | 文 |
+|---|---|
+| `settings.slack.label` | Slack |
+| `settings.slack.use` | あなたがリアクション :memo: を付けた投稿と、そのスレッドを読みます。添付のファイルは読みません。投稿やリアクションはしません |
+| `settings.slack.signal` | 取り込みの目印はリアクション :{emoji}: です。このリアクションを付けた投稿が依頼の候補に出ます。 |
+| `settings.slack.connected` | 連携済み |
+| `settings.slack.as` | {team} の {user} で連携しています |
+| `settings.slack.expired` | 連携し直してください |
+| `settings.slack.expiredNote` | Slack のトークンが使えなくなりました。Slack アプリの設定画面でアプリをワークスペースに入れ直し、出たトークンを PC の `.env.local` に入れ直して、libretto を再起動してください。 |
+| `settings.slack.unconfigured` | 設定がありません |
+| `settings.slack.unconfiguredNote` | Slack と連携する設定がまだありません。Slack アプリのトークンを PC の `.env.local` に入れて、libretto を再起動してください。 |
+| `settings.slack.missing` | Slack アプリに権限 {scopes} がありません。Slack アプリの設定画面の「OAuth & Permissions」で「User Token Scopes」に足し、アプリをワークスペースに入れ直してください。トークンが変わったら `.env.local` を書き換えて、libretto を再起動してください。 |
+| `settings.slack.stopNote` | 取り込みを止めるときは、`.env.local` から Slack のトークンの行を消して、libretto を再起動してください。 |
+| `settings.slack.problem.rate_limited` | Slack が混み合っていたので、取り込みを次の回に回しました。 |
+| `settings.slack.problem.network` | Slack につながりませんでした。15 分後にもう一度見ます。 |
+| `settings.slack.lastAt` | {at} に取り込み |

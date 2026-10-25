@@ -28,6 +28,7 @@ beforeEach(() => {
   conn = {
     isolation: { level: 'strong', running: false },
     google: { configured: false, state: 'none', label: 'libretto', docs: false },
+    slack: { configured: false, state: 'none', emoji: 'memo', missingScopes: [] },
   }
   respond = () => new Response('{}')
   samples = []

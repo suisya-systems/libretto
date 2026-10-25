@@ -371,6 +371,17 @@ export const ConnectionsView = z.object({
     lastAt: z.string().optional(),
     problem: z.enum(['rate_limited', 'network']).optional(),
   }),
+  // Slack（6.6 (7)）。configured は .env.local にトークンがあるか。missingScopes は足りない権限の名前
+  slack: z.object({
+    configured: z.boolean(),
+    state: z.enum(['none', 'connected', 'expired']),
+    team: z.string().optional(),
+    user: z.string().optional(),
+    emoji: z.string(),
+    missingScopes: z.array(z.string()),
+    lastAt: z.string().optional(),
+    problem: z.enum(['rate_limited', 'network']).optional(),
+  }),
 })
 export type ConnectionsView = z.infer<typeof ConnectionsView>
 
@@ -389,7 +400,8 @@ export const CandidateCard = z.object({
   proposal: z.object({ docType: DocType, destination: z.array(DeliveryTarget) }),
   attachmentsNeeded: z.array(z.string()).optional(),
   attachments: z.array(z.string()).optional(), // 添付の名前の全部（中身は読まない。6.4 (4)）
-  account: z.string().optional(), // 取り込んだ本人のアドレス（読み直すときの照合。6.4 (5)）
+  account: z.string().optional(), // 取り込んだ本人のアドレス（Slack は user_id）。読み直すときの照合（6.4 (5)・6.6 (6)）
+  othersPost: z.boolean().optional(), // 他人の Slack の投稿（「○○さんの投稿を資料にします」。6.6 (5)）
 })
 export type CandidateCard = z.infer<typeof CandidateCard>
 

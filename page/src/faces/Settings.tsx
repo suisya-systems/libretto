@@ -405,8 +405,54 @@ function useResult(): Result | undefined {
   return r
 }
 
-// 連携の節。Google の行（6.4 (7)）
-function LinkSection({ g, reload }: { g: Google; reload: () => void }) {
+type SlackView = ConnectionsView['slack']
+const SLACK_STATE: Record<SlackView['state'] | 'unconfigured', [string, WKey]> = {
+  connected: ['b-done', 'settings.slack.connected'],
+  none: ['b-off', 'settings.slack.unconfigured'],
+  expired: ['b-alert', 'settings.slack.expired'],
+  unconfigured: ['b-off', 'settings.slack.unconfigured'],
+}
+
+// Slack の行（6.6 (7)）。トークンは .env.local に置くので、連携する・解除のボタンは無い
+function SlackRow({ s }: { s: SlackView }) {
+  const [badge, label] = SLACK_STATE[s.configured ? s.state : 'unconfigured']
+  return (
+    <li className="key-row">
+      <div className="key-head">
+        <div className="grow">
+          <h3 className="key-label">{W['settings.slack.label']}</h3>
+          <p className="muted small">{W['settings.slack.use']}</p>
+        </div>
+        <span className={`badge ${badge} key-status`}>{W[label]}</span>
+      </div>
+      {!s.configured && <p className="note-warn small">{withCode(W['settings.slack.unconfiguredNote'])}</p>}
+      {s.state === 'connected' && s.team && s.user && (
+        <p className="muted small key-saved">{w('settings.slack.as', { team: s.team, user: s.user })}</p>
+      )}
+      {s.state === 'expired' && (
+        <p className="note-alert small" role="alert">
+          {withCode(W['settings.slack.expiredNote'])}
+        </p>
+      )}
+      {s.state === 'connected' && s.missingScopes.length > 0 && (
+        <p className="note-warn small" role="status">
+          {withCode(w('settings.slack.missing', { scopes: s.missingScopes.map((x) => `\`${x}\``).join('、') }))}
+        </p>
+      )}
+      {s.configured && <p className="muted small">{w('settings.slack.signal', { emoji: s.emoji })}</p>}
+      {s.state === 'connected' && s.problem && (
+        <p className="note-warn small">{W[`settings.slack.problem.${s.problem}`]}</p>
+      )}
+      {s.state === 'connected' && s.lastAt && (
+        <p className="muted small">{w('settings.slack.lastAt', { at: when(s.lastAt) })}</p>
+      )}
+      {s.configured && <p className="muted small">{withCode(W['settings.slack.stopNote'])}</p>}
+    </li>
+  )
+}
+
+// 連携の節。Google の行（6.4 (7)）と Slack の行（6.6 (7)）
+function LinkSection({ g, s, reload }: { g: Google; s: SlackView; reload: () => void }) {
   const result = useResult()
   const [busy, setBusy] = useState(false)
   const [failed, setFailed] = useState<WKey>()
@@ -513,6 +559,7 @@ function LinkSection({ g, reload }: { g: Google; reload: () => void }) {
             </p>
           )}
         </li>
+        <SlackRow s={s} />
       </ul>
     </section>
   )
@@ -525,7 +572,7 @@ export function Settings() {
   return (
     <section className="face">
       <h1 className="face-title">{W['nav.settings']}</h1>
-      {env.data && <LinkSection g={env.data.google} reload={env.reload} />}
+      {env.data && <LinkSection g={env.data.google} s={env.data.slack} reload={env.reload} />}
       {keys.problem && !keys.data ? (
         <ProblemView problem={keys.problem} retry={keys.reload} />
       ) : (

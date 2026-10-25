@@ -36,6 +36,7 @@ import { CLOSED, purge } from '../facts/purge.ts'
 import { readThread } from '../intake/gmail.ts'
 import { createGoogle, type Google } from '../intake/google.ts'
 import { createPoller, RUN_KEY } from '../intake/poller.ts'
+import { parseCandidateId, readPost, type Slack } from '../intake/slack.ts'
 import { caseDir } from '../ledger/db.ts'
 import type { Ledger } from '../ledger/ledger.ts'
 import type { Job, Outcome } from '../model/invoke.ts'
@@ -77,6 +78,8 @@ export type ServerOptions = {
   fetch?: Fetch // 出典の取り寄せ（テストは偽物。6.3.1 (5)）
   google?: Google // Google の連携（6.4 (2)）。無ければ設定の無い連携
   gmailLabel?: string // 取り込みの目印（設定の Issue までは既定の libretto）
+  slack?: Slack // Slack の連携（6.6 (2)）。無ければトークンの無い連携
+  slackEmoji?: string // 取り込みの目印（設定の Issue までは既定の memo）
 }
 
 export function createServer(o: ServerOptions) {
@@ -124,6 +127,23 @@ export function createServer(o: ServerOptions) {
 
   const google = o.google ?? createGoogle({ home, redirectUri: 'http://127.0.0.1/oauth/google/callback', log })
   const gmailLabel = o.gmailLabel ?? 'libretto'
+  const slack = o.slack
+  const slackEmoji = o.slackEmoji ?? 'memo'
+  // 取り込み元の本文を読み直す。今の連携の本人が取り込んだときと同じときだけ（6.4 (5)(6)・6.6 (6)）
+  const reread = async (candidateId: string, account: string | undefined, signal: AbortSignal) => {
+    if (!account) return undefined
+    const at = parseCandidateId(candidateId)
+    if (at) {
+      if (!slack?.configured) return undefined
+      const who = await slack.whoami(signal)
+      if (!who.ok || who.me.userId !== account) return undefined
+      const r = await readPost(slack, who.me, at.channel, at.ts, undefined, signal)
+      return r.ok ? r.post.body : undefined
+    }
+    if (google.status().email !== account) return undefined
+    const r = await readThread(google, candidateId.replace(/^gmail:/, ''), account, signal)
+    return r.ok ? r.thread.body : undefined
+  }
   // Google ドキュメントに保存できる連携があるか（6.5 (2)）
   const gdocReady = () => {
     const s = google.status()
@@ -134,9 +154,11 @@ export function createServer(o: ServerOptions) {
     home,
     ledger,
     google,
+    slack,
     invoke: o.invoke,
     runs,
     label: () => gmailLabel,
+    emoji: () => slackEmoji,
     candidatesChanged,
     connectionsChanged: () => hub.emit('connections.changed', {}),
     log,
@@ -155,12 +177,8 @@ export function createServer(o: ServerOptions) {
     blocked: (caseId) => runner.blocked(caseId),
     onAuthExpired: (caseId) => runner.onAuthExpired(caseId),
     ...(o.fetch && { fetch: o.fetch }),
-    // 連携のアドレスが取り込んだときと同じときだけ読み直す（6.4 (6)）
-    external: async (src, signal) => {
-      if (google.status().email !== src.account) return undefined
-      const r = await readThread(google, src.threadId, src.account, signal)
-      return r.ok ? r.thread.body : undefined
-    },
+    // 連携の本人が取り込んだときと同じときだけ読み直す（6.4 (6)・6.6 (6)）
+    external: (src, signal) => reread(src.candidateId, src.account, signal),
   })
   // 状態ごとの仕事を起こす（6.2.3 (1)）。入口待ちは entrance に任せる
   const runner = createRunner({
@@ -193,11 +211,7 @@ export function createServer(o: ServerOptions) {
     requested: (caseId) => runner.kick(caseId),
     revised: (caseId) => runner.kick(caseId),
     candidateChanged: () => candidatesChanged(),
-    mailOf: async (candidateId, account, signal) => {
-      if (!account || google.status().email !== account) return undefined
-      const r = await readThread(google, candidateId.replace(/^gmail:/, ''), account, signal)
-      return r.ok ? r.thread.body : undefined
-    },
+    mailOf: reread,
     // 依頼書と仮定だけ。チェック項目は渡さない（6.2.2 (8)）
     gdocReady,
     briefOf: (caseId) => {
@@ -335,9 +349,16 @@ export function createServer(o: ServerOptions) {
         ...(last && { last: { at: last.at, verdict: last.verdict } }),
       },
       google: { configured: google.configured, ...google.status(), label: gmailLabel, ...intake },
+      slack: slackView(),
     }
     return c.json(view)
   })
+
+  // Slack の行（6.6 (7)）。user_id は返さない
+  function slackView(): ConnectionsView['slack'] {
+    const { userId: _, ...s } = slack?.status() ?? { state: 'none' as const, missingScopes: [] }
+    return { configured: !!slack?.configured, ...s, emoji: slackEmoji, ...poller.slackView() }
+  }
 
   // 連携する（6.4 (2)）。画面は返した URL へ移る
   app.post('/api/connections/google/start', (c) => {
@@ -384,11 +405,11 @@ export function createServer(o: ServerOptions) {
       const caseId = randomUUID()
       // intake.json はトランザクションの前に新しい案件フォルダへ（4.2 T2）
       if (cand.status === 'presented' && card) {
-        const w = writing(c, () => writeIntake(caseId, candidateId, card))
+        const w = writing(c, () => writeIntake(caseId, candidateId, cand.source, card))
         if (w instanceof Response) return w
       }
       const r = writing(c, () =>
-        transition(ledger, { type: 'candidate.proceed', candidateId, caseId, mode: DEFAULTS.gmail }),
+        transition(ledger, { type: 'candidate.proceed', candidateId, caseId, mode: DEFAULTS[cand.source] }),
       )
       if (r instanceof Response) return r
       if (!r.ok || !r.case) return refused(r.ok ? { reason: 'invalid_transition' } : r)
@@ -409,17 +430,22 @@ export function createServer(o: ServerOptions) {
     return c.json({})
   })
 
-  // 候補から作る案件の intake.json（6.4 (5)）
-  function writeIntake(caseId: string, candidateId: string, card: NonNullable<ReturnType<Ledger['getCandidateCard']>>) {
+  // 候補から作る案件の intake.json（6.4 (5)・6.6 (6)）。Slack の threadId は <channelId>:<ts>
+  function writeIntake(
+    caseId: string,
+    candidateId: string,
+    source: 'gmail' | 'slack' | 'meet',
+    card: NonNullable<ReturnType<Ledger['getCandidateCard']>>,
+  ) {
     const dir = caseDir(home, caseId)
     mkdirSync(dir, { recursive: true, mode: 0o700 })
     const intake: Intake = {
-      origin: { kind: '合図', source: 'gmail' },
+      origin: { kind: '合図', source },
       summary: card.summary,
       materials: [{ id: candidateId, kind: '元データ', title: card.subject, where: card.link }],
       source: {
         candidateId,
-        threadId: candidateId.replace(/^gmail:/, ''),
+        threadId: candidateId.replace(/^(gmail|slack):/, ''),
         account: card.account ?? '',
         subject: card.subject,
         from: card.from,
@@ -448,8 +474,14 @@ export function createServer(o: ServerOptions) {
   })
   app.get('/api/home', (c) => {
     if (!stop.isStopped()) poller.maybe() // 画面を開いたとき（4.5）
-    const { running, lastAt } = poller.view()
-    const connected = google.status().state === 'connected'
+    const { running, lastAt: gmailAt } = poller.view()
+    // どちらかがつながっていれば候補の欄を出す。取り込みの時刻は新しいほう（6.6 (7)）
+    const connected = google.status().state === 'connected' || slack?.status().state === 'connected'
+    const slackAt = poller.slackView().lastAt
+    const lastAt = [gmailAt, slackAt]
+      .filter((x) => x !== undefined)
+      .sort()
+      .at(-1)
     return c.json(homeView(ledger, { ...status }, { connected, running, ...(lastAt && { lastAt }) }))
   })
 

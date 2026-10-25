@@ -141,6 +141,7 @@ const toCard = (r: Row) =>
       attachmentsNeeded: json(r.attachments_needed),
       attachments: json(r.attachments),
       account: r.account,
+      othersPost: r.others_post === null || r.others_post === undefined ? undefined : r.others_post === 1,
     }),
   )
 const cardCols = (k: CardContent) =>
@@ -155,6 +156,7 @@ const cardCols = (k: CardContent) =>
     k.attachmentsNeeded ? JSON.stringify(k.attachmentsNeeded) : null,
     k.attachments ? JSON.stringify(k.attachments) : null,
     k.account ?? null,
+    k.othersPost === undefined ? null : k.othersPost ? 1 : 0,
   ] as const
 
 const toCandidate = (r: Row) =>
@@ -463,8 +465,8 @@ export class Ledger {
       this.#appendCandidateEvent({ type: 'presented', candidateId }, at)
       this.#db
         .prepare(
-          `INSERT INTO candidate_cards (candidate_id, subject, from_name, received_at, link, reason, summary, proposal, attachments_needed, attachments, account)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO candidate_cards (candidate_id, subject, from_name, received_at, link, reason, summary, proposal, attachments_needed, attachments, account, others_post)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(candidateId, ...cardCols(k))
     })
@@ -477,7 +479,7 @@ export class Ledger {
       const r = this.#db
         .prepare(
           `UPDATE candidate_cards SET subject = ?, from_name = ?, received_at = ?, link = ?, reason = ?, summary = ?,
-             proposal = ?, attachments_needed = ?, attachments = ?, account = ? WHERE candidate_id = ?`,
+             proposal = ?, attachments_needed = ?, attachments = ?, account = ?, others_post = ? WHERE candidate_id = ?`,
         )
         .run(...cardCols(k), candidateId)
       if (!r.changes) return false

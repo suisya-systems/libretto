@@ -1,4 +1,5 @@
 // 起動（docs/implementation.md 12 章）。`libretto` でホスト、`libretto stop` で緊急停止（4.4・5.7 (3)）
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { serve } from '@hono/node-server'
@@ -7,6 +8,7 @@ import { causeOf, checkIsolation, probeDir } from './checks/isolation.ts'
 import { purgeClosed } from './facts/purge.ts'
 import { createGoogle, googleConfig } from './intake/google.ts'
 import { POLL_MS } from './intake/poller.ts'
+import { createSlack, slackToken } from './intake/slack.ts'
 import { callsDir, caseDir, initHome, monthCapFromEnv, resolveHome } from './ledger/db.ts'
 import { createClaudeCli, resolveClaude } from './model/claude-cli.ts'
 import { createInvoke, type Job } from './model/invoke.ts'
@@ -49,13 +51,17 @@ if (sandboxCheck.reason?.startsWith('missing:') || sandboxCheck.reason === 'user
   )
 if (!sandboxCheck.claudeOk)
   console.error(`libretto: Claude Code ${MIN_CLAUDE} or later is required. Claude is not called.`)
-const sandbox = createSandbox({ home, claude, check: () => sandboxCheck })
+// コードの置き場の .env.local（Google の秘密と Slack のトークン）を作り手に読ませない。ホームの外に置かれても（6.6 (2)）
+const envFile = fileURLToPath(new URL('../../.env.local', import.meta.url))
+const secrets = existsSync(envFile) ? [envFile] : []
+const sandbox = createSandbox({ home, claude, check: () => sandboxCheck, secrets })
 // 隔離の点検の対照: checks/ を開け直した起こし方（8.10 (4)）
 const control = createSandbox({
   home,
   claude,
   check: () => sandboxCheck,
   reopen: [join(probeDir(home), 'checks')],
+  secrets,
 })
 // ponytail: 為替と上限は 5.3 の既定（P3: 全体は未入力。検証では LIBRETTO_MONTH_CAP_YEN。11.3 (2)）。settings.json から読むのは設定の Issue
 const usdJpy = () => 150
@@ -100,6 +106,7 @@ const server = createServer({
   invoke,
   origins,
   google,
+  slack: createSlack({ token: slackToken(), log: (line) => console.error(line) }),
   staticDir: fileURLToPath(new URL('../../page/dist', import.meta.url)),
   isolation: sandboxCheck.isolation,
   ...(cause && { cause }),

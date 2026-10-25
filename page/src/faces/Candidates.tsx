@@ -1,4 +1,4 @@
-// ホームの「依頼の候補」の欄（画面案 1 の合図カード。docs/implementation.md 6.4 (5)(7)）。進める・見送る・内容を修正（候補の中の会話）
+// ホームの「依頼の候補」の欄（画面案 1 の合図カード。docs/implementation.md 6.4 (5)(7)・6.6 (5)(7)）。進める・見送る・内容を修正（候補の中の会話）
 import type { CandidateCard, DeliveryTarget, HomeView } from '@libretto/shared/api'
 import { useState } from 'react'
 import { useLocation } from 'wouter'
@@ -8,7 +8,7 @@ import { Confirm } from '../parts/Dialog.tsx'
 import { W, type WKey, w } from '../wording.ts'
 import { Chat } from './Chat.tsx'
 
-// ラベルのカードで選べる見送りの理由（6.4 (5)）
+// ラベル・リアクションのカードで選べる見送りの理由（6.4 (5)）
 const REASONS = ['依頼ではない', '自分の仕事ではない', 'もう済んだ'] as const
 type Reason = (typeof REASONS)[number]
 
@@ -52,10 +52,11 @@ function Card({ c, stopped, reload }: { c: CandidateCard; stopped: boolean; relo
   }
 
   const titleId = `cand-${c.id}`
+  const slack = c.source === 'slack'
   return (
     <li className="card cand" aria-labelledby={titleId}>
       <div className="cand-head">
-        <span className="badge b-you badge-sm">{W['cand.mark.gmail']}</span>
+        <span className="badge b-you badge-sm">{W[slack ? 'cand.mark.slack' : 'cand.mark.gmail']}</span>
         <span className="muted small">{w('cand.from', { from: c.from, at: when(c.receivedAt) })}</span>
       </div>
       <h3 className="cand-title" id={titleId}>
@@ -71,6 +72,7 @@ function Card({ c, stopped, reload }: { c: CandidateCard; stopped: boolean; relo
       {!!c.attachmentsNeeded?.length && (
         <p className="note-warn small">{w('cand.attach', { names: c.attachmentsNeeded.join('」「') })}</p>
       )}
+      {c.othersPost && <p className="muted small">{w('cand.othersPost', { from: c.from })}</p>}
       {c.aiInstructionFlag && <p className="note-alert small">{W['cand.aiNote']}</p>}
       <div className="cand-actions">
         <button
@@ -111,7 +113,7 @@ function Card({ c, stopped, reload }: { c: CandidateCard; stopped: boolean; relo
           />
         </Confirm>
         <a className="btn btn-quiet btn-sm" href={c.link} target="_blank" rel="noreferrer noopener">
-          {W['cand.open']}
+          {W[slack ? 'cand.openSlack' : 'cand.open']}
         </a>
       </div>
       {notice && (
