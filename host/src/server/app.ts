@@ -36,10 +36,11 @@ import { type Fetch, fetchedSources, materialsDir } from '../facts/inventory.ts'
 import { CLOSED, purge } from '../facts/purge.ts'
 import { readThread } from '../intake/gmail.ts'
 import { createGoogle, type Google, parseClientJson } from '../intake/google.ts'
+import { MEET_WINDOW_DAYS, meetFileId, rereadNote } from '../intake/meet.ts'
 import { createPoller, RUN_KEY } from '../intake/poller.ts'
 import { createSlack, parseCandidateId, readPost, type Slack } from '../intake/slack.ts'
 import { caseDir } from '../ledger/db.ts'
-import type { Ledger } from '../ledger/ledger.ts'
+import { jst, type Ledger } from '../ledger/ledger.ts'
 import type { Job, Outcome } from '../model/invoke.ts'
 import {
   deleteGoogleClient,
@@ -138,9 +139,13 @@ export function createServer(o: ServerOptions) {
   const gmailLabel = o.gmailLabel ?? 'libretto'
   const slack = o.slack ?? createSlack({ token: () => readKey(home, 'slack'), log })
   const slackEmoji = o.slackEmoji ?? 'memo'
-  // 取り込み元の本文を読み直す。今の連携の本人が取り込んだときと同じときだけ（6.4 (5)(6)・6.6 (6)）
+  // 取り込み元の本文を読み直す。今の連携の本人が取り込んだときと同じときだけ（6.4 (5)(6)・6.6 (6)・6.7 (4)）
   const reread = async (candidateId: string, account: string | undefined, signal: AbortSignal) => {
     if (!account) return undefined
+    if (candidateId.startsWith('meet:')) {
+      const s = google.status()
+      return s.email === account && s.meet ? rereadNote(google, candidateId, signal) : undefined
+    }
     const at = parseCandidateId(candidateId)
     if (at) {
       if (!slack.configured()) return undefined
@@ -364,6 +369,7 @@ export function createServer(o: ServerOptions) {
         ...google.status(),
         label: gmailLabel,
         ...intake,
+        ...poller.meetView(),
       },
       slack: slackView(),
     }
@@ -461,7 +467,7 @@ export function createServer(o: ServerOptions) {
       const caseId = randomUUID()
       // intake.json はトランザクションの前に新しい案件フォルダへ（4.2 T2）
       if (cand.status === 'presented' && card) {
-        const w = writing(c, () => writeIntake(caseId, candidateId, cand.source, card))
+        const w = writing(c, () => writeIntake(caseId, cand, card))
         if (w instanceof Response) return w
       }
       const r = writing(c, () =>
@@ -477,8 +483,8 @@ export function createServer(o: ServerOptions) {
       return c.json(CandidateActionResult.parse({ caseId: r.case.caseId }))
     }
 
-    // 見送る。「この人・この場所からは拾わなくてよい」は推測にしか効かないので、ラベルのカードでは受けない（6.4 (5)）
-    if (a.reason === '拾わなくてよい' && cand.origin === '合図') return c.json({ reason: 'invalid' }, 400)
+    // 見送る。「この人・この場所からは拾わなくてよい」は推測にしか効かないので、ラベル・会議のカードでは受けない（6.4 (5)・6.7 (4)）
+    if (a.reason === '拾わなくてよい' && cand.origin !== '推測') return c.json({ reason: 'invalid' }, 400)
     const r = writing(c, () => transition(ledger, { type: 'candidate.dismiss', candidateId, reason: a.reason }))
     if (r instanceof Response) return r
     if (!r.ok) return refused(r)
@@ -486,22 +492,29 @@ export function createServer(o: ServerOptions) {
     return c.json({})
   })
 
-  // 候補から作る案件の intake.json（6.4 (5)・6.6 (6)）。Slack の threadId は <channelId>:<ts>
+  // 候補から作る案件の intake.json（6.4 (5)・6.6 (6)・6.7 (4)）。Slack の threadId は <channelId>:<ts>、会議メモはファイルの id
   function writeIntake(
     caseId: string,
-    candidateId: string,
-    source: 'gmail' | 'slack' | 'meet',
+    cand: NonNullable<ReturnType<Ledger['getCandidate']>>,
     card: NonNullable<ReturnType<Ledger['getCandidateCard']>>,
   ) {
+    const { candidateId, source, confidence = '低' } = cand
     const dir = caseDir(home, caseId)
     mkdirSync(dir, { recursive: true, mode: 0o700 })
+    // 由来は候補のとおり（transition.ts の originOf と同じ写し方）
+    const origin: Intake['origin'] =
+      cand.origin === '合図'
+        ? { kind: '合図', source }
+        : cand.origin === '会議'
+          ? { kind: '会議', confidence }
+          : { kind: '推測', source, confidence, reason: card.reason ?? '' }
     const intake: Intake = {
-      origin: { kind: '合図', source },
+      origin,
       summary: card.summary,
       materials: [{ id: candidateId, kind: '元データ', title: card.subject, where: card.link }],
       source: {
         candidateId,
-        threadId: candidateId.replace(/^(gmail|slack):/, ''),
+        threadId: meetFileId(candidateId) ?? candidateId.replace(/^(gmail|slack):/, ''),
         account: card.account ?? '',
         subject: card.subject,
         from: card.from,
@@ -534,11 +547,19 @@ export function createServer(o: ServerOptions) {
     // どちらかがつながっていれば候補の欄を出す。取り込みの時刻は新しいほう（6.6 (7)）
     const connected = google.status().state === 'connected' || slack.status().state === 'connected'
     const slackAt = poller.slackView().lastAt
-    const lastAt = [gmailAt, slackAt]
+    const lastAt = [gmailAt, slackAt, poller.meetView().meetLastAt]
       .filter((x) => x !== undefined)
       .sort()
       .at(-1)
-    return c.json(homeView(ledger, { ...status }, { connected, running, ...(lastAt && { lastAt }) }))
+    // 窓の中の会議メモのうち、候補にならなかったもの（6.7 (5)）
+    const email = google.status().email
+    const since = jst(new Date(now().getTime() - MEET_WINDOW_DAYS * 86_400_000))
+    const meetNotes = email
+      ? ledger
+          .listMeetNotes(email, since, 10)
+          .flatMap(({ title, heldAt, link, result }) => (result === 'items' ? [] : [{ title, heldAt, link, result }]))
+      : []
+    return c.json(homeView(ledger, { ...status }, { connected, running, ...(lastAt && { lastAt }) }, meetNotes))
   })
 
   // 一覧（5.2）。完了した依頼（/done）が使う。新しく変わった順

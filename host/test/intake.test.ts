@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { INSTRUCTION_MARK } from '../src/facts/instructions.ts'
 import { CARD_EXAMPLE, CARD_FALLBACK, CARD_INSTRUCTION, CardDraft, cardViolations } from '../src/intake/card.ts'
 import { parseFrom, parseThread } from '../src/intake/gmail.ts'
-import { createGoogle, DRIVE_SCOPE, GMAIL_SCOPE } from '../src/intake/google.ts'
+import { createGoogle, DRIVE_SCOPE, GMAIL_SCOPE, MEET_SCOPE } from '../src/intake/google.ts'
 import { caseDir, initHome } from '../src/ledger/db.ts'
 import type { Ledger } from '../src/ledger/ledger.ts'
 import { createFake, type ScriptEntry } from '../src/model/fake.ts'
@@ -215,11 +215,11 @@ describe('メールの読み取り（6.4 (3)）', () => {
 })
 
 describe('連携（6.4 (2)）', () => {
-  it('連携の URL は gmail.readonly と drive.file だけ・PKCE・オフライン。戻りで google.json を 0600 で書き、応答にトークンを出さない', async () => {
+  it('連携の URL は gmail.readonly と drive.file と drive.meet.readonly だけ・PKCE・オフライン。戻りで google.json を 0600 で書き、応答にトークンを出さない', async () => {
     await setup({ connected: false })
     const url = await startUrl()
     expect(url.origin + url.pathname).toBe(g.endpoints.auth)
-    expect(url.searchParams.get('scope')).toBe(`${GMAIL_SCOPE} ${DRIVE_SCOPE}`)
+    expect(url.searchParams.get('scope')).toBe(`${GMAIL_SCOPE} ${DRIVE_SCOPE} ${MEET_SCOPE}`)
     expect(url.searchParams.get('code_challenge_method')).toBe('S256')
     expect(url.searchParams.get('access_type')).toBe('offline')
     expect(url.searchParams.get('redirect_uri')).toBe(`${ORIGIN}/oauth/google/callback`)

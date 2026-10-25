@@ -1,4 +1,5 @@
-// 拾い上げ（docs/implementation.md 4.5・6.4 (3)・6.6 (4)）。Gmail のラベルの付いたスレッドと、Slack で本人が :memo: を付けた投稿を候補にする（T1）。
+// 拾い上げ（docs/implementation.md 4.5・6.4 (3)・6.6 (4)・6.7 (2)）。Gmail のラベルの付いたスレッドと、Slack で本人が :memo: を付けた投稿と、
+// 会議メモの本人担当の行動項目を候補にする（T1）。
 // 時刻のカーソルは持たない。同時に 1 本。runs で起こすので、STOP の間は起きず、すべて停止で切れる
 import { transition } from '../case/transition.ts'
 import type { Ledger } from '../ledger/ledger.ts'
@@ -8,6 +9,7 @@ import { type Runs, Stopped } from '../runs.ts'
 import { draftCard, flagInstructions, toCardContent } from './card.ts'
 import { labelId, readThread, threadIds } from './gmail.ts'
 import type { Google, GoogleFail } from './google.ts'
+import { createMeet, type MeetProblem } from './meet.ts'
 import {
   markedBy,
   type Names,
@@ -53,6 +55,8 @@ export function createPoller(d: Deps) {
   let docsProblem: 'api_disabled' | undefined
   let docsCheckedAt = -1
   const sl: { lastAt?: string; problem: Problem; sweep?: string | undefined } = { problem: undefined }
+  const mt: { lastAt?: string; problem?: MeetProblem | undefined } = {}
+  const meet = createMeet({ ...d, now })
 
   // 失敗は連携の欄に出す。auth_expired は google / slack の側が覚える
   const why = (f: GoogleFail | SlackFail): Problem =>
@@ -194,10 +198,20 @@ export function createPoller(d: Deps) {
     sl.lastAt = jst(now())
   }
 
-  // Gmail の後に Slack。片方の失敗はもう片方を止めない（6.6 (4)）
+  // 会議メモは連携に Meet のファイルの許可があるときだけ（6.7 (1)）
+  async function meetOnce(signal: AbortSignal) {
+    const r = await meet.once(signal)
+    if (r === 'stopped') return
+    mt.problem = r
+    if (!r) mt.lastAt = jst(now())
+  }
+
+  // Gmail の後に Slack、その後に会議メモ。どれかの失敗はほかを止めない（6.6 (4)・6.7 (2)）
   async function once(signal: AbortSignal) {
-    if (d.google.status().state === 'connected') await gmailOnce(signal)
+    const google = () => d.google.status()
+    if (google().state === 'connected') await gmailOnce(signal)
     if (d.slack?.configured() && !signal.aborted) await slackOnce(d.slack, signal)
+    if (google().state === 'connected' && google().meet && !signal.aborted) await meetOnce(signal)
   }
 
   // 走っていれば同じ回に乗る。どちらもつながっていない・止まっている間は何もしない
@@ -241,5 +255,6 @@ export function createPoller(d: Deps) {
       ...(docsProblem && { docsProblem }),
     }),
     slackView: () => ({ ...(sl.lastAt && { lastAt: sl.lastAt }), ...(sl.problem && { problem: sl.problem }) }),
+    meetView: () => ({ ...(mt.lastAt && { meetLastAt: mt.lastAt }), ...(mt.problem && { meetProblem: mt.problem }) }),
   }
 }

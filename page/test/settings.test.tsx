@@ -27,7 +27,7 @@ beforeEach(() => {
   jev = { kind: 'jev', set: true, last4: 'WXYZ', savedAt: '2026-10-24T17:00:00+09:00' }
   conn = {
     isolation: { level: 'strong', running: false },
-    google: { configured: false, state: 'none', label: 'libretto', docs: false },
+    google: { configured: false, state: 'none', label: 'libretto', docs: false, meet: false },
     slack: { configured: false, state: 'none', emoji: 'memo', missingScopes: [] },
   }
   respond = () => new Response('{}')
@@ -290,7 +290,7 @@ describe('あなたの文体の見本（6.3.2 (10)）', () => {
 
 describe('連携の節（Google。6.4 (7)）', () => {
   const google = (g: Partial<ConnectionsView['google']>) => {
-    conn = { ...conn, google: { configured: true, state: 'none', label: 'libretto', docs: true, ...g } }
+    conn = { ...conn, google: { configured: true, state: 'none', label: 'libretto', docs: true, meet: true, ...g } }
   }
   const row = (el: HTMLElement) => el.querySelector('#h-link')?.parentElement as HTMLElement
 
@@ -388,6 +388,21 @@ describe('連携の節（Google。6.4 (7)）', () => {
     expect(dialog.textContent).toContain(W['settings.google.disconnectBody'])
     await r.click(r.button(W['settings.google.disconnect']) && [...dialog.querySelectorAll('button')].at(-1))
     expect(sent).toEqual([{ method: 'DELETE', path: '/api/connections/google' }])
+    r.done()
+  })
+
+  it('会議メモ: できることの文と目印。Meet の許可が無ければ連携し直しを促し、Drive API が無効の文を出す（6.7 (1)(5)）', async () => {
+    google({ state: 'connected', email: 'me@example.com', meet: false, meetProblem: 'api_disabled' })
+    const r = await render()
+    const g = row(r.el)
+    for (const s of [
+      W['settings.google.useMeet'],
+      W['settings.google.meetSignal'],
+      W['settings.google.meetMissing'],
+      W['settings.google.meetProblem.api_disabled'],
+    ])
+      expect(g.textContent).toContain(s)
+    expect(r.button(W['settings.google.connect'])).toBeDefined()
     r.done()
   })
 

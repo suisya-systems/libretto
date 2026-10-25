@@ -1,5 +1,6 @@
 // 偽の Google（docs/implementation.md 11.1・6.4 (8)・6.5 (10)）。OAuth のトークン・取り消しと Gmail の 4 口、
-// Drive の 3 口（multipart の作成・appProperties の検索・HTML の書き出し）をプロセス内の HTTP で受け、受けた要求を記録する。
+// Drive の 3 口（multipart の作成・appProperties の検索・HTML の書き出し）と会議メモ（一覧・text/plain の書き出し。6.7 (7)）を
+// プロセス内の HTTP で受け、受けた要求を記録する。
 // テストは「添付の口を呼んでいない」をこの記録で確かめる
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
@@ -75,9 +76,13 @@ function multipart(body: Buffer, type: string): { meta: Record<string, unknown>;
   return { meta: JSON.parse((parts[0] as Buffer).toString('utf-8')), media: parts[1] as Buffer }
 }
 
+// Meet が作った Google ドキュメント（drive.meet.readonly で見えるもの）
+export type MeetNoteFile = { id: string; name: string; createdTime: string; modifiedTime: string; text: string }
+
 export async function startFakeGoogle() {
   const seen: Seen[] = []
   const files = new Map<string, DriveFile>()
+  const notes = new Map<string, MeetNoteFile>()
   const threads = new Map<string, RawThread>()
   const labels = [
     { id: 'INBOX', name: 'INBOX' },
@@ -99,6 +104,8 @@ export async function startFakeGoogle() {
     createThenFail: 0, // 作成を受けてファイルを作った上で 500 を返す回数（作られたか分からない場面）
     dropParagraph: false, // 書き出しで最初の段落を落とす（読み戻しの不一致）
     exportFail: 0, // 書き出しを 500 にする回数
+    displayName: '岩間 涼', // about の user.displayName
+    notesPageSize: 100,
   }
   const issue = () => {
     const t = `at-${++state.issued}`
@@ -187,7 +194,25 @@ export async function startFakeGoogle() {
       files.set(f.id, f)
       return json(200, pick(f))
     }
-    if (url.pathname === '/drive/v3/about') return json(200, { kind: 'drive#about' })
+    if (url.pathname === '/drive/v3/about')
+      return json(200, { kind: 'drive#about', user: { displayName: state.displayName } })
+    // 会議メモの一覧: 窓（createdTime >）の中の Meet のドキュメント。題名では絞らない
+    const since = /createdTime > '([^']+)'/.exec(url.searchParams.get('q') ?? '')?.[1]
+    if (url.pathname === '/drive/v3/files' && since) {
+      const all = [...notes.values()]
+        .filter((n) => n.createdTime > since)
+        .sort((a, b) => (a.createdTime < b.createdTime ? -1 : 1))
+      const from = Number(url.searchParams.get('pageToken') ?? 0)
+      const page = all.slice(from, from + state.notesPageSize)
+      const next = from + state.notesPageSize < all.length ? String(from + state.notesPageSize) : undefined
+      return json(200, {
+        files: page.map(({ text: _, ...n }) => ({
+          ...n,
+          webViewLink: `https://docs.google.com/document/d/${n.id}/edit`,
+        })),
+        ...(next && { nextPageToken: next }),
+      })
+    }
     if (url.pathname === '/drive/v3/files') {
       const q = url.searchParams.get('q') ?? ''
       const [, k, v] = /key='([^']*)' and value='([^']*)'/.exec(q) ?? []
@@ -203,6 +228,11 @@ export async function startFakeGoogle() {
       return f ? json(200, { id: f.id, trashed: !!f.trashed, shared: !!f.shared }) : json(404, { error: { code: 404 } })
     }
     const ex = /^\/drive\/v3\/files\/([^/]+)\/export$/.exec(url.pathname)
+    const note = ex && notes.get(decodeURIComponent(ex[1] as string))
+    if (note) {
+      res.writeHead(200, { 'content-type': 'text/plain' })
+      return res.end(note.text)
+    }
     if (ex) {
       const f = files.get(decodeURIComponent(ex[1] as string))
       if (!f) return json(404, { error: { code: 404 } })
@@ -253,6 +283,7 @@ export async function startFakeGoogle() {
     seen,
     state,
     files,
+    notes,
     labels,
     // ラベルの付いたスレッドを足す
     add(t: RawThread, label = true) {

@@ -38,7 +38,9 @@ export type State = {
   isolation?: { level: HostStatus['isolation']; cause?: IsolationCause; last?: IsolationRecord }
   fetch?: Fetch // 出典の取り寄せの偽物（網に出ない。6.3.1 (5)）
   voiceSamples?: { title: string; url: string }[] // 会話の前に「あなたの文体の見本」を登録しておく（6.3.2 (10)）
-  google?: true | 'gmail' // Google と連携済みにする（偽の設定と google.json。Google へはつながない。6.4 (7)）。'gmail' は Drive の許可の無い前の連携（6.5 (2)）
+  // Google と連携済みにする（偽の設定と google.json。Google へはつながない。6.4 (7)）。'gmail' は Drive の許可の無い前の連携（6.5 (2)）、
+  // 'docs' は Meet のファイルの許可の無い前の連携（6.7 (1)）
+  google?: true | 'gmail' | 'docs'
 }
 
 const at = (h: number) => `2026-10-24T${String(h).padStart(2, '0')}:05:00.000+09:00`
@@ -398,6 +400,64 @@ export const STATES: Record<string, State> = {
     selector: '.cand',
     path: () => '/',
   },
+  // ホーム: 会議メモの行動項目の候補（会議・高と、折りたたんだ推測・低）と、候補にならなかったメモ（6.7 (5)）
+  'home-meet': {
+    script: entrance(),
+    google: true,
+    drive: async (ctx) => {
+      const link = (id: string) => `https://docs.google.com/document/d/${id}/edit`
+      const items: [string, '会議' | '推測', '高' | '低', string, string][] = [
+        ['meet:f1:aaaaaaaaaaaa', '会議', '高', '岩間 涼', '来週の定例で使う、新サービスの紹介資料をまとめる'],
+        ['meet:f1:bbbbbbbbbbbb', '推測', '低', '', '会議の内容を関係者向けのメモにまとめる'],
+      ]
+      for (const [id, origin, confidence, from, summary] of items) {
+        const r = transition(ctx.ledger, {
+          type: 'candidate.presented',
+          candidate: {
+            candidateId: id,
+            source: 'meet',
+            origin,
+            confidence,
+            aiInstructionFlag: false,
+            senderKey: 'meet:ブレスト',
+          },
+          card: {
+            subject: 'ブレスト',
+            from,
+            receivedAt: at(11),
+            link: link('f1'),
+            ...(origin === '推測' && { reason: '担当がチームと書かれています' }),
+            summary,
+            proposal: { docType: 'メモ', destination: [{ kind: 'page', shared: false }] },
+            attachmentsNeeded: [],
+            attachments: [],
+            account: 'me@example.com',
+          },
+        })
+        if (!r.ok) throw new Error(`candidate ${id}: ${r.reason}`)
+      }
+      const notes = [
+        ['f2', '定例', 'none'],
+        ['f3', '朝会', 'unreadable'],
+        ['f4', '1on1', 'notMine'],
+      ] as const
+      for (const [fileId, title, result] of notes)
+        ctx.ledger.putMeetNote({
+          account: 'me@example.com',
+          fileId,
+          title,
+          heldAt: at(9),
+          link: link(fileId),
+          modifiedTime: '2026-10-24T00:10:00.000Z',
+          result,
+          truncated: false,
+        })
+    },
+    expect: (v) => v.state === '入口待ち',
+    mark: W['cand.mark.meet.高'],
+    selector: '.cand',
+    path: () => '/',
+  },
   // 設定: Google と連携済み（6.4 (7)）
   'settings-google': {
     script: entrance(),
@@ -413,6 +473,15 @@ export const STATES: Record<string, State> = {
     google: 'gmail',
     expect: (v) => v.state === '入口待ち',
     mark: W['settings.google.docsMissing'],
+    path: () => '/settings',
+    sameFirst390: true,
+  },
+  // 設定: Meet のファイルの許可の無い前の連携で、会議メモには連携し直しが要る（6.7 (1)）
+  'settings-google-meet': {
+    script: entrance(),
+    google: 'docs',
+    expect: (v) => v.state === '入口待ち',
+    mark: W['settings.google.meetMissing'],
     path: () => '/settings',
     sameFirst390: true,
   },
