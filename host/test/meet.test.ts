@@ -161,6 +161,9 @@ describe('会議メモの読み取り（6.7 (2)(3)）', () => {
     expect(actionItems('次のステップ:\n* ありません\n')).toEqual({ items: [], truncated: false })
     expect(actionItems(NOTE_TEXT([MINE, OTHERS]))).toEqual({ items: [MINE, OTHERS], truncated: false })
     expect(actionItems(`Suggested next steps\n${'- x\n'.repeat(51)}`)?.truncated).toBe(true)
+    // 項目の中の「Gemini」では節を切らず、末尾の注意書きで切る
+    const g1 = '[岩間 涼] Gemini の評価レポートを作る'
+    expect(actionItems(NOTE_TEXT([g1, MINE]))?.items).toEqual([g1, MINE])
   })
   it('確信度: 名前かアドレス全体が項目にあれば高、モデルが本人と言っただけなら中、曖昧は低', () => {
     const me = { email: 'me@example.com', name: '岩間 涼' }
@@ -223,6 +226,23 @@ describe('拾い上げ（6.7 (2)(3)(5)）', () => {
     expect(meetCalls()).toHaveLength(1)
     const r = Object.fromEntries((await home_()).meetNotes.map((n) => [n.link.split('/')[5], n.result]))
     expect(r).toEqual({ f1: 'none', f2: 'unreadable', f3: 'notMine' })
+  })
+
+  it('書き出しを断られたメモは「見つけられません」にして、後ろのメモを止めない', async () => {
+    await setup()
+    note('f1', [MINE])
+    note('f2', [MINE], { name: '定例 - 2026/10/24 10:00 JST - Gemini によるメモ' })
+    g.state.fail = {
+      status: 403,
+      body: '{"error":{"errors":[{"reason":"cannotDownloadFile"}]}}',
+      times: 1,
+      path: /\/f1\/export$/,
+    }
+    meetReply = () => say({ items: [pick(1, '本人')] })
+    await server.poller.run()
+    const v = await home_()
+    expect(v.meetNotes.map((n) => [n.link.split('/')[5], n.result])).toEqual([['f1', 'unreadable']])
+    expect(v.candidates.meeting.map((c) => c.id)).toEqual([meetCandidateId('f2', MINE)])
   })
 
   it('題名の形に合わないもの・書き足しの途中（10 分以内）は読まない。一覧の窓は 14 日', async () => {

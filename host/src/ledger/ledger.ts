@@ -588,11 +588,13 @@ export class Ledger {
       )
   }
 
-  // 会議の日時が since より後のもの。新しい順（ホームの 1 行。6.7 (5)）
+  // 会議の日時が since より後で、候補にならなかったもの。新しい順（ホームの 1 行。6.7 (5)）
   listMeetNotes(account: string, since: string, limit: number): MeetNote[] {
     return (
       this.#db
-        .prepare('SELECT * FROM meet_notes WHERE account = ? AND held_at > ? ORDER BY held_at DESC LIMIT ?')
+        .prepare(
+          `SELECT * FROM meet_notes WHERE account = ? AND held_at > ? AND result <> 'items' ORDER BY held_at DESC LIMIT ?`,
+        )
         .all(account, since, limit) as Row[]
     ).map(meetNote)
   }

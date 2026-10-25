@@ -37,6 +37,8 @@ const START =
   /^(推奨される次のステップ|次のステップ|行動項目|アクション ?アイテム|Suggested next steps|Next steps|Action items)$/i
 const END = /^(まとめ|概要|詳細|Summary|Details)$/i
 const BULLET = /^\s*(?:[*\-•・●◦▪]|\d+[.)．])\s*/
+// 末尾の注意書き（「Gemini が作成したメモは…」「You should review Gemini's notes…」）。項目の中の「Gemini」では切らない
+const FOOTER = /^(Gemini\s?(が|は|に|の|can|may|makes)|You should review Gemini)/i
 const NOTHING =
   /^(なし|ありません|特にありません|推奨される次のステップはありません|None|No (suggested )?next steps.*)[。.]?$/i
 const plain = (line: string) => line.replace(/^[#\s📝]+/u, '').replace(/[:：\s]+$/, '')
@@ -50,7 +52,7 @@ export function actionItems(text: string): { items: string[]; truncated: boolean
   for (const l of lines.slice(start + 1)) {
     const p = plain(l)
     // 次の見出しか、末尾の Gemini の注意書きで節が終わる
-    if (END.test(p) || START.test(p) || /Gemini/.test(p)) break
+    if (END.test(p) || START.test(p) || FOOTER.test(p)) break
     const item = l.replace(BULLET, '').trim()
     if (item && !NOTHING.test(item)) items.push(item.slice(0, MAX_ITEM))
   }
@@ -229,6 +231,11 @@ export function createMeet(d: Deps) {
           truncated,
         })
       const r = await readNote(g, f.id, signal)
+      // 書き出しを断られたメモ（持ち主がダウンロードを止めたなど）は見つけられませんとして、ほかのメモを止めない
+      if (!r.ok && r.why === 'rejected') {
+        note('unreadable')
+        continue
+      }
       if (!r.ok) return problemOf(r)
       if (g.generation() !== generation) return 'stopped'
       // 節が無い → 見つけられません。項目が無い → 行動項目なし。モデルは呼ばない
@@ -278,7 +285,7 @@ export function createMeet(d: Deps) {
         const senderKey = `meet:${meeting}` // 繰り返しの会議を「この場所からは拾わなくてよい」で外せる（推測のときだけ効く）
         if (confidence === '低' && d.ledger.isSuppressed('sender', senderKey)) continue
         const flagged = await flagInstructions({ home: d.home, invoke: d.invoke, signal }, meeting, item)
-        if (flagged === 'stopped') return 'stopped'
+        if (flagged === 'stopped' || g.generation() !== generation) return 'stopped'
         transition(d.ledger, {
           type: 'candidate.presented',
           candidate: {
