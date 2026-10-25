@@ -52,8 +52,11 @@ export function createPoller(d: Deps) {
     if (g.status().docs && (docsCheckedAt !== generation || docsProblem)) {
       const r = await g.drive('/drive/v3/about?fields=kind', {}, signal)
       if (g.generation() !== generation) return
-      if (r.ok || r.why === 'api_disabled') docsCheckedAt = generation
-      docsProblem = !r.ok && r.why === 'api_disabled' ? 'api_disabled' : undefined
+      // 届かないなど決め手の無い失敗では、前の判断も「確かめた」印も変えない（次の回にもう一度）
+      if (r.ok || r.why === 'api_disabled') {
+        docsCheckedAt = generation
+        docsProblem = r.ok ? undefined : 'api_disabled'
+      }
     }
     const label = await labelId(g, d.label(), signal)
     if (!label.ok) return failed(label)
