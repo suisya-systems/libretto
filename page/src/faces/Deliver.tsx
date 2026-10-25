@@ -288,7 +288,7 @@ export function ResultFace({ c, reload, stopped }: { c: CaseView; reload: () => 
       {more.length > 0 && (
         <section aria-labelledby="h-add" className="stack">
           <h2 id="h-add">{W['result.addHeading']}</h2>
-          <div className="row-gap">
+          <div className="row-gap result-add">
             {more.map((k) => (
               <button
                 key={k}

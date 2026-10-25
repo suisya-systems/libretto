@@ -5,7 +5,7 @@ import { useRef, useState } from 'react'
 import { Link, useLocation } from 'wouter'
 import { useCaseAction } from '../action.ts'
 import { Confirm } from '../parts/Dialog.tsx'
-import { STATE, W, type WKey, w } from '../wording.ts'
+import { STATE, W, type WKey, w, yen } from '../wording.ts'
 import { tone } from './Home.tsx'
 
 export const PROGRESS_STATES: readonly CaseState[] = ['材料待ち', '下書き中', '検品中', '送付中', '停止', '取り消し']
@@ -65,7 +65,6 @@ function AutoRevise({ locked, send }: { locked: boolean; send: (note: string) =>
   )
 }
 
-const yen = (n: number) => n.toLocaleString('ja-JP')
 const time = (at: string) =>
   new Intl.DateTimeFormat('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(
     new Date(at),

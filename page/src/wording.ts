@@ -798,3 +798,7 @@ export type WKey = keyof typeof W
 
 export const w = (key: WKey, vars: Record<string, string | number> = {}) =>
   W[key].replace(/\{(\w+)\}/g, (_, k: string) => String(vars[k] ?? ''))
+
+// 円の出し方（6.12 (8)）。10 円以上は整数、10 円未満は小数 1 桁まで。切り上げて、掛かった額を少なく見せない
+export const yen = (n: number) =>
+  n.toLocaleString('ja-JP', { maximumFractionDigits: n < 10 ? 1 : 0, roundingMode: 'ceil' })

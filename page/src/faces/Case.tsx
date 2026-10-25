@@ -4,7 +4,7 @@
 import { CaseView, type HostStatus } from '@libretto/shared/api'
 import { Link } from 'wouter'
 import { useLoad } from '../load.ts'
-import { STATE, W, w } from '../wording.ts'
+import { STATE, W, w, yen } from '../wording.ts'
 import { ApprovalFace } from './Approval.tsx'
 import { DeliverFace, ResultFace } from './Deliver.tsx'
 import { EntranceFace } from './Entrance.tsx'
@@ -12,8 +12,6 @@ import { tone } from './Home.tsx'
 import { OutlineFace } from './Outline.tsx'
 import { ProblemView } from './Pending.tsx'
 import { PROGRESS_STATES, ProgressFace } from './Progress.tsx'
-
-const yen = (n: number) => n.toLocaleString('ja-JP')
 
 export function Case({
   id,

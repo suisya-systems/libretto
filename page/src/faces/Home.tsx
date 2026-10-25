@@ -5,7 +5,7 @@ import { useCaseAction } from '../action.ts'
 import { useLoad } from '../load.ts'
 import { Confirm } from '../parts/Dialog.tsx'
 import { EnvBand } from '../parts/EnvBand.tsx'
-import { STATE, W, w } from '../wording.ts'
+import { STATE, W, w, yen } from '../wording.ts'
 import { Candidates, when } from './Candidates.tsx'
 import { Chat } from './Chat.tsx'
 import { ProblemView } from './Pending.tsx'
@@ -18,7 +18,6 @@ export function tone(c: Pick<CaseCard, 'state' | 'turn'>) {
   return c.turn === '本人' ? 'b-you' : 'b-run'
 }
 
-const yen = (n: number) => n.toLocaleString('ja-JP')
 const today = () => new Intl.DateTimeFormat('ja-JP', { month: 'long', day: 'numeric', weekday: 'short' }).format()
 
 function Meta({ c }: { c: CaseCard }) {

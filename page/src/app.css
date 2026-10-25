@@ -17,6 +17,19 @@ body {
   font-size: var(--text-base);
   line-height: 1.7;
   overflow-x: hidden;
+  /* ホーム画面から開いた iPhone の時刻・電波と、横向きの切り欠きを避ける（6.12 (8)）。ほかでは 0 */
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
+}
+/* 時刻の下はナビの色で塗り、スクロールした本文が重ならない */
+body::before {
+  content: "";
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: env(safe-area-inset-top);
+  background: var(--color-nav);
+  z-index: 30;
 }
 a {
   color: var(--color-link);
@@ -63,13 +76,13 @@ p {
 /* 枠: 左ナビ＋本文 */
 .shell {
   display: flex;
-  min-height: 100dvh;
+  min-height: calc(100dvh - env(safe-area-inset-top));
 }
 .nav {
   flex: 0 0 var(--nav-w);
   position: sticky;
-  top: 0;
-  height: 100dvh;
+  top: env(safe-area-inset-top);
+  height: calc(100dvh - env(safe-area-inset-top));
   background: var(--color-nav);
   color: var(--color-nav-ink);
   padding: var(--space-7) var(--space-4);
@@ -790,7 +803,7 @@ select:disabled {
   border-color: var(--color-stopped);
 }
 .pair {
-  min-height: 100dvh;
+  min-height: calc(100dvh - env(safe-area-inset-top));
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2768,5 +2781,19 @@ select:disabled {
   /* ほかの節のボタンと同じく全幅（親指の的） */
   .device-add .btn {
     width: 100%;
+  }
+}
+
+/* 別の保存先のボタン: 長い名前は折り返す。スマホ幅では 1 列で幅をそろえる（6.12 (8)） */
+.result-add .btn {
+  white-space: normal;
+  max-width: 100%;
+  padding-block: 10px;
+  text-align: center;
+}
+@media (max-width: 720px) {
+  .result-add {
+    flex-direction: column;
+    align-items: stretch;
   }
 }

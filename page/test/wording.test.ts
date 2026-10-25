@@ -1,7 +1,7 @@
 // wording.ts が docs/ui-wording.md の「画面が wording.ts で引くラベル」と一致し、出さない語を含まない（5.5・5.8 (4)・11.2）
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { STATE, W } from '../src/wording.ts'
+import { STATE, W, yen } from '../src/wording.ts'
 
 const md = readFileSync(new URL('../../docs/ui-wording.md', import.meta.url), 'utf-8')
 const labels = md.slice(md.indexOf('### 画面が `wording.ts` で引くラベル'))
@@ -28,5 +28,20 @@ describe('wording.ts', () => {
     ]
     const rest = Object.entries(W).filter(([k]) => !allowed.includes(k))
     for (const s of [...rest.map(([, v]) => v), ...Object.values(STATE)]) expect(s).not.toMatch(CLI_MARKERS)
+  })
+})
+
+describe('yen', () => {
+  it('10 円以上は整数、10 円未満は小数 1 桁まで。切り上げで、掛かった額を 0 に見せない', () => {
+    expect([300.843, 1500, 1499.2, 10, 9.96, 0.43, 0.01, 0].map(yen)).toEqual([
+      '301',
+      '1,500',
+      '1,500',
+      '10',
+      '10',
+      '0.5',
+      '0.1',
+      '0',
+    ])
   })
 })
