@@ -25,6 +25,8 @@ import {
   type Mode,
   mixesTables,
   NoticePrefs,
+  Presence,
+  PushSubscriptionInput,
   SuppressionInput,
 } from '@libretto/shared/api'
 import type { Intake } from '@libretto/shared/ledger'
@@ -74,6 +76,7 @@ import {
   voiceSamples,
 } from '../settings.ts'
 import { createNotices, type Sender } from './notices.ts'
+import { createPush, vapidKeys } from './push.ts'
 import { createSlackDm, SLACK_DM_HOLD_MS } from './slack-dm.ts'
 import { createHub, type SseMessage } from './sse.ts'
 import { createStop, isStorageError } from './stop.ts'
@@ -110,6 +113,7 @@ export type ServerOptions = {
   slackBot?: Slack // お知らせの Slack の DM（6.8 (8)）。無ければ設定の画面で入れたボットトークンで
   tools?: Tools // 起動時の事前点検で見つけた LibreOffice と poppler（6.10 (5)）
   senders?: Record<string, Sender> // お知らせの画面の外の送り手（6.8 (5)）。Slack の DM は slackBot から作る
+  pushFetch?: typeof fetch // Web Push の配信元へ送る口（テストは偽の配信元へ向ける。6.8 (13)）
 }
 
 export function createServer(o: ServerOptions) {
@@ -118,15 +122,20 @@ export function createServer(o: ServerOptions) {
   const { home, ledger } = o
   const status: HostStatus = { stopped: false, storageOk: true, signIn: false, isolation: o.isolation ?? 'strong' }
   const hub = createHub()
-  // お知らせ（6.8）。出来事ごとの入り切りは書くときに settings から。画面の外の送り先は、ボットトークンがあれば Slack の DM
+  // お知らせ（6.8）。出来事ごとの入り切りは書くときに settings から。画面の外の送り先は、登録のある端末（Web Push）と、ボットトークンがあれば Slack の DM
+  const valid = (sessionId: string) => {
+    const at = ledger.sessionCreatedAt(sessionId)
+    return !!at && now().getTime() - Date.parse(at) < SESSION_MS
+  }
+  const push = createPush({ home, ledger, valid, ...(o.pushFetch && { fetch: o.pushFetch }), log })
   ledger.noticeRoute = {
     on: (kind) => kind !== 'info' && noticePrefs(home)[kind],
-    targets: () => (readKey(home, 'slackBot') ? ['slack'] : []),
+    targets: () => [...ledger.pushSessions().map((s) => `push:${s}`), ...(readKey(home, 'slackBot') ? ['slack'] : [])],
   }
   const notices = createNotices({
     ledger,
     hub,
-    senders: { slack: (target, ns) => slackDm.send(target, ns), ...o.senders },
+    senders: { push: push.sender, slack: (target, ns) => slackDm.send(target, ns), ...o.senders },
     holdMs: { slack: SLACK_DM_HOLD_MS },
     now,
     log,
@@ -300,11 +309,8 @@ export function createServer(o: ServerOptions) {
     return { url, expiresAt: new Date(expiresAt).toISOString() }
   }
 
-  const paired = (c: Context) => {
-    const v = getCookie(c, COOKIE)
-    const at = v && ledger.sessionCreatedAt(sha256(v))
-    return !!at && now().getTime() - Date.parse(at) < SESSION_MS
-  }
+  const sessionOf = (c: Context) => sha256(getCookie(c, COOKIE) ?? '')
+  const paired = (c: Context) => !!getCookie(c, COOKIE) && valid(sessionOf(c))
 
   // 保存の失敗は 503 にして帯を出す。成功したら帯を下ろす（5.7 (8)）
   function writing<T>(c: Context, fn: () => T): T | Response {
@@ -864,6 +870,8 @@ export function createServer(o: ServerOptions) {
       }
       // 登録してから送り直しを積む（同期なので、間に合図が挟まらない）
       const unsubscribe = hub.subscribe(send)
+      // このタブが見ているか（6.8 (2)）。つながっている間だけ数え、切れたら見ていない
+      const away = push.presence.connect(sessionOf(c), c.req.query('tab') ?? '')
       const replay = hub.since(c.req.header('last-event-id'))
       if (replay) for (const m of replay) send(m)
       else send({ id: hub.lastId(), event: 'resync', data: '{}' })
@@ -878,6 +886,7 @@ export function createServer(o: ServerOptions) {
       await ended
       clearInterval(beat)
       unsubscribe()
+      away()
     }),
   )
 
@@ -975,8 +984,36 @@ export function createServer(o: ServerOptions) {
     return c.json(issuePairing(body.data.label))
   })
   app.delete('/api/devices/:sessionId', (c) => {
-    const r = writing(c, () => ledger.appendSession('revoked', c.req.param('sessionId')))
+    const id = c.req.param('sessionId')
+    // 外した端末に通知を送り続けない（6.8 (6)）。登録と送り残しも消す
+    const r = writing(c, () =>
+      ledger.transaction(() => {
+        ledger.appendSession('revoked', id)
+        ledger.deletePushSubscription(id)
+      }),
+    )
     return r instanceof Response ? r : c.body(null, 204)
+  })
+
+  // この端末の Web Push の登録（6.8 (6)(13)）。画面が開くたび・許可したときに置き換える
+  app.get('/api/devices/push', (c) => {
+    const id = sessionOf(c)
+    const r = writing(c, () => vapidKeys(home).publicKey)
+    if (r instanceof Response) return r
+    return c.json({ publicKey: r, subscribed: !!ledger.pushSubscription(id), unreachable: push.unreachable(id) })
+  })
+  app.put('/api/devices/push', async (c) => {
+    const body = PushSubscriptionInput.safeParse(await c.req.json().catch(() => undefined))
+    if (!body.success) return c.json({ reason: 'invalid' }, 400)
+    const { endpoint, keys } = body.data
+    const r = writing(c, () => ledger.putPushSubscription(sessionOf(c), { endpoint, ...keys }))
+    return r instanceof Response ? r : c.body(null, 204)
+  })
+  app.post('/api/devices/presence', async (c) => {
+    const body = Presence.safeParse(await c.req.json().catch(() => undefined))
+    if (!body.success) return c.json({ reason: 'invalid' }, 400)
+    push.presence.set(sessionOf(c), body.data.tab, body.data.n, body.data.visible)
+    return c.body(null, 204)
   })
 
   // 手元のファイルのダウンロード（5.2・6.10 (4)）。その形式で保存した（送付済の）版だけ

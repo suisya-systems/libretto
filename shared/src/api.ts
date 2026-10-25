@@ -374,6 +374,16 @@ export const NoticePrefs = z.object({
   started: z.boolean(),
 })
 export type NoticePrefs = z.infer<typeof NoticePrefs>
+// 画面を閉じていても届く通知（6.8 (6)(13)）。PUT /api/devices/push は PushSubscription.toJSON() の形。配信元は https だけ
+export const PushSubscriptionInput = z.object({
+  endpoint: z.url({ protocol: /^https$/ }).max(2048),
+  keys: z.object({ p256dh: z.string().min(1).max(200), auth: z.string().min(1).max(200) }),
+})
+// GET /api/devices/push。subscribed はこの端末の登録をホストが持っているか、unreachable は前に送ったとき配信元に届かなかったか
+export const PushStatus = z.object({ publicKey: z.string(), subscribed: z.boolean(), unreachable: z.boolean() })
+export type PushStatus = z.infer<typeof PushStatus>
+// n はタブの中の通し番号（遅れて届いた前の POST で上書きしない）
+export const Presence = z.object({ tab: z.string().min(1).max(64), n: z.number().int(), visible: z.boolean() })
 
 // 止めたのは本人、保存できないのはホスト。別の欄（5.7 (8)）。signIn は Claude のログインし直し待ち（6.2.3 (7)）
 // isolation は作り手の隔離（8.9 (5)）。入口・承認の帯と設定の面が読む（8.10 (6)）

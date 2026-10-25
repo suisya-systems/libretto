@@ -1,5 +1,5 @@
 // サービスワーカー（docs/implementation.md 6.8 (2)）。画面から渡されたお知らせをブラウザの通知に出し、押されたら該当の面を開く。
-// 画面を閉じていても届く通知（Web Push）は後の Issue でここに push を足す。出し方は同じ show を通す
+// 画面を閉じていても届く通知（Web Push）も同じ show を通す
 self.addEventListener('install', () => self.skipWaiting())
 self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()))
 
@@ -9,13 +9,20 @@ const windows = () =>
     .matchAll({ type: 'window', includeUncontrolled: true })
     .then((ws) => ws.filter((w) => !/^\/cases\/[^/]+\/page$/.test(new URL(w.url).pathname)))
 
-async function show(n) {
+// 届いた push は必ず何か出す（Safari は出さない push が続くと登録を取り消す。6.8 (2)）。見ていても出し、
+// 同じものが出ていれば、それを同じ tag で出し直す（置き換わるだけで鳴り直さない）
+async function show(n, push = false) {
   // この端末のどれかのタブで見ていれば出さない（タブごとでなく端末ごと）
-  if ((await windows()).some((w) => w.visibilityState === 'visible' && w.focused)) return
+  if (!push && (await windows()).some((w) => w.visibilityState === 'visible' && w.focused)) return
   const open = await self.registration.getNotifications()
   // 同じ知らせ（同じ tag）はそのまま残す（閉じて出し直すと鳴り直す）。同じ案件の新しい知らせが出ていれば、遅れて届いた古いものは出さない
   const sameCase = (x) => n.caseId && x.data?.caseId === n.caseId
-  if (open.some((x) => x.tag === String(n.id) || (sameCase(x) && x.data.id > n.id))) return
+  const shown = open.find((x) => x.tag === String(n.id) || (sameCase(x) && x.data.id > n.id))
+  if (shown) {
+    if (push)
+      await self.registration.showNotification(shown.title, { body: shown.body, tag: shown.tag, data: shown.data })
+    return
+  }
   for (const x of open) if (sameCase(x)) x.close()
   await self.registration.showNotification('libretto', {
     body: n.text,
@@ -29,6 +36,17 @@ let queue = Promise.resolve()
 self.addEventListener('message', (e) => {
   if (e.data?.type !== 'notice') return
   queue = queue.then(() => show(e.data.notice)).catch(() => {})
+  e.waitUntil(queue)
+})
+
+self.addEventListener('push', (e) => {
+  let n
+  try {
+    n = e.data.json()
+  } catch {
+    n = { id: 0, path: '/', text: '' }
+  }
+  queue = queue.then(() => show(n, true)).catch(() => {})
   e.waitUntil(queue)
 })
 

@@ -6,12 +6,13 @@ import {
   InferenceSettings,
   MaterialRef,
   NoticePrefs,
+  PushStatus,
   Settings as SettingsSchema,
 } from '@libretto/shared/api'
 import { type ReactNode, useEffect, useId, useState } from 'react'
 import { z } from 'zod'
 import { send, useLoad } from '../load.ts'
-import { type DeviceState, deviceState, enable } from '../notify.ts'
+import { type DeviceState, deviceState, enable, pushable, syncPush } from '../notify.ts'
 import { Confirm } from '../parts/Dialog.tsx'
 import { W, type WKey, w } from '../wording.ts'
 import { ProblemView } from './Pending.tsx'
@@ -948,6 +949,7 @@ const DEVICE: Record<DeviceState, [string, WKey]> = {
   off: ['b-off', 'settings.notices.off'],
   denied: ['b-off', 'settings.notices.off'],
   insecure: ['b-alert', 'settings.notices.unavailable'],
+  homescreen: ['b-alert', 'settings.notices.unavailable'],
   unavailable: ['b-alert', 'settings.notices.unavailable'],
 }
 const KINDS = NoticePrefs.keyof().options
@@ -984,6 +986,12 @@ function NoticeSection({
   reloadDm: () => void
 }) {
   const [device, setDevice] = useState(deviceState)
+  const push = useLoad('/api/devices/push', PushStatus)
+  // 画面を閉じていても届くのは、対応しているブラウザで、許可してホストが登録を持っているとき
+  // 開いたときの登録（SSE の open でも送る）が済んでから読み直す
+  const { reload: reloadPush } = push
+  useEffect(() => void syncPush().then(reloadPush), [reloadPush])
+  const openOnly = !pushable() || (device === 'on' && push.data?.subscribed === false)
   // 保存の応答を待たずに続けて押しても、前の入り切りから送る
   const [prefs, setPrefs] = useState(loaded)
   useEffect(() => setPrefs(loaded), [loaded])
@@ -1019,15 +1027,28 @@ function NoticeSection({
           <div className="key-head">
             <div className="grow">
               <h3 className="key-label">{W['settings.notices.device']}</h3>
-              <p className="muted small">{W['settings.notices.openOnly']}</p>
+              {openOnly && <p className="muted small">{W['settings.notices.openOnly']}</p>}
             </div>
             <span className={`badge ${badge} key-status`}>{W[label]}</span>
           </div>
           {device === 'denied' && <p className="note-warn small">{W['settings.notices.denied']}</p>}
           {device === 'insecure' && <p className="note-warn small">{W['settings.notices.insecure']}</p>}
+          {device === 'homescreen' && <p className="note-warn small">{W['settings.notices.homescreen']}</p>}
+          {device === 'on' && push.data?.unreachable && (
+            <p className="note-warn small">{W['settings.notices.unreachable']}</p>
+          )}
           {(device === 'off' || device === 'denied') && (
             <div className="key-actions">
-              <button type="button" className="btn btn-primary btn-sm" onClick={() => void enable().then(setDevice)}>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={() =>
+                  void enable().then((s) => {
+                    setDevice(s)
+                    push.reload()
+                  })
+                }
+              >
                 {W['settings.notices.enable']}
               </button>
             </div>

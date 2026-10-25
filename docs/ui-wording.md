@@ -828,7 +828,7 @@ Slack の行は API キーの行と同じ形（貼り付け・「入れ直す」
 
 **設定の面のお知らせ（実装設計書 6.8 (6)(7)）**
 
-この端末の状態は 3 つ（`on`・`off`・`unavailable`）。`off` のときは「この端末に通知する」を出し、押したときだけブラウザの許可の画面を出す。ブラウザで拒んであれば `denied`、`http://` の Tailscale のアドレスなど通知を使えない開き方なら `insecure` を添える。出来事の名前は実装設計書 6.8 (1) の表の言葉。画面を閉じていても届く通知は後の Issue なので、今は `openOnly` をいつも出す。
+この端末の状態は 3 つ（`on`・`off`・`unavailable`）。`off` のときは「この端末に通知する」を出し、押したときだけブラウザの許可の画面を出す。ブラウザで拒んであれば `denied`、`http://` の Tailscale のアドレスなど通知を使えない開き方なら `insecure`、iPhone・iPad でホーム画面から開いていなければ `homescreen` を添える。画面を閉じたあとの通知に対応していないブラウザと、許可してもホストが登録を受け取れていない端末には `openOnly` を出す。前に送ったときに配信元へ届かなかった端末には `unreachable` を出す。出来事の名前は実装設計書 6.8 (1) の表の言葉。
 
 | キー | 文 |
 |---|---|
@@ -842,6 +842,8 @@ Slack の行は API キーの行と同じ形（貼り付け・「入れ直す」
 | `settings.notices.enable` | この端末に通知する |
 | `settings.notices.denied` | このブラウザでは libretto の通知が許可されていません。ブラウザのサイトの設定で通知を「許可」にしてから、もう一度押してください |
 | `settings.notices.insecure` | この開き方では通知を使えません。https:// で始まるアドレス（Tailscale の HTTPS）で開き直してください |
+| `settings.notices.homescreen` | iPhone では、ホーム画面に追加した libretto から開くと通知を受け取れます。Safari の共有ボタンから「ホーム画面に追加」を選び、追加したアイコンから開いてください |
+| `settings.notices.unreachable` | 画面を閉じているときの通知を送れませんでした。libretto を動かしている PC がインターネットにつながっているか確かめてください。画面を開いているあいだの通知は出ます |
 | `settings.notices.kinds` | 通知する出来事 |
 | `settings.notices.kindsNote` | 切っても、お知らせ欄には残ります。 |
 | `settings.notices.kind.your_turn` | 確認待ちになった |

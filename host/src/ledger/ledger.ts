@@ -1004,9 +1004,55 @@ export class Ledger {
   ) {
     this.#db
       .prepare(
-        'UPDATE notice_deliveries SET status = ?, tries = ?, next_at = COALESCE(?, next_at) WHERE notice_seq = ? AND target = ?',
+        // 送っている間に端末を外して dropped にしたものを、遅れて返った送り手の結果で pending に戻さない
+        `UPDATE notice_deliveries SET status = ?, tries = ?, next_at = COALESCE(?, next_at)
+         WHERE notice_seq = ? AND target = ? AND status = 'pending'`,
       )
       .run(d.status, d.tries, d.nextAt ? jst(d.nextAt) : null, seq, target)
+  }
+
+  // --- push_subscriptions（画面を閉じていても届く通知の登録。6.8 (6)）
+
+  // この端末の登録を置き換える。同じ endpoint が別の端末（ペアリングし直す前）にあれば、その登録と送り残しを消す
+  putPushSubscription(sessionId: string, s: { endpoint: string; p256dh: string; auth: string }) {
+    this.transaction(() => {
+      const other = this.#db
+        .prepare('SELECT session_id FROM push_subscriptions WHERE endpoint = ? AND session_id <> ?')
+        .get(s.endpoint, sessionId) as { session_id: string } | undefined
+      if (other) this.deletePushSubscription(other.session_id)
+      this.#db
+        .prepare(
+          `INSERT INTO push_subscriptions (session_id, endpoint, p256dh, auth, at) VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(session_id) DO UPDATE SET endpoint = excluded.endpoint, p256dh = excluded.p256dh, auth = excluded.auth, at = excluded.at`,
+        )
+        .run(sessionId, s.endpoint, s.p256dh, s.auth, jst(this.#now()))
+    })
+  }
+
+  pushSubscription(sessionId: string): { endpoint: string; keys: { p256dh: string; auth: string } } | undefined {
+    const r = this.#db.prepare('SELECT * FROM push_subscriptions WHERE session_id = ?').get(sessionId) as
+      | Row
+      | undefined
+    return r && { endpoint: r.endpoint as string, keys: { p256dh: r.p256dh as string, auth: r.auth as string } }
+  }
+
+  pushSessions(): string[] {
+    return (this.#db.prepare('SELECT session_id FROM push_subscriptions').all() as { session_id: string }[]).map(
+      (r) => r.session_id,
+    )
+  }
+
+  // 登録と、その端末への送り残しを消す。endpoint を渡せば、その登録のままのときだけ（送っている間に登録し直したものは残す）
+  deletePushSubscription(sessionId: string, endpoint?: string) {
+    this.transaction(() => {
+      const r = this.#db
+        .prepare('DELETE FROM push_subscriptions WHERE session_id = ? AND (? IS NULL OR endpoint = ?)')
+        .run(sessionId, endpoint ?? null, endpoint ?? null)
+      if (endpoint === undefined || r.changes)
+        this.#db
+          .prepare(`UPDATE notice_deliveries SET status = 'dropped' WHERE target = ? AND status = 'pending'`)
+          .run(`push:${sessionId}`)
+    })
   }
 
   // 候補の知らせの数え方（6.8 (4)）。前の候補の知らせが数えたところ（event_id の candidates:<seq>）より後に出て、まだ出したままで、

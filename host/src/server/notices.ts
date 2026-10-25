@@ -1,6 +1,6 @@
 // お知らせの送り出し（docs/implementation.md 6.8 (2)(4)(5)）。コミットの後に呼ぶ。
 // 新しいお知らせを SSE の notice で出し（画面がブラウザの通知 B を出す）、画面の外の送り先の pending を送る。
-// 送り先（Web Push・Slack の DM）は後の Issue が senders に足す。届いたことを書く前に落ちれば送り直すので、届くのは 1 回以上
+// 送り先は Web Push（push.ts）。Slack の DM は後の Issue が senders に足す。届いたことを書く前に落ちれば送り直すので、届くのは 1 回以上
 import type { Notice } from '@libretto/shared/api'
 import type { Ledger } from '../ledger/ledger.ts'
 import type { Hub } from './sse.ts'

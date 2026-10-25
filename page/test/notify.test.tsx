@@ -69,6 +69,8 @@ function worker(windows: { visibilityState: string; focused: boolean; url?: stri
   }
   return {
     show: (n: Notice) => wait((waitUntil) => handlers.message?.({ data: { type: 'notice', notice: n }, waitUntil })),
+    push: (n: unknown) => wait((waitUntil) => handlers.push?.({ data: { json: () => n }, waitUntil })),
+    shows: () => shown.length,
     click: (data: unknown) =>
       wait((waitUntil) => handlers.notificationclick?.({ notification: { data, close: () => {} }, waitUntil })),
     open: () => shown.filter((x) => !x.closed),
@@ -116,6 +118,18 @@ describe('サービスワーカーの出し方', () => {
     expect(bg.open()).toHaveLength(1)
   })
 
+  it('Web Push は見ていても、同じものが出ていても必ず出す（出ているものを同じ tag で出し直し、鳴り直さない）', async () => {
+    const sw = worker([{ visibilityState: 'visible', focused: true }])
+    await sw.push(notice(2))
+    expect(sw.open().map((x) => x.tag)).toEqual(['2'])
+    await sw.push(notice(2))
+    await sw.push(notice(1)) // 同じ案件の古いもの
+    expect(sw.shows()).toBe(3)
+    expect(sw.open().map((x) => [x.tag, x.body])).toEqual([['2', '知らせ 2']])
+    await sw.push({ ...notice(3), caseId: 'c2' })
+    expect(sw.open().map((x) => x.tag)).toEqual(['2', '3'])
+  })
+
   it('押すと、開いているタブにその面を開かせる。無ければ新しく開く', async () => {
     const tab = { visibilityState: 'hidden', focused: false, sent: [] as unknown[] }
     // 版のあるページのタブは画面のタブに数えない
@@ -137,9 +151,12 @@ let fire: (event: string, data?: unknown) => void
 let posted: unknown[]
 let permission: NotificationPermission
 let requested: number
-function stubBrowser(secure = true) {
+let subscribed: unknown[]
+function stubBrowser(secure = true, push = false) {
   posted = []
   requested = 0
+  subscribed = []
+  if (push) vi.stubGlobal('PushManager', class {})
   class FakeSource {
     static CLOSED = 2
     readyState = 0
@@ -171,7 +188,16 @@ function stubBrowser(secure = true) {
     value: {
       register: async () => ({}),
       addEventListener: () => {},
-      ready: Promise.resolve({ active: { postMessage: (m: unknown) => posted.push(m) } }),
+      ready: Promise.resolve({
+        active: { postMessage: (m: unknown) => posted.push(m) },
+        pushManager: {
+          getSubscription: async () => null,
+          subscribe: async (o: unknown) => {
+            subscribed.push(o)
+            return { toJSON: () => ({ endpoint: 'https://push.test/a', keys: { p256dh: 'p', auth: 'a' } }) }
+          },
+        },
+      }),
     },
   })
 }
@@ -203,6 +229,8 @@ describe('設定の「お知らせ」の節', () => {
   let sent: unknown[]
   let bot: ApiKeyStatus
   let dm: ConnectionsView['slackDm']['state']
+  let host: { subscribed: boolean; unreachable: boolean }
+  let puts: unknown[]
   const conn: ConnectionsView = {
     isolation: { level: 'strong', running: false },
     google: { configured: false, state: 'none', label: 'libretto', docs: false, meet: false },
@@ -216,7 +244,17 @@ describe('設定の「お知らせ」の節', () => {
     sent = []
     bot = { kind: 'slackBot', set: false }
     dm = 'none'
+    host = { subscribed: false, unreachable: false }
+    puts = []
     vi.stubGlobal('fetch', async (path: string, init: RequestInit = {}) => {
+      if (path === '/api/devices/push') {
+        if (init.method === 'PUT') {
+          puts.push(JSON.parse(String(init.body)))
+          host.subscribed = true
+          return new Response(null, { status: 204 })
+        }
+        return new Response(JSON.stringify({ publicKey: Buffer.alloc(65, 4).toString('base64url'), ...host }))
+      }
       if (path === '/api/settings/notices') {
         if (init.method === 'PUT') {
           prefs = JSON.parse(String(init.body))
@@ -277,6 +315,45 @@ describe('設定の「お知らせ」の節', () => {
     expect(p.text()).toContain(W['settings.notices.on'])
     expect(p.button()).toBeUndefined()
     p.done()
+  })
+
+  it('画面を閉じていても届くブラウザでは、許可したときに登録をホストへ渡す。届かなかったら直し方を出す', async () => {
+    permission = 'default'
+    stubBrowser(true, true)
+    const p = await render()
+    expect(puts).toEqual([]) // 許可が無いあいだは登録しない
+    expect(p.text()).not.toContain(W['settings.notices.openOnly'])
+    await act(async () => p.button()?.click())
+    expect(subscribed).toEqual([{ userVisibleOnly: true, applicationServerKey: new Uint8Array(65).fill(4) }])
+    expect(puts).toEqual([{ endpoint: 'https://push.test/a', keys: { p256dh: 'p', auth: 'a' } }])
+    expect(p.text()).toContain(W['settings.notices.on'])
+    expect(p.text()).not.toContain(W['settings.notices.openOnly'])
+    expect(p.text()).not.toContain(W['settings.notices.unreachable'])
+    p.done()
+    host.unreachable = true
+    const q = await render()
+    expect(q.text()).toContain(W['settings.notices.unreachable'])
+    q.done()
+  })
+
+  it('対応していないブラウザでは、画面を開いているあいだだけと出す', async () => {
+    permission = 'granted'
+    stubBrowser()
+    const p = await render()
+    expect(p.text()).toContain(W['settings.notices.openOnly'])
+    expect(puts).toEqual([])
+    p.done()
+  })
+
+  it('iPhone でホーム画面から開いていなければ、ホーム画面に追加する手順を出す', async () => {
+    vi.stubGlobal('isSecureContext', true)
+    const ua = vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (iPhone; CPU iPhone OS 18_0)')
+    const p = await render()
+    expect(p.text()).toContain(W['settings.notices.unavailable'])
+    expect(p.text()).toContain(W['settings.notices.homescreen'])
+    expect(p.button()).toBeUndefined()
+    p.done()
+    ua.mockRestore()
   })
 
   it('ブラウザで拒んでいれば、直し方を出す', async () => {
