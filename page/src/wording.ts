@@ -435,7 +435,7 @@ export const W = {
   'home.candEmpty':
     '依頼の候補はありません。メールにラベル libretto を、Slack の投稿にリアクション :memo: を付けると、ここに出ます。会議メモのあなたが担当の行動項目も、ここに出ます',
   'home.candLast': '{at} に取り込み',
-  'home.lowFold': 'ほかに {n} 件、依頼かもしれないものがあります',
+  'home.lowFold': 'ほかに {n} 件、依頼かどうかはっきりしないものがあります',
   'home.meetNotesLabel': '読んだ会議メモ',
   'home.meetNote.none': '「{title}」（{at}）: 行動項目はありませんでした',
   'home.meetNote.notMine': '「{title}」（{at}）: あなたが担当の行動項目はありませんでした',
@@ -444,11 +444,10 @@ export const W = {
   'cand.mark.slack': 'リアクション :memo:',
   'cand.mark.meet.高': '会議・高',
   'cand.mark.meet.中': '会議・中',
-  'cand.mark.inferred.低': '推測・低',
   'cand.from': '{from}・{at}',
   'cand.meetFrom': '担当: {from}・{at}',
   'cand.noAssignee': '担当の記載なし',
-  'cand.why': '拾った理由: {why}',
+  'cand.why': '見つけた理由: {why}',
   'cand.askLabel': '頼まれていそうなこと',
   'cand.make': '作るもの: {doc}　保存先: {dest}',
   'cand.attach': '添付「{names}」の中身は読んでいません。進めたあと、資料として貼り付けてください',
@@ -464,7 +463,7 @@ export const W = {
   'cand.reason.依頼ではない': '依頼ではない',
   'cand.reason.自分の仕事ではない': '自分の仕事ではない',
   'cand.reason.もう済んだ': 'もう済んだ',
-  'cand.reason.拾わなくてよい': 'この人・この場所からは拾わなくてよい',
+  'cand.reason.拾わなくてよい': 'この人・この場所からは自動検出しなくてよい',
   'cand.cancel': 'やめる',
   'cand.change': '内容を修正',
   'cand.changeClose': '閉じる',
@@ -533,7 +532,7 @@ export const W = {
   'settings.google.disconnectFailed': '連携を解除できませんでした。もう一度お試しください。',
   'settings.slack.label': 'Slack',
   'settings.slack.use':
-    'あなたがリアクション :memo: を付けた投稿と、そのスレッドを読みます。添付のファイルは読みません。投稿やリアクションはしません',
+    'あなたがリアクション :memo: を付けた投稿と、そのスレッドを読みます。自動検出では、あなた宛てのメンションと、選んだチャンネルの投稿も読みます。添付のファイルは読みません。投稿やリアクションはしません',
   'settings.slack.unsetNote':
     'Slack から取り込むには、Slack アプリを作り、その「User OAuth Token」（xoxp- で始まるもの）をここに貼り付けてください。',
   'settings.slack.input': 'トークンを貼り付け',
@@ -552,6 +551,46 @@ export const W = {
   'settings.slack.problem.rate_limited': 'Slack が混み合っていたので、取り込みを次の回に回しました。',
   'settings.slack.problem.network': 'Slack につながりませんでした。15 分後にもう一度見ます。',
   'settings.slack.lastAt': '{at} に取り込み',
+  'cand.mark.inferred.高': '自動検出・可能性 高',
+  'cand.mark.inferred.中': '自動検出・可能性 中',
+  'cand.mark.inferred.低': '自動検出・可能性 低',
+  'home.lowDismiss': 'まとめて見送る',
+  'home.lowDismissTitle': 'まとめて見送りますか',
+  'home.lowDismissBody':
+    '依頼かどうかはっきりしない {n} 件を、「依頼ではない」として見送ります。見送った候補は、もう出しません。',
+  'home.askSuppress':
+    '{label} からの自動検出の候補を、続けて 3 回「依頼ではない」で見送りました。今後は自動検出から除外しますか',
+  'home.askSuppressYes': '除外する',
+  'home.askSuppressNo': '除外しない',
+  'home.askSuppressDone': '{label} を自動検出から除外しました。設定の「自動検出」から戻せます。',
+  'settings.infer.heading': '自動検出',
+  'settings.infer.use':
+    'ラベルやリアクションが無くても、届いたメールと Slack の投稿から、文書づくりを頼まれていそうなものを見つけて依頼の候補に出します。本文は判断に使うだけで保存しません。依頼ではないと判断したものは、件名も差出人も残しません。',
+  'settings.infer.gmailDays': 'メールを見る範囲',
+  'settings.infer.days': '受信箱（メイン）の直近 {n} 日',
+  'settings.infer.slackChannels': '見る Slack のチャンネル',
+  'settings.infer.slackNote':
+    'あなた宛てのメンションは、選ばなくても見ます（直近 7 日）。ダイレクトメッセージは見ません。',
+  'settings.infer.slackEmpty': '選べるチャンネルがありません。',
+  'settings.infer.limit': '1 日に判断する件数の上限',
+  'settings.infer.limitNote': '0 にすると自動検出を止めます。',
+  'settings.infer.showLow': '可能性が低い候補も出す',
+  'settings.infer.useJev': 'Jev（TypeSafe）にも件名と本文の先頭 600 字を送って、可能性を判断する',
+  'settings.infer.save': '保存',
+  'settings.infer.saved': '保存しました。',
+  'settings.infer.invalid': '保存できませんでした。上限は 0 から 1000 までの数で入れてください。',
+  'settings.infer.failed': '保存できませんでした。もう一度お試しください。',
+  'settings.infer.today': '今日判断した件数: {n} / {limit} 件',
+  'settings.infer.skipped': '今日は {n} 件を見られませんでした。明日の取り込みで見ます。',
+  'settings.infer.recall':
+    'ラベル・リアクションを付けた {total} 件のうち、自動検出が先に見つけていたのは {hit} 件（{pct}%）です（直近 30 日）。',
+  'settings.infer.recallNone':
+    '見落としの割合はまだありません。自動検出の範囲のメールや投稿にラベル・リアクションを付けると、ここに出ます。',
+  'settings.infer.excluded': '除外した差出人・チャンネル',
+  'settings.infer.excludedNone': '除外したものはありません。',
+  'settings.infer.restore': '戻す',
+  'settings.infer.restoreLabel': '{label} を戻す',
+  'settings.infer.lastAt': '{at} に自動検出',
 } as const
 
 export type WKey = keyof typeof W

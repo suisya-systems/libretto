@@ -121,7 +121,12 @@ export const CandidateEvent = z.discriminatedUnion('type', [
   }),
   candidateEvent('promoted_to_signal', { signal: z.enum(['gmail_label', 'slack_emoji']) }),
   candidateEvent('proposal_changed', {}),
-  candidateEvent('not_request', { source: Source }),
+  // historyId は Gmail のスレッドの版（返信で変わったら分類し直す）、prefiltered は前さばきで落とした（6.9 (4)）
+  candidateEvent('not_request', {
+    source: Source,
+    historyId: z.string().optional(),
+    prefiltered: z.boolean().optional(),
+  }),
   candidateEvent('presented', {}),
   candidateEvent('proceeded', { caseId: z.string() }),
   candidateEvent('auto_entered', { caseId: z.string() }),

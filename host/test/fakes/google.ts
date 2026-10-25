@@ -21,6 +21,9 @@ export function message(o: {
   html?: string
   at: number
   attachments?: { name: string; text: string; inline?: boolean }[]
+  to?: string
+  headers?: { name: string; value: string }[]
+  labelIds?: string[]
 }): NonNullable<RawThread['messages']>[number] {
   const parts: Part[] = []
   if (o.text !== undefined) parts.push({ mimeType: 'text/plain', body: { data: b64(o.text) } })
@@ -39,11 +42,14 @@ export function message(o: {
   return {
     id: o.id,
     internalDate: String(o.at),
+    ...(o.labelIds && { labelIds: o.labelIds }),
     payload: {
       mimeType: 'multipart/mixed',
       headers: [
         { name: 'From', value: o.from },
         { name: 'Subject', value: o.subject ?? '' },
+        ...(o.to ? [{ name: 'To', value: o.to }] : []),
+        ...(o.headers ?? []),
       ],
       parts,
     },
@@ -89,6 +95,7 @@ export async function startFakeGoogle() {
     { id: 'Label_1', name: 'libretto' },
   ]
   const labeled = new Set<string>()
+  const inbox = new Set<string>() // 自動検出の窓（q 付きの一覧）に出るスレッド（6.9 (5)）
   const state = {
     email: 'me@example.com',
     pageSize: 500,
@@ -255,13 +262,23 @@ export async function startFakeGoogle() {
     if (p === '/profile') return json(200, { emailAddress: state.email })
     if (p === '/labels') return json(200, { labels })
     if (p === '/threads') {
-      const ids = [...threads.keys()].filter((id) => url.searchParams.get('labelIds') !== 'Label_1' || labeled.has(id))
+      const q = url.searchParams.get('q')
+      // q は自動検出の窓。-from: の差出人は外す（ほかの条件は inbox に入れたかで決める）
+      const not = [...(q ?? '').matchAll(/-from:(\S+@\S+)/g)].map((m) => (m[1] as string).toLowerCase())
+      const fromOf = (id: string) =>
+        (threads.get(id)?.messages?.[0]?.payload?.headers?.find((h) => h.name === 'From')?.value ?? '').toLowerCase()
+      const ids = [...threads.keys()].filter((id) =>
+        q !== null
+          ? inbox.has(id) && !not.some((a) => fromOf(id).includes(a))
+          : url.searchParams.get('labelIds') !== 'Label_1' || labeled.has(id),
+      )
       // 新しい順（最後のメッセージの時刻）
       ids.sort((a, b) => last(threads.get(b)) - last(threads.get(a)))
       const from = Number(url.searchParams.get('pageToken') ?? 0)
       const page = ids.slice(from, from + state.pageSize)
       const next = from + state.pageSize < ids.length ? String(from + state.pageSize) : undefined
-      return json(200, { threads: page.map((id) => ({ id })), ...(next && { nextPageToken: next }) })
+      const ref = (id: string) => ({ id, ...(threads.get(id)?.historyId && { historyId: threads.get(id)?.historyId }) })
+      return json(200, { threads: page.map(ref), ...(next && { nextPageToken: next }) })
     }
     if (p.includes('/attachments/')) return json(200, { data: b64('添付の中身') })
     const m = /^\/threads\/([^/]+)$/.exec(p)
@@ -290,6 +307,13 @@ export async function startFakeGoogle() {
       threads.set(t.id, t)
       if (label) labeled.add(t.id)
     },
+    // 受信箱のメインに届いたスレッド（自動検出の窓に出る）。label でラベルも付ける
+    toInbox(t: RawThread, label = false) {
+      threads.set(t.id, t)
+      inbox.add(t.id)
+      if (label) labeled.add(t.id)
+    },
+    label: (id: string) => labeled.add(id),
     expireAll: () => state.valid.clear(),
     close: () => new Promise<void>((r) => server.close(() => r())),
   }

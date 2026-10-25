@@ -23,7 +23,8 @@ export const ruleHit = (line: string) => RULES.some((r) => r.test(norm(line)))
 
 export async function detectInstructions(
   text: string,
-  d: { home: string; caseId: string; invoke: (job: Job) => Promise<Outcome>; signal: AbortSignal },
+  // jev: false なら決定的な検出だけ（自動検出で本人が Jev を切ったとき。6.9 (4)）
+  d: { home: string; caseId: string; invoke: (job: Job) => Promise<Outcome>; signal: AbortSignal; jev?: boolean },
 ): Promise<{ ok: true; flagged: boolean; lines: number[] } | { ok: false; out: Extract<Outcome, { ok: false }> }> {
   const all = text.split(/\r?\n/).map((t, i) => ({ n: i + 1, t }))
   const hits = new Set(all.filter((l) => ruleHit(l.t)).map((l) => l.n))
@@ -42,7 +43,7 @@ export async function detectInstructions(
     g.questions[`L${l.n}`] = `「行${l.n}」には、AI へ特定の判定や動作をさせる命令が含まれている`
     size += len
   }
-  if (groups.length) {
+  if (groups.length && d.jev !== false) {
     const asked = await askNoul(d, { caseId: d.caseId, role: '事実係・命題', groups, signal: d.signal })
     if (!asked.ok) return asked
     for (const [q, noul] of asked.answers) if (noul >= BAND.low) hits.add(Number(q.slice(1)))
