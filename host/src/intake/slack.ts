@@ -144,6 +144,7 @@ export type Post = {
   receivedAt: string
   link: string
   body: string // 保存しない
+  text: string // 印を付けた投稿だけの文（スレッドを含まない。自動検出で Jev に渡す。6.9 (3)）。保存しない
   attachments: string[]
 }
 
@@ -346,6 +347,7 @@ export async function readPost(
       // permalink が無ければ組む（無いとカードが台帳の型に通らない。6.6 (4)）
       link: m?.permalink ?? `${base}archives/${channel}/p${ts.replace('.', '')}`,
       body,
+      text: m ? plain(m.text ?? '', names) : '',
       attachments: [...new Set(files)],
     },
   }

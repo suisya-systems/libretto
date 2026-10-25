@@ -148,7 +148,7 @@ export function createInference(d: Deps) {
         const p = r.post
         // 投稿を読めなかった（履歴の権限が無いなど）: 判定を残さず、次の回にもう一度（空の本文で「頼んでいない」にしない）
         if (!p.body.trim()) continue
-        m = { source: 'slack', ...p, latest: p.body, self: !p.othersPost, bulk: p.auto }
+        m = { source: 'slack', ...p, latest: p.text, self: !p.othersPost, bulk: p.auto }
         src = { ...p, slack: true }
         candidateId = p.candidateId
         owner = sl.me?.userId ?? ''

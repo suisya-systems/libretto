@@ -405,6 +405,20 @@ describe('Slack の推測（6.9 (5)）', () => {
     expect(ledger.getCandidate(`slack:C1:${ts}`)).toMatchObject({ origin: '推測' })
   })
 
+  it('Jev に渡すのは投稿だけ（スレッドの返信は Haiku にだけ）', async () => {
+    await setup({ slack: true, jev: true })
+    const sl = s as NonNullable<typeof s>
+    const ts = (Date.parse('2026-10-24T01:00:00Z') / 1000).toFixed(6)
+    const root = { ts, thread_ts: ts, user: 'U0ALICE', text: `<@${ME}> 確認です` }
+    sl.state.history.set('C1', [root])
+    sl.state.threads.set(`C1:${ts}`, [root, { ts: `${ts}1`, user: 'U0ALICE', text: '返信の別の頼み' }])
+    sl.state.mentions = [{ channel: 'C1', ts }]
+    await server.poller.run()
+    const ask = jevCalls().find((c) => c.instruction.includes(JEV_QUESTION)) as Call
+    expect(material(ask, '本文')).toBe('@本人 確認です')
+    expect(material(classifyCalls()[0] as Call, '外部資料（Slack の投稿）')).toContain('返信の別の頼み')
+  })
+
   it('設定の面のチャンネルの候補（DM は出さない）', async () => {
     await setup({ slack: true })
     const r = (await (await get('/api/connections/slack/channels')).json()) as { channels: { id: string }[] }
