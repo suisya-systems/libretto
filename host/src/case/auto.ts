@@ -53,12 +53,12 @@ type EnterDeps = {
   since: Partial<Record<keyof EntranceDefaults, string>>
   monthCapYen: number | null
   now: Date
+  made: (caseId: string) => void // 作った案件ごとにすぐ呼ぶ（後の候補で落ちても、作った案件は起こしてある）
 }
 
-// 作った案件の id を返す。STOP の間は呼ぶ側が呼ばない
-export function autoEnter(d: EnterDeps): string[] {
-  if (d.monthCapYen !== null && d.ledger.monthCostYen(d.now) >= d.monthCapYen) return []
-  const made: string[] = []
+// STOP の間は呼ぶ側が呼ばない
+export function autoEnter(d: EnterDeps) {
+  if (d.monthCapYen !== null && d.ledger.monthCostYen(d.now) >= d.monthCapYen) return
   for (const { candidate: cand, card } of d.ledger.listPresentedCandidates()) {
     const since = d.since[cand.source]
     if (d.defaults[cand.source] !== 'おまかせ' || !since || cand.updatedAt < since) continue
@@ -71,9 +71,8 @@ export function autoEnter(d: EnterDeps): string[] {
       caseId,
       entranceDefault: 'おまかせ',
     })
-    if (r.ok && !r.replayed && r.case) made.push(r.case.caseId)
+    if (r.ok && !r.replayed && r.case) d.made(r.case.caseId)
   }
-  return made
 }
 
 // --- 送付の自走を止める理由（D5・6.11 (4)）

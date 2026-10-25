@@ -275,6 +275,7 @@ export function createServer(o: ServerOptions) {
     },
     log,
     google,
+    stopped: () => stop.isStopped(),
     ...(o.now && { now: o.now }),
     ...(o.fetch && { fetch: o.fetch }),
     tools,
@@ -306,27 +307,28 @@ export function createServer(o: ServerOptions) {
   // おまかせの自動入口（T4。6.11 (2)）。拾い上げの回の終わりと起動のとき。STOP の間は動かさない
   function enterAuto() {
     if (stop.isStopped()) return
-    let made: string[]
+    let made = 0
     try {
-      made = autoEnter({
+      autoEnter({
         home,
         ledger,
         defaults: entranceDefaults(home),
         since: autoSince(home),
         monthCapYen: o.monthCapYen ?? null,
         now: now(),
+        // 作ったらすぐ起こす（後の候補で落ちても、作った案件を止めたままにしない）
+        made: (id) => {
+          made++
+          caseChanged(id)
+          runner.kick(id)
+        },
       })
       storage(true)
     } catch (e) {
       log(`auto enter: ${e instanceof Error ? e.stack : String(e)}`)
       if (isStorageError(e)) storage(false)
-      return
     }
-    for (const id of made) {
-      caseChanged(id)
-      runner.kick(id)
-    }
-    if (made.length) candidatesChanged()
+    if (made) candidatesChanged()
   }
 
   // --- ペアリング（5.4）。トークンはメモリだけ。起こし直すと前の URL は使えない

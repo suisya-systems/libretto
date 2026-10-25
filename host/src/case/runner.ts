@@ -49,6 +49,7 @@ type Deps = {
   now?: () => Date
   fetch?: Fetch // 出典の取り寄せ（テストは偽物。6.3.1 (5)）
   google: Google // Google ドキュメントの届け先（6.5）
+  stopped?: () => boolean // 止めている間はおまかせの自動の遷移も出さない（runs.open と同じ関門。6.11 (2)）
   tools?: Tools // 描き出しと計算し直しの道具（6.10 (3)(5)）
 }
 
@@ -234,7 +235,7 @@ export function createRunner(d: Deps) {
     // おまかせでホストが本人の代わりに出す入口の承認と送付（6.11 (2)）。遷移したら続きを起こす
     let auto: ReturnType<typeof autoStep>
     try {
-      auto = c && autoStep(home, ledger, c)
+      auto = c && !d.stopped?.() ? autoStep(home, ledger, c) : undefined
     } catch (e) {
       // 普通の仕事と同じく、書けなければ帯を出して続けない（起動の resume を落とさない）
       d.log(`runner ${caseId} auto: ${e instanceof Error ? e.stack : String(e)}`)
