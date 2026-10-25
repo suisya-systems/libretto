@@ -172,11 +172,11 @@ describe('会議メモの読み取り（6.7 (2)(3)）', () => {
     const items = actionItems(text)?.items ?? []
     expect(items).toEqual(['[岩間 涼] 資料を作る', '[山田 花子] 予約する', '【チーム】 共有する'])
     expect(items.map(assigneeOf)).toEqual(['岩間 涼', '山田 花子', 'チーム'])
-    // 「Gemini で」で始まる項目では切らない（注意書きは「Gemini で作成…」）
-    expect(actionItems('Next steps\nGemini で資料の下書きを作る\n* [岩間 涼] 送る')?.items).toEqual([
-      'Gemini で資料の下書きを作る',
-      '[岩間 涼] 送る',
-    ])
+    // 「Gemini で」「Gemini の」で始まる項目では切らず、注意書きの言い回しで切る
+    const lead = ['Gemini で資料の下書きを作る', 'Gemini で作成した資料を共有する', 'Gemini の評価を書く']
+    expect(
+      actionItems(['Next steps', ...lead, 'Gemini can make mistakes, so double-check it'].join('\n'))?.items,
+    ).toEqual(lead)
     expect(actionItems('推奨される次のステップ\nこの会議では推奨される次のステップは見つかりませんでした。')).toEqual({
       items: [],
       truncated: false,
@@ -184,7 +184,10 @@ describe('会議メモの読み取り（6.7 (2)(3)）', () => {
   })
   it('節が無ければ undefined、節が空・「ありません」だけなら []、項目は節の中だけ', () => {
     expect(actionItems('まとめ\n話しました')).toBeUndefined()
-    expect(actionItems('推奨される次のステップ\n\nGemini が作成したメモ')).toEqual({ items: [], truncated: false })
+    expect(actionItems('推奨される次のステップ\n\nGemini が作成したメモは不正確な場合があります。')).toEqual({
+      items: [],
+      truncated: false,
+    })
     expect(actionItems('次のステップ:\n* ありません\n')).toEqual({ items: [], truncated: false })
     expect(actionItems(NOTE_TEXT([MINE, OTHERS]))).toEqual({ items: [MINE, OTHERS], truncated: false })
     expect(actionItems(`Suggested next steps\n${'- x\n'.repeat(51)}`)?.truncated).toBe(true)

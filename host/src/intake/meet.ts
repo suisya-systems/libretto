@@ -40,8 +40,10 @@ const END = /^(まとめ|概要|詳細|Summary|Details)$/i
 const BULLET = /^\s*(?:[*\-•・●○◦▪■]|\d+[.)．])\s*/
 // チェックリストの印（書き出しで `☐` か `[ ]` になる）。残すと `[ ]` を担当と読み、後ろの `[担当]` を取りこぼす
 const CHECK = /^(?:[☐☑☒]|\[[ xX]?\])\s*/
-// 末尾の注意書き（「Gemini が作成したメモは…」「You should review Gemini's notes…」）。項目の中の「Gemini」では切らない
-const FOOTER = /^(Gemini\s?(が|は|に|の|で作成|can|may|makes)|You should review Gemini)/i
+// 末尾の注意書き（「Gemini が作成したメモは…」「You should review Gemini's notes…」）。「Gemini で…」で始まる項目では切らないよう、
+// 注意書きの言い回しそのものに当てる（ponytail: 本物の注意書きの文が分かれば、その文に合わせる）
+const FOOTER =
+  /^(Gemini\s?(が|で|によって|により)作成(した|された)メモ(は|に)|Gemini\s?(can|may|makes?)\s?(make\s)?mistakes|You should review Gemini)/i
 const NOTHING =
   /^(なし|ありません|特にありません|.*次のステップ(は|が)(ありません|見つかりませんでした)|None|No (suggested )?next steps.*)[。.]?$/i
 const plain = (line: string) => line.replace(/^[#\s📝]+/u, '').replace(/[:：\s]+$/, '')
