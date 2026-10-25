@@ -699,6 +699,8 @@ export function noticeFor(
         if (after.approvalKind === '構成案') return at('your_turn', fill(NOTICE.outline, { 題 }))
         return at('your_turn', n ? fill(NOTICE.finalMarks, { 題, n }) : fill(NOTICE.final, { 題 }))
       case '送付確認待ち':
+        // おまかせで止める理由が無ければ、続けてホストが保存する（T22。6.11 (4)）。確認を求める知らせは出さない
+        if (after.mode === 'おまかせ' && ev.type === 'format.checked' && !ctx.hold) return undefined
         return at('your_turn', fill(NOTICE.confirmSave, { 題 }), `/cases/${after.caseId}/deliver`)
     }
   }

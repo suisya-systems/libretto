@@ -719,6 +719,16 @@ describe('仕立てと送付（T20〜T26c）', () => {
     ok(transition(ledger, { ...ev, expectedRevision: get().revision } as Input, { hold: '引用' }))
     expect(get()).toMatchObject({ state: '送付確認待ち', turn: '本人' })
     expect(ledger.listConversation('c1')).toEqual([SAY.heldQuote])
+    expect(ledger.listNotices(5).map((x) => x.kind)).toContain('your_turn')
+  })
+
+  it('T20 おまかせで止める理由が無ければ、保存先の確認の知らせを出さない（続けてホストが保存する）', () => {
+    toDrafting('おまかせ')
+    draft()
+    review(true)
+    const before = ledger.listNotices(50).length
+    checked()
+    expect(ledger.listNotices(50)).toHaveLength(before)
   })
 
   it('T23 送付確認待ち delivery.decline → 承認待ち（完成稿の承認は残る）', () => {

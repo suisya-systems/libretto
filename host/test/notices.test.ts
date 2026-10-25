@@ -164,8 +164,10 @@ describe('どの遷移が何を書くか（6.8 (1)）', () => {
     })
   })
 
-  it('T20 保存先の確認は送付の面を開く', () => {
-    toConfirmSave()
+  it('T20 保存先の確認は送付の面を開く（おまかせは止める理由があるときだけ。6.11 (6)）', () => {
+    toChecking('おまかせ')
+    host('review.pass', { n: 1 })
+    host('format.checked', { n: 1, outputFingerprint: 'o1' }, { hold: '見える' })
     expect(lastNotice()).toMatchObject({
       kind: 'your_turn',
       text: '『週報』を保存する前の確認です。保存先と公開範囲を確かめてください',
