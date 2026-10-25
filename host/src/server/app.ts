@@ -15,6 +15,7 @@ import {
   type ConnectionsView,
   ConversationPost,
   DraftDiff,
+  GoogleClientInput,
   type HostStatus,
   type IsolationCause,
   MaterialsPost,
@@ -34,13 +35,21 @@ import { readGathered } from '../facts/gather.ts'
 import { type Fetch, fetchedSources, materialsDir } from '../facts/inventory.ts'
 import { CLOSED, purge } from '../facts/purge.ts'
 import { readThread } from '../intake/gmail.ts'
-import { createGoogle, type Google } from '../intake/google.ts'
+import { createGoogle, type Google, parseClientJson } from '../intake/google.ts'
 import { createPoller, RUN_KEY } from '../intake/poller.ts'
 import { createSlack, parseCandidateId, readPost, type Slack } from '../intake/slack.ts'
 import { caseDir } from '../ledger/db.ts'
 import type { Ledger } from '../ledger/ledger.ts'
 import type { Job, Outcome } from '../model/invoke.ts'
-import { deleteKey, keyStatus, readKey, setKey } from '../model/keys.ts'
+import {
+  deleteGoogleClient,
+  deleteKey,
+  googleClientInfo,
+  keyStatus,
+  readKey,
+  setGoogleClient,
+  setKey,
+} from '../model/keys.ts'
 import type { Isolation } from '../model/sandbox.ts'
 import { createConversation } from '../roles/conversation.ts'
 import { createEntrance, currentSet, entranceView, writeApproval, writeAtomic } from '../roles/entrance.ts'
@@ -341,6 +350,7 @@ export function createServer(o: ServerOptions) {
   app.get('/api/connections', (c) => {
     const last = readIsolation(home)
     const { running: _, ...intake } = poller.view()
+    const client = googleClientInfo(home)
     const view: ConnectionsView = {
       isolation: {
         level: status.isolation,
@@ -348,14 +358,20 @@ export function createServer(o: ServerOptions) {
         running: !!probing,
         ...(last && { last: { at: last.at, verdict: last.verdict } }),
       },
-      google: { configured: google.configured, ...google.status(), label: gmailLabel, ...intake },
+      google: {
+        configured: google.configured(),
+        ...(client && { clientSavedAt: client.savedAt }),
+        ...google.status(),
+        label: gmailLabel,
+        ...intake,
+      },
       slack: slackView(),
     }
     return c.json(view)
   })
 
-  // Slack のトークンを入れた・入れ直した・消した: 連携の欄を取り直させ、入っていれば取り込む（6.6 (2)）
-  function slackChanged() {
+  // Slack のトークン・Google の OAuth クライアントを入れた・入れ直した・消した: 連携の欄を取り直させ、入っていれば取り込む（6.6 (2)・6.4 (10)）
+  function intakeChanged() {
     hub.emit('connections.changed', {})
     candidatesChanged()
     if (!stop.isStopped()) void poller.run()
@@ -369,7 +385,7 @@ export function createServer(o: ServerOptions) {
 
   // 連携する（6.4 (2)）。画面は返した URL へ移る
   app.post('/api/connections/google/start', (c) => {
-    if (!google.configured) return c.json({ reason: 'not_configured' }, 409)
+    if (!google.configured()) return c.json({ reason: 'not_configured' }, 409)
     return c.json({ url: google.start(c.req.header('origin') ?? '') })
   })
   // 連携を解除（6.4 (2)）。世代を進め、動いている取り込みを止めてから消す
@@ -385,6 +401,39 @@ export function createServer(o: ServerOptions) {
     await left
     hub.emit('connections.changed', {})
     candidatesChanged()
+    return c.body(null, 204)
+  })
+
+  // OAuth クライアントを入れる・入れ直す（6.4 (10)）。値は返さない。別のクライアントなら今の連携を解除する
+  // （更新トークンは出したクライアントでしか使えない）。解除と保存は同期で続け、間に連携の開始・戻りを挟まない
+  app.put('/api/connections/google/client', async (c) => {
+    const body = GoogleClientInput.safeParse(await c.req.json().catch(() => undefined))
+    const client = body.success ? parseClientJson(body.data.json) : undefined
+    if (!client) return c.json({ reason: 'invalid' }, 400)
+    await runs.abort(RUN_KEY)
+    const r = writing(c, () => {
+      const before = googleClientInfo(home)
+      const disconnected = !!before && before.clientId !== client.clientId
+      const token = google.reset(disconnected)
+      setGoogleClient(home, client, now())
+      return { disconnected, token }
+    })
+    if (r instanceof Response) return r
+    await google.revoke(r.token)
+    intakeChanged()
+    return c.json({ disconnected: r.disconnected })
+  })
+  // 消すと連携も解除する（クライアントが無ければ更新できない）
+  app.delete('/api/connections/google/client', async (c) => {
+    await runs.abort(RUN_KEY)
+    const r = writing(c, () => {
+      const token = google.reset(true)
+      deleteGoogleClient(home)
+      return { token }
+    })
+    if (r instanceof Response) return r
+    await google.revoke(r.token)
+    intakeChanged()
     return c.body(null, 204)
   })
 
@@ -729,7 +778,7 @@ export function createServer(o: ServerOptions) {
     const r = writing(c, () => setKey(home, kind.data, body.data.value, now()))
     if (r instanceof Response) return r
     hub.emit('settings.changed', {})
-    if (kind.data === 'slack') slackChanged()
+    if (kind.data === 'slack') intakeChanged()
     return c.json(r)
   })
   app.delete('/api/settings/keys/:kind', async (c) => {
@@ -740,7 +789,7 @@ export function createServer(o: ServerOptions) {
     const r = writing(c, () => deleteKey(home, kind.data))
     if (r instanceof Response) return r
     hub.emit('settings.changed', {})
-    if (kind.data === 'slack') slackChanged()
+    if (kind.data === 'slack') intakeChanged()
     return c.json(r)
   })
 

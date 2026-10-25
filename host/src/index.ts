@@ -6,7 +6,7 @@ import { serve } from '@hono/node-server'
 import { transition } from './case/transition.ts'
 import { causeOf, checkIsolation, probeDir } from './checks/isolation.ts'
 import { purgeClosed } from './facts/purge.ts'
-import { createGoogle, googleConfig } from './intake/google.ts'
+import { createGoogle } from './intake/google.ts'
 import { POLL_MS } from './intake/poller.ts'
 import { callsDir, caseDir, initHome, monthCapFromEnv, resolveHome } from './ledger/db.ts'
 import { createClaudeCli, resolveClaude } from './model/claude-cli.ts'
@@ -50,7 +50,7 @@ if (sandboxCheck.reason?.startsWith('missing:') || sandboxCheck.reason === 'user
   )
 if (!sandboxCheck.claudeOk)
   console.error(`libretto: Claude Code ${MIN_CLAUDE} or later is required. Claude is not called.`)
-// コードの置き場の .env.local（Google の秘密）を作り手に読ませない。ホームの外に置かれても（6.6 (2)）
+// コードの置き場の .env.local（前の版の Google の秘密が残りうる。6.4 (10)）を作り手に読ませない。ホームの外に置かれても（6.6 (2)）
 const envFile = fileURLToPath(new URL('../../.env.local', import.meta.url))
 const secrets = existsSync(envFile) ? [envFile] : []
 const sandbox = createSandbox({ home, claude, check: () => sandboxCheck, secrets })
@@ -92,11 +92,9 @@ const invokeWith = (box: Sandbox) =>
 const invoke = invokeWith(sandbox)
 const cause = causeOf(sandboxCheck.reason)
 const invokeControl: (job: Job) => ReturnType<typeof invoke> = invokeWith(control)
-// Google の戻り先はループバックに固定（デスクトップ型の OAuth クライアント。6.4 (2)）
-const gconfig = googleConfig()
+// Google の戻り先はループバックに固定（デスクトップ型の OAuth クライアント。6.4 (2)）。クライアントは設定の画面で入れたもの（6.4 (10)）
 const google = createGoogle({
   home,
-  ...(gconfig && { config: gconfig }),
   redirectUri: `http://127.0.0.1:${port}/oauth/google/callback`,
 })
 const server = createServer({
