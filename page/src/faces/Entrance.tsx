@@ -176,7 +176,18 @@ function EntranceSet(p: {
   const rows: [string, ReactNode][] = [
     [W['entrance.brief.docType'], b.docType],
     [W['entrance.brief.subject'], b.subject],
-    [W['entrance.brief.wanted'], b.wanted.length ? b.wanted.join('、') : W['entrance.none']],
+    [
+      W['entrance.brief.wanted'],
+      b.wanted.length ? (
+        <>
+          {b.wanted.join('、')}
+          {/* 「これ」が何かが分かるよう行の直下に（GitHub #68） */}
+          <span className="wanted-note">{W['entrance.wantedNote']}</span>
+        </>
+      ) : (
+        W['entrance.none']
+      ),
+    ],
     [
       W['entrance.brief.gather'],
       b.gather.length ? (
@@ -212,7 +223,6 @@ function EntranceSet(p: {
               </div>
             ))}
           </dl>
-          {b.wanted.length > 0 && <p className="wanted-note">{W['entrance.wantedNote']}</p>}
         </section>
 
         {e.assumptions.length > 0 && (

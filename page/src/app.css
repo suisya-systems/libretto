@@ -965,12 +965,12 @@ input:disabled {
   font-weight: 500;
   overflow-wrap: anywhere;
 }
-/* 渡してほしいものがあるとき: 次に本人の番が来ることを琥珀の印で予告する */
+/* 渡してほしいものの行の直下: 次に本人の番が来ることを琥珀の印で予告する */
 .wanted-note {
   display: flex;
   align-items: baseline;
   gap: var(--space-2);
-  margin-top: var(--space-3);
+  margin-top: var(--space-2);
   padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-sm);
   background: var(--color-turn-bg);
@@ -989,7 +989,6 @@ input:disabled {
 }
 /* libretto が集めるものの行の直下に出す説明: 本人の番ではないので進行中の色（6.3.3 (7)） */
 .gather-note {
-  margin-top: var(--space-2);
   background: var(--color-moving-bg);
   color: var(--color-moving);
   font-weight: 500;

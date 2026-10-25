@@ -230,7 +230,7 @@ describe('依頼の確認', () => {
     none.done()
   })
 
-  it('渡してほしいものがあれば依頼書の表に出し、進めると貼り付けてもらうことを書く', async () => {
+  it('渡してほしいものがあれば依頼書の表に出し、その行の中に次の画面で貼り付けることを書く（GitHub #68）', async () => {
     const r = await render({
       ...base,
       entrance: { ...entrance, brief: { ...entrance.brief, wanted: ['ブレストのメモ', '当日の写真の説明'] } },
@@ -238,8 +238,14 @@ describe('依頼の確認', () => {
     const row = [...r.el.querySelectorAll('.brief > div')].find(
       (d) => d.querySelector('dt')?.textContent === W['entrance.brief.wanted'],
     )
-    expect(row?.querySelector('dd')?.textContent).toBe('ブレストのメモ、当日の写真の説明')
-    expect(r.text()).toContain(W['entrance.wantedNote'])
+    expect(row?.querySelector('dd')?.firstChild?.textContent).toBe('ブレストのメモ、当日の写真の説明')
+    // 本物の端末で、表の最後（してはいけないこと）の下に離れて出て「これ」が何か分からなかった。行の中に 1 つだけ
+    expect(row?.querySelector('.wanted-note')?.textContent).toBe(W['entrance.wantedNote'])
+    expect(r.el.querySelectorAll('.wanted-note')).toHaveLength(1)
+    expect(r.el.querySelector('.brief + .wanted-note')).toBeNull()
+    // 何を・いつ・どうするかを書く
+    expect(W['entrance.wantedNote']).toContain(`「${W['entrance.approve']}」`)
+    expect(W['entrance.wantedNote']).toContain('貼り付けて')
     r.done()
   })
 
