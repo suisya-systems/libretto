@@ -5,9 +5,11 @@ import { MARK } from '@libretto/shared/checks'
 import { transition } from '../../../host/src/case/transition.ts'
 import type { IsolationRecord } from '../../../host/src/checks/isolation.ts'
 import { paragraphUnits, plain, renderHtml } from '../../../host/src/checks/text.ts'
+import type { Tools } from '../../../host/src/deliver/render.ts'
 import { type Fetch, sentencesOf } from '../../../host/src/facts/inventory.ts'
 import type { CardContent, Ledger } from '../../../host/src/ledger/ledger.ts'
 import type { ScriptEntry } from '../../../host/src/model/fake.ts'
+import type { Claude } from '../../../host/src/server/app.ts'
 import { briefDraft, classified, goodChecks } from '../../../host/test/fixtures/entrance.ts'
 import { W, w } from '../../../page/src/wording.ts'
 
@@ -36,6 +38,8 @@ export type State = {
   sameFirst390?: true // 390 の 1 画面目が他の状態と同じでよい（違いが下の方にだけある）。重複の検査から外す
   // チェック項目を隠す仕組みの水準・原因・前回の確認（8.10。既定は strong・確認なし）
   isolation?: { level: HostStatus['isolation']; cause?: IsolationCause; last?: IsolationRecord }
+  // 動作環境の確認の行（6.13）。無ければ道具・AI はそろっている扱い
+  env?: { tools: Tools; claude: Claude; platform?: NodeJS.Platform }
   fetch?: Fetch // 出典の取り寄せの偽物（網に出ない。6.3.1 (5)）
   voiceSamples?: { title: string; url: string }[] // 会話の前に「あなたの文体の見本」を登録しておく（6.3.2 (10)）
   // Google と連携済みにする（偽の設定と google.json。Google へはつながない。6.4 (7)）。'gmail' は Drive の許可の無い前の連携（6.5 (2)）、
@@ -488,6 +492,38 @@ export const STATES: Record<string, State> = {
     selector: '.notices a',
     path: () => '/',
     sameFirst390: true, // お知らせ欄は 390 の 1 画面目より下にある
+  },
+  // 設定: 動作環境の確認で足りないものがある（6.13）。AI のログイン切れ・隠す道具・ファイルを作る道具・スマホは未設定
+  'settings-env-missing': {
+    script: entrance(),
+    isolation: { level: 'weak', cause: 'tools' },
+    env: { tools: {}, claude: { version: '2.1.310', ok: true, signedIn: false } },
+    expect: (v) => v.state === '入口待ち',
+    mark: W['settings.ai.signedOutWhy'],
+    selector: '.env-cmd',
+    path: () => '/settings',
+    sameFirst390: true, // 動作環境の確認は 390 の 1 画面目より下にある
+  },
+  // ホーム: 動作環境で足りないものがあり、先頭に帯が出る（6.13 (2)）
+  'home-env-missing': {
+    script: entrance(),
+    isolation: { level: 'weak', cause: 'tools' },
+    env: { tools: {}, claude: { version: '2.1.310', ok: true, signedIn: false } },
+    expect: (v) => v.state === '入口待ち',
+    mark: w('band.envMissing', { n: 3 }),
+    path: () => '/',
+  },
+  // 設定: 動作環境の確認で全部そろっている（直った行は済みの印。6.13）
+  'settings-env-ok': {
+    script: entrance(),
+    env: {
+      tools: { soffice: 'soffice', pdftoppm: 'pdftoppm' },
+      claude: { version: '2.1.310', ok: true, signedIn: true },
+    },
+    expect: (v) => v.state === '入口待ち',
+    mark: W['settings.env.ok'],
+    path: () => '/settings',
+    sameFirst390: true,
   },
   // 設定: お知らせの節（この端末の状態と、出来事ごとの入り切り。6.8 (6)）
   'settings-notices': {

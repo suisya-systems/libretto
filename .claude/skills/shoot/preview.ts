@@ -93,6 +93,13 @@ const server = createServer({
   ...(def.isolation && { isolation: def.isolation.level }),
   ...(def.isolation?.cause && { cause: def.isolation.cause }),
   ...(def.fetch && { fetch: def.fetch }),
+  // 動作環境の確認の見た目（6.13）。道具・AI・ホストの OS
+  ...(def.env && {
+    tools: def.env.tools,
+    claude: def.env.claude,
+    platform: def.env.platform ?? 'linux',
+    port: Number(port),
+  }),
 })
 if (def.isolation?.last) writeIsolation(home, def.isolation.last)
 let http: ReturnType<typeof serve> | undefined
