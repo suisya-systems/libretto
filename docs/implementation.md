@@ -1740,6 +1740,9 @@ S1 で作らないもの: 共有リンク `/p/:shareToken` と `share.revoke` �
 - `/cases/:id` で完了のとき、案件の面は成果の面を出す。いまの欄は「保存しました」と、保存したバージョン。
 - 届け先ごとの受け取り口（送付済の行）: page は「ページを開く」（新しいタブ）と「HTML をダウンロード」と「HTML をダウンロードして渡せます」、paste は「本文をコピー」（クリップボード。使えなければ欄から選んでコピーするよう 1 行出す）とプレビュー。
 - 保存した版ごとにページへのリンク（設計書 3.4 の「版が切り替えられる」）。バージョンと履歴は進行の面と同じ部品。履歴に送付の 4 つ（頼んだ・戻った・保存した・保存できなかった）の文を足す。
+- 「保存しました」の行には保存先の名前を入れる（#21。保存先が 2 つ以上だと同じ文が並び、どれを保存したか読めなかった）。T24 の `transition` 行の `detail.target` に保存した届け先 1 つを残し、`EventRow.target` で画面へ渡す。画面は `event.delivery.done.<kind>`（page・paste・gdoc。「Web ページに保存しました」など）を引き、文の無い種類と `target` の無い古い行は「保存先に保存しました」に戻す。
+
+理由（#21）: 既存の `detail.destination` は `cases.destination` を書き換える欄なので、1 つだけ入れると案件の届け先一覧が壊れる。そこで別の欄にした（列は足さない。`detail` なのでマイグレーションは要らない）。`deliveries` 表と時刻で突き合わせる案は、同じ秒に複数の届け先が済むと対応が決まらないので却下。`dest.page` は「Web ページ（自分だけ閲覧・履歴付き）」と長いので、`{dest}に保存しました` の差し込みにはせず種類ごとの文にした。保存できなかった・確かめている・中身が違ったの行には、今は名前を入れない（同じ `target` を書けば足せる）。
 
 **(9) 完了した依頼の一覧（`/done`）**
 
@@ -3503,7 +3506,7 @@ CREATE UNIQUE INDEX conversation_one_per_request ON conversation_messages(reques
 | type | 欄 | 書くとき |
 |---|---|---|
 | `created` | `caseId`, `to: CaseState`, `turn`, `step`（作ったときの状態。出来事を順にたどる起点）, `title`, `origin: Origin`, `auto: boolean`, `mode: Mode`, `docType`, `destination: DeliveryTarget[]`, `deadline?`, `candidateId?`, `parentCaseId?`（T31 の元の案件） | T2 / T4 / T5 / T31（`event_id` の決め方は 9.4 (4)・4.6 (0)） |
-| `transition` | `caseId`, `from: CaseState`, `to: CaseState`, `event: string`, `by: '本人'|'libretto'|'自動'|'拾い上げ'|'費用'|'停止'`, `turn`, `step`, `reason?`, `version?`, `series?`, `round?`, `approvalKind?: '構成案'|'完成稿'`（承認待ちに入るとき。5.3.2）, `mode?: Mode`（T8 で決めたとき）, `destination?: DeliveryTarget[]`（T23b で届け先を変えたとき） | 4.2 の全遷移 |
+| `transition` | `caseId`, `from: CaseState`, `to: CaseState`, `event: string`, `by: '本人'|'libretto'|'自動'|'拾い上げ'|'費用'|'停止'`, `turn`, `step`, `reason?`, `version?`, `series?`, `round?`, `approvalKind?: '構成案'|'完成稿'`（承認待ちに入るとき。5.3.2）, `mode?: Mode`（T8 で決めたとき）, `destination?: DeliveryTarget[]`（T23b で届け先を変えたとき）, `target?: DeliveryTarget`（T24 で保存した届け先 1 つ。履歴の文に名前を入れる。#21） | 4.2 の全遷移 |
 | `rejected` | `caseId`, `state`（拒否したときの状態。`detail.state` に入れる）, `event`, `reason: 'invalid_transition'|'stale'` | 表に無い遷移、`expectedRevision`・指紋の食い違い（5.3.1） |
 | `mode_changed` | `caseId`, `mode` | 入口でモードを変えたとき |
 | `title_changed` | `caseId`, `title` | 話し相手が題を付け直したとき |

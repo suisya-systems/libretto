@@ -94,6 +94,7 @@ export const CaseEvent = z.discriminatedUnion('type', [
     approvalKind: ApprovalKind.optional(),
     mode: Mode.optional(),
     destination: z.array(DeliveryTarget).optional(),
+    target: DeliveryTarget.optional(), // 保存した届け先 1 つ（T24。履歴の文に名前を入れる）
     // 書き換えた指紋の列（9.1 の「順にたどれば今の行に一致」）。空にする遷移は 4.6 (1)
     setFingerprint: z.string().optional(),
     outlineFingerprint: z.string().optional(),

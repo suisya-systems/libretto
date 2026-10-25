@@ -1201,6 +1201,9 @@ describe('送付と完了（6.2.8）', () => {
     const rows = ledger.listDeliveries(id)
     expect(rows.filter((d) => d.attemptId === first.attemptId && d.status === '送付済')).toHaveLength(1)
     expect(new Set(rows.filter((d) => d.status === '送付済').map((d) => d.attemptId)).size).toBe(2)
+    // 履歴の行はどの届け先を保存したかを持つ（#21）
+    const done = (await caseView(id)).events.filter((e) => e.event === 'delivery.done').map((e) => e.target?.kind)
+    expect(done.sort()).toEqual(c.destination.map((t) => t.kind).sort())
   })
 
   it('T26: 形式の判定の後に成果物が書き換わっていれば、保存したことにせず停止（送付失敗）', async () => {

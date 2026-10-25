@@ -675,6 +675,10 @@ describe('仕立てと送付（T20〜T26c）', () => {
     ok(attempt('delivery.done', `${sendId}:1`, { receiptId: 'r1', link: 'https://page' }))
     expect(get()).toMatchObject({ state: '完了' })
     expect(ledger.listDecisions('c1').at(-1)).toMatchObject({ gate: '送付' })
+    // 一部・完了のどちらの行にも保存した届け先 1 つを残し、案件の届け先一覧は変えない（#21）
+    const done = ledger.listCaseEvents('c1').filter((e) => e.type === 'transition' && e.event === 'delivery.done')
+    expect(done.map((e) => e.type === 'transition' && e.target)).toEqual([paste, page])
+    expect(get().destination).toEqual([paste, page])
   })
 
   it('T24b 送付中 delivery.mismatch → 下書き中（失敗の行、完成稿と送付の承認を無効に）。古い送付回の通知は stale', () => {

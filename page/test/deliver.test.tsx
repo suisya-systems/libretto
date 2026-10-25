@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 // 送付の面・成果の面・完了した依頼（docs/implementation.md 6.2.8 (6)(7)(9)）
-import type { CaseView } from '@libretto/shared/api'
+import type { CaseView, DeliveryTarget } from '@libretto/shared/api'
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DeliverFace, ResultFace } from '../src/faces/Deliver.tsx'
 import { Done } from '../src/faces/Done.tsx'
+import { History } from '../src/faces/Progress.tsx'
 import { W, w } from '../src/wording.ts'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -153,6 +154,39 @@ describe('成果の面', () => {
     expect(writeText).toHaveBeenCalledWith(PASTE)
     expect(r.button(W['result.copied'])).toBeDefined()
     expect(r.text()).toContain(W['event.delivery.done'])
+    r.done()
+  })
+
+  it('履歴の「保存しました」に保存先の名前を入れる。文の無い種類と古い行は名前の無い文（#21）', async () => {
+    const ev = (target?: DeliveryTarget) =>
+      ({
+        at,
+        type: 'transition',
+        from: '送付中',
+        to: '送付中',
+        event: 'delivery.done',
+        by: 'libretto',
+        ...(target && { target }),
+      }) as const
+    const c: CaseView = {
+      ...done,
+      events: [
+        ev({ kind: 'paste' }),
+        ev({ kind: 'page', shared: false }),
+        ev({ kind: 'gdoc', folderId: 'f' }),
+        ev({ kind: 'gsheet', folderId: 'f' }),
+        ev(),
+      ],
+    }
+    const r = await render(<History c={c} />)
+    const lines = [...r.el.querySelectorAll('.history li span')].map((s) => s.textContent)
+    expect(lines).toEqual([
+      W['event.delivery.done'],
+      W['event.delivery.done'],
+      W['event.delivery.done.gdoc'],
+      W['event.delivery.done.page'],
+      W['event.delivery.done.paste'],
+    ])
     r.done()
   })
 
