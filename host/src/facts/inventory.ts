@@ -297,14 +297,15 @@ export type Facts = { file: FactsFile; excerpts: Map<string, string> } // claimI
 export type Sources = Map<string, Fetched | FetchFailure>
 export const sourceRef = (url: string) => sha256(url).slice(0, 16)
 
-// 主張の文の出典。リンクも印も無い文の主張が、本文の出典付きの文（出典付きの文を 2 つ繋いだものも）の 2-gram を
+// 主張の文の出典。リンクも印も無い文の主張が、本文の出典付きの文（離れた 2 つを繋いだものも）の 2-gram を
 // 6 割以上含めば、その文の出典を引き継ぐ（まとめの文。6.2.12 (2)）。合っているかは引き継いだ出典の該当箇所と支持の判定が決める。
 // ponytail: 言い換えの強いまとめは当たらず出典なしのまま（作り手に文が返る）。困ったら出典付きの文を Haiku に選ばせる
 function linksOf(sentences: readonly Sentence[], c: Claim): string[] {
   const s = sentences.find((x) => x.start <= c.range[0] && c.range[0] < x.end)
   if (!s || s.links.length || s.marked) return s?.links ?? []
   const sourced = sentences.filter((x) => x.links.length)
-  const groups = [...sourced.map((x) => [x]), ...sourced.slice(1).map((x, i) => [sourced[i] as Sentence, x])]
+  // ponytail: 出典付きの文の組を全部試す（O(n²)）。3 つ以上の事実をまとめた文は当たらない
+  const groups = sourced.flatMap((x, i) => [[x], ...sourced.slice(i + 1).map((y) => [x, y])])
   const text = cleanText(c.text)
   let top: { group: Sentence[]; score: number } | undefined
   for (const group of groups) {

@@ -334,6 +334,19 @@ describe('進め方の説明文とまとめの文（6.2.12）', () => {
     // 2 つの文をまとめた文は、文に出典が複数あるときと同じく一番当たる出典を相手にし、支持の判定に回る（抜粋がある）
     expect(f.excerpts.get('K03')).toBe('設定の画面に「停止」の項目を加えました。')
   })
+
+  it('まとめた 2 つの文の間にほかの出典付きの文があっても引き継ぐ（どちらか 1 つでは 6 割に届かない）', () => {
+    const md = [
+      `検索が 2 倍速くなった（[更新履歴](${URL_A})）。`,
+      `会社の本社が大阪へ移った（[別](https://example.net/c)）。`,
+      `停止の項目が加わった（[お知らせ](${URL_B})）。`,
+      '検索が 2 倍速くなり、停止の項目が加わった。',
+    ].join('\n\n')
+    const cs = claimsFrom(md, [{ text: '検索が 2 倍速くなり、停止の項目が加わった', kind: '断定' }])
+    const v = buildFacts(1, md, cs, [], new Map()).file.verdicts[0]
+    expect(v?.kind).toBe('出典あり')
+    expect([URL_A, URL_B]).toContain(v?.sourceRef)
+  })
 })
 
 describe('取り寄せ（6.3.1 (5)）', () => {
