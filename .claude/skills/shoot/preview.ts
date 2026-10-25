@@ -1,6 +1,6 @@
 // 撮影用のプレビュー: states.ts の 1 状態を、fake の台本で動くホストに作って出す（Claude の答えだけ台本、ほかは本物）
 // node --experimental-strip-types --no-warnings preview.ts <state> <port>
-// /state は状態名（着かなければ出さずに終わる）、/frame?w=&h=&id= は撮る枠（iframe）、/shot はペアリングして状態の画面へ
+// /state は状態名（着かなければ出さずに終わる）、/frame?w=&h=&id= は撮る枠（iframe）、/shot は起動時にペアリングした端末で状態の画面へ
 // TMPDIR が無くても動く（os.tmpdir() は無ければ /tmp）
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -114,16 +114,13 @@ process.on('SIGINT', () => void shutdown(0))
 process.on('SIGTERM', () => void shutdown(0))
 
 // GET /pair/:token は確かめの画面だけを返し、Cookie は POST で出る（GitHub #71）
-const pairCookie = async () => {
-  const p = await server.app.fetch(
-    new Request(`${origin}${new URL(server.issuePairing('shoot').url).pathname}`, {
-      method: 'POST',
-      headers: { origin },
-    }),
-  )
-  return (p.headers.get('set-cookie') ?? '').split(';')[0] as string
-}
-const cookie = await pairCookie()
+const paired = await server.app.fetch(
+  new Request(`${origin}${new URL(server.issuePairing('shoot').url).pathname}`, {
+    method: 'POST',
+    headers: { origin },
+  }),
+)
+const cookie = (paired.headers.get('set-cookie') ?? '').split(';')[0] as string
 const api = (path: string, body?: unknown) =>
   server.app.fetch(
     new Request(`${origin}${path}`, {
@@ -226,7 +223,8 @@ http = serve({
     if (u.pathname === '/shot') {
       return new Response(null, {
         status: 302,
-        headers: { location: def.path?.(ctx.caseId) ?? `/cases/${ctx.caseId}`, 'set-cookie': await pairCookie() },
+        // 起動時の 1 台を使い回す。撮るたびにペアリングすると端末の節が 1 台ずつ伸びる（GitHub #77）
+        headers: { location: def.path?.(ctx.caseId) ?? `/cases/${ctx.caseId}`, 'set-cookie': cookie },
       })
     }
     if (u.pathname === '/frame') {
