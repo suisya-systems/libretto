@@ -48,7 +48,7 @@ type Deps = {
   now?: () => Date
   fetch?: Fetch // 出典の取り寄せ（テストは偽物。6.3.1 (5)）
   google: Google // Google ドキュメントの届け先（6.5）
-  tools?: Tools // 描き出しと計算し直しの道具（6.8 (3)(5)）
+  tools?: Tools // 描き出しと計算し直しの道具（6.10 (3)(5)）
 }
 
 export type Runner = ReturnType<typeof createRunner>

@@ -1,4 +1,4 @@
-// 描き出しと計算し直し（docs/implementation.md 6.8 (3)(5)）。LibreOffice（soffice）で PDF・xlsx に、poppler（pdftoppm）でページの画像に。
+// 描き出しと計算し直し（docs/implementation.md 6.10 (3)(5)）。LibreOffice（soffice）で PDF・xlsx に、poppler（pdftoppm）でページの画像に。
 // 道具が無い・失敗した・時間切れは ToolFailure（判定役が fail.system(道具の失敗) で止める。10 章）
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -10,7 +10,7 @@ const sha256 = (b: Buffer) => createHash('sha256').update(b).digest('hex')
 
 export class ToolFailure extends Error {}
 
-// 事前点検で見つけた道具の名前（無ければ undefined）。起動時に 1 回（6.8 (5)）
+// 事前点検で見つけた道具の名前（無ければ undefined）。起動時に 1 回（6.10 (5)）
 export type Tools = { soffice?: string; pdftoppm?: string }
 const CALL_MS = 120_000
 
@@ -39,7 +39,7 @@ export async function preflight(names: { soffice: string; pdftoppm: string }): P
 export type Page = { png: string; blank: boolean }
 // 白（250 以上）でない画素がこの割合より少ないページは空白
 const INK = 0.001
-export const MAX_PAGES = 40 // 見た目の判定に渡すページの上限（超えたら判定できない。6.8 (3)）
+export const MAX_PAGES = 40 // 見た目の判定に渡すページの上限（超えたら判定できない。6.10 (3)）
 
 // PGM（P5、8 bit）の画素から空白かを決める
 export function blankPgm(buf: Buffer): boolean {
@@ -105,7 +105,7 @@ export function renderer(tools: Tools, root: string, signal: AbortSignal) {
         if (!gray.length || gray.length !== png.length) throw new ToolFailure('pdftoppm: pages do not match')
         return png.map((p, i) => ({ png: p, blank: blankPgm(readFileSync(gray[i] as string)) }))
       }),
-    // 式を計算し直した xlsx（6.8 (3)）
+    // 式を計算し直した xlsx（6.10 (3)）
     recalc: (buf: Buffer) =>
       once(`recalc:${sha256(buf)}`, async (): Promise<Buffer> => {
         const dir = fresh(`xlsx-${sha256(buf).slice(0, 16)}`)

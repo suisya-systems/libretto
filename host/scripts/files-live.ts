@@ -1,4 +1,4 @@
-// 本物の LibreOffice と poppler での確かめ（docs/implementation.md 6.8 (3)(5)）。モデルを呼ばず、網に出ない
+// 本物の LibreOffice と poppler での確かめ（docs/implementation.md 6.10 (3)(5)）。モデルを呼ばず、網に出ない
 //   npm run verify:files -- [出力のフォルダ]
 // 見本の pptx / docx / xlsx を作り、pptx と docx をページの画像にして空白を数え、xlsx の式を計算し直してエラーを数える。
 // 画像と計算し直した xlsx は出力のフォルダ（既定は一時フォルダ）に残すので、目でも確かめられる

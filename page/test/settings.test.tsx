@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 // 設定の面の API キーの節（画面 7。docs/implementation.md 6.1.3 (6)・設計書 D17）
-import type { ApiKeyStatus, ConnectionsView } from '@libretto/shared/api'
+import type { ApiKeyStatus, ConnectionsView, InferenceSettings } from '@libretto/shared/api'
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -19,6 +19,8 @@ let jev: ApiKeyStatus
 let respond: (method: string) => Response
 const sent: { method: string; path: string; body?: unknown }[] = []
 let samples: { id: string; kind: '声の見本'; title: string; where: string }[]
+let infer: InferenceSettings
+let inferStatus: number
 let voiceStatus: number
 
 beforeEach(() => {
@@ -30,7 +32,10 @@ beforeEach(() => {
     google: { configured: false, state: 'none', label: 'libretto', docs: false, meet: false },
     slack: { configured: false, state: 'none', emoji: 'memo', missingScopes: [] },
     tools: { soffice: true, pdftoppm: true },
+    inference: { classifiedToday: 0, dailyLimit: 300, recall: { hit: 0, total: 0 }, suppressions: [] },
   }
+  infer = { gmailDays: 7, slackChannels: [], dailyLimit: 300, showLow: true, useJev: true }
+  inferStatus = 200
   respond = () => new Response('{}')
   samples = []
   voiceStatus = 200
@@ -51,6 +56,28 @@ beforeEach(() => {
         }))
       }
       return new Response(JSON.stringify({ samples }))
+    }
+    if (path === '/api/settings/inference') {
+      if (init.method === 'PUT') {
+        const body = JSON.parse(String(init.body))
+        sent.push({ method: 'PUT', path, body })
+        if (inferStatus !== 200) return new Response('{}', { status: inferStatus })
+        infer = body
+      }
+      return new Response(JSON.stringify(infer))
+    }
+    if (path === '/api/connections/slack/channels')
+      return new Response(
+        JSON.stringify({
+          channels: [
+            { id: 'C1', name: 'general' },
+            { id: 'C2', name: 'docs' },
+          ],
+        }),
+      )
+    if (path.startsWith('/api/suppressions/') && init.method) {
+      sent.push({ method: init.method, path })
+      return new Response(null, { status: 204 })
     }
     if (path === '/api/checks/run' && init.method) {
       sent.push({ method: init.method, path })
@@ -461,6 +488,71 @@ describe('Slack の行（6.6 (2)(7)）', () => {
     conn = { ...conn, slack: { configured: true, state: 'expired', emoji: 'memo', missingScopes: [] } }
     r = await render()
     expect(r.text()).toContain(W['settings.slack.expiredNote'])
+    r.done()
+  })
+})
+
+describe('自動検出の節（6.9 (10)）', () => {
+  const scope = '[aria-labelledby="h-infer"]'
+  const setValue = async (el: HTMLInputElement | HTMLSelectElement, v: string) => {
+    const proto = el instanceof HTMLSelectElement ? HTMLSelectElement.prototype : HTMLInputElement.prototype
+    Object.getOwnPropertyDescriptor(proto, 'value')?.set?.call(el, v)
+    await act(async () =>
+      el.dispatchEvent(new Event(el instanceof HTMLSelectElement ? 'change' : 'input', { bubbles: true })),
+    )
+  }
+
+  it('今日の件数・見られなかった数・見落としの割合・除外したもの（戻すは DELETE）', async () => {
+    conn.inference = {
+      classifiedToday: 12,
+      dailyLimit: 300,
+      skippedToday: 4,
+      recall: { hit: 9, total: 10 },
+      suppressions: [{ id: 3, kind: 'sender', label: 'news@example.com', addedAt: '2026-10-24T10:00:00+09:00' }],
+    }
+    const r = await render()
+    const sec = r.el.querySelector(scope)?.textContent ?? ''
+    expect(sec).toContain(w('settings.infer.today', { n: 12, limit: 300 }))
+    expect(sec).toContain(w('settings.infer.skipped', { n: 4 }))
+    expect(sec).toContain(w('settings.infer.recall', { total: 10, hit: 9, pct: 90 }))
+    expect(sec).toContain('news@example.com')
+    await r.click(
+      r.el.querySelector(
+        `${scope} button[aria-label="${w('settings.infer.restoreLabel', { label: 'news@example.com' })}"]`,
+      ),
+    )
+    expect(sent).toContainEqual({ method: 'DELETE', path: '/api/suppressions/3' })
+    r.done()
+  })
+
+  it('範囲・上限・表示を 1 回で保存する。Slack と連携していればチャンネルを選べる。形の誤りは直し方', async () => {
+    conn.slack = { ...conn.slack, configured: true, state: 'connected' }
+    const r = await render()
+    expect(r.text()).toContain(W['settings.infer.recallNone'])
+    const sec = r.el.querySelector(scope) as HTMLElement
+    await setValue(sec.querySelector('select') as HTMLSelectElement, '14')
+    await setValue(sec.querySelector('input[type="number"]') as HTMLInputElement, '0')
+    const boxes = [...sec.querySelectorAll('input[type="checkbox"]')] as HTMLInputElement[]
+    // チャンネル 2 つ、可能性が低い候補、Jev
+    expect(boxes).toHaveLength(4)
+    await r.click(boxes[1])
+    await r.click(boxes[2])
+    await r.click(r.button(W['settings.infer.save'], scope))
+    expect(sent.at(-1)).toEqual({
+      method: 'PUT',
+      path: '/api/settings/inference',
+      body: { gmailDays: 14, slackChannels: ['C2'], dailyLimit: 0, showLow: false, useJev: true },
+    })
+    expect(sec.textContent).toContain(W['settings.infer.saved'])
+    inferStatus = 400
+    await r.click(r.button(W['settings.infer.save'], scope))
+    expect(sec.textContent).toContain(W['settings.infer.invalid'])
+    r.done()
+  })
+
+  it('Slack と連携していなければチャンネルの欄を出さない', async () => {
+    const r = await render()
+    expect(r.text()).not.toContain(W['settings.infer.slackChannels'])
     r.done()
   })
 })

@@ -108,9 +108,9 @@ function toSending(destination = [paste]) {
 }
 
 // --- 候補
-const candidate = (candidateId = 'gmail:t1', extra: Record<string, unknown> = {}) =>
-  run({
-    type: 'candidate.presented',
+const candidateInput = (candidateId = 'gmail:t1', extra: Record<string, unknown> = {}) =>
+  ({
+    type: 'candidate.presented' as const,
     candidate: {
       candidateId,
       source: 'gmail',
@@ -127,7 +127,9 @@ const candidate = (candidateId = 'gmail:t1', extra: Record<string, unknown> = {}
       summary: '記事を書いてほしい',
       proposal: { docType: '記事', destination: [paste] },
     },
-  })
+  }) as const
+const candidate = (candidateId = 'gmail:t1', extra: Record<string, unknown> = {}) =>
+  run(candidateInput(candidateId, extra) as never)
 
 describe('候補（4.6 (0)）', () => {
   it('T1 （無し） candidate.presented → 候補（案件は作らない）', () => {
@@ -179,13 +181,55 @@ describe('候補（4.6 (0)）', () => {
     })
   })
 
-  it('T3 「依頼ではない」が同じ差出人で 3 回目なら ask_suppress を返す', () => {
-    const results = ['gmail:a', 'gmail:b', 'gmail:c'].map((cid) => {
-      candidate(cid)
-      return run({ type: 'candidate.dismiss', candidateId: cid, reason: '依頼ではない' })
+  it('T3 推測の「依頼ではない」が同じ差出人で続いて 3 回目のときだけ askSuppress を返す（6.9 (7)）', () => {
+    const inferred = { origin: '推測', confidence: '低' }
+    const dismiss = (cid: string, reason = '依頼ではない', extra: Record<string, unknown> = inferred) => {
+      candidate(cid, extra)
+      return run({ type: 'candidate.dismiss', candidateId: cid, reason } as never)
+    }
+    // 合図のカードの見送りは数えない。間に別の理由が挟まれば数え直す
+    expect(dismiss('gmail:s', '依頼ではない', {})).not.toHaveProperty('askSuppress')
+    dismiss('gmail:a')
+    dismiss('gmail:b', 'もう済んだ')
+    dismiss('gmail:c')
+    expect(dismiss('gmail:d')).not.toHaveProperty('askSuppress')
+    expect(dismiss('gmail:e')).toMatchObject({
+      askSuppress: { kind: 'sender', value: 'a@example.com', label: 'a@example.com', count: 3 },
     })
-    expect(results[1]).not.toHaveProperty('askSuppress')
-    expect(results[2]).toMatchObject({ askSuppress: { senderKey: 'a@example.com', count: 3 } })
+    // 4 回目は聞かない
+    expect(dismiss('gmail:f')).not.toHaveProperty('askSuppress')
+  })
+
+  it('T3 「拾わなくてよい」は除外の行を足す。名前は Gmail がアドレス、Slack がチャンネル名（6.9 (7)）', () => {
+    candidate('gmail:a', { origin: '推測', confidence: '中' })
+    ok(run({ type: 'candidate.dismiss', candidateId: 'gmail:a', reason: '拾わなくてよい' }))
+    candidate('slack:C1:1.0', { source: 'slack', origin: '推測', confidence: '中', senderKey: 'C1' })
+    ok(run({ type: 'candidate.dismiss', candidateId: 'slack:C1:1.0', reason: '拾わなくてよい' }))
+    expect(ledger.listSuppressions()).toMatchObject([
+      { kind: 'sender', value: 'a@example.com', label: 'a@example.com' },
+      { kind: 'channel', value: 'C1', label: '来週の記事' },
+    ])
+  })
+
+  it('T1 推測が「頼んでいない」とした行は、合図が付いたら出し直して自己測定は「見落とし」（6.9 (8)）', () => {
+    ledger.insertNotRequest('gmail:t1', 'gmail', { historyId: 'h1' }, 'gmail:t1@h1')
+    expect(ledger.getCandidate('gmail:t1')).toMatchObject({ status: 'not_request', senderKey: '', origin: '推測' })
+    ok(run({ ...candidateInput(), recall: { signalAt: '2026-10-24T10:00:00.000+09:00' } } as never))
+    expect(ledger.getCandidate('gmail:t1')).toMatchObject({
+      status: 'presented',
+      origin: '合図',
+      senderKey: 'a@example.com',
+    })
+    expect(ledger.listCandidateEvents('gmail:t1').map((e) => e.type)).toEqual([
+      'not_request',
+      'found',
+      'presented',
+      'recall_sample',
+    ])
+    expect(ledger.listCandidateEvents('gmail:t1').at(-1)).toMatchObject({ inferredBefore: false })
+    // 出した後の重複は今までどおり記録しない
+    expect(candidate()).toMatchObject({ ok: false, reason: 'invalid_transition' })
+    expect(ledger.recallSince('2026-01-01')).toEqual({ hit: 0, total: 1 })
   })
 
   it('T4 候補 candidate.auto_enter → 入口待ち（おまかせ・auto）。推測は合図に昇格させてから', () => {

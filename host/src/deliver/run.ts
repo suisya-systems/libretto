@@ -22,7 +22,7 @@ const isFormat = (k: string): k is OutputFormat => (FORMATS as string[]).include
 const readManifest = (path: string) => VersionManifest.parse(JSON.parse(readFileSync(path, 'utf-8')))
 
 // versions/NN/outputs/ と outputs.json を書く。版のファイルと manifest.at は T12 の後に変わらないので、何度流しても同じ指紋。
-// 成果物は形式ごとに 1 つ（Google の 3 つは手元のファイルと同じもの。6.8 (2)）
+// 成果物は形式ごとに 1 つ（Google の 3 つは手元のファイルと同じもの。6.10 (2)）
 export function tailor(home: string, c: CaseRecord, now: Date): VersionManifest {
   const vdir = versionDir(home, c.caseId, c.version)
   const f = draftNames(c.version)
@@ -107,7 +107,7 @@ export async function deliver(d: Deps, c: CaseRecord, signal: AbortSignal, reche
       type: 'delivery.done',
       receiptId: t.kind === 'file' ? `file:${t.format}:v${c.version}` : `${t.kind}:v${c.version}`,
       ...(t.kind === 'page' && { link: `/cases/${encodeURIComponent(c.caseId)}/page?v=${c.version}` }),
-      // 手元のファイルはダウンロードの口（6.8 (4)）
+      // 手元のファイルはダウンロードの口（6.10 (4)）
       ...(t.kind === 'file' && { link: fileLink(c.caseId, c.version, t.format) }),
       eventId: `${c.caseId}:delivery.done:${pending.attemptId}`,
     }),
@@ -117,7 +117,7 @@ export async function deliver(d: Deps, c: CaseRecord, signal: AbortSignal, reche
 export const fileLink = (caseId: string, n: number, format: string) =>
   `/api/cases/${encodeURIComponent(caseId)}/files/${n}?format=${format}`
 
-// 手元のファイルでダウンロードできる版か = その形式の file の届け先で最新の行が送付済の attempt がある（6.8 (4)）
+// 手元のファイルでダウンロードできる版か = その形式の file の届け先で最新の行が送付済の attempt がある（6.10 (4)）
 export function fileVersions(ledger: Ledger, caseId: string, format: string): number[] {
   const latest = new Map(ledger.listDeliveries(caseId).map((x) => [x.attemptId, x]))
   return [...latest.values()]

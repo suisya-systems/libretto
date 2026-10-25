@@ -174,7 +174,7 @@ type Deps = {
   invoke: (job: Job) => Promise<Outcome>
   candidatesChanged: () => void
   now: () => Date
-  destChoices: () => DestChoice[] // 今選べる保存先（6.8 (3)）
+  destChoices: () => DestChoice[] // 今選べる保存先（6.10 (3)）
 }
 export type MeetProblem = 'rate_limited' | 'network' | 'api_disabled'
 

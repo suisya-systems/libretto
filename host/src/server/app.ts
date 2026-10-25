@@ -15,13 +15,16 @@ import {
   type ConnectionsView,
   ConversationPost,
   type DeliveryTarget,
+  DismissLow,
   DraftDiff,
   GoogleClientInput,
   type HostStatus,
+  InferenceSettings,
   type IsolationCause,
   MaterialsPost,
   type Mode,
   mixesTables,
+  SuppressionInput,
 } from '@libretto/shared/api'
 import type { Intake } from '@libretto/shared/ledger'
 import { type Context, Hono } from 'hono'
@@ -41,7 +44,7 @@ import { readThread } from '../intake/gmail.ts'
 import { createGoogle, type Google, parseClientJson } from '../intake/google.ts'
 import { MEET_WINDOW_DAYS, meetFileId, rereadNote } from '../intake/meet.ts'
 import { createPoller, RUN_KEY } from '../intake/poller.ts'
-import { createSlack, parseCandidateId, readPost, type Slack } from '../intake/slack.ts'
+import { channelList, createSlack, parseCandidateId, readPost, type Slack } from '../intake/slack.ts'
 import { caseDir } from '../ledger/db.ts'
 import { jst, type Ledger } from '../ledger/ledger.ts'
 import type { Job, Outcome } from '../model/invoke.ts'
@@ -60,7 +63,7 @@ import { createEntrance, currentSet, entranceView, writeApproval, writeAtomic } 
 import { currentMarks, OUTPUT_FILES, reviewsOf } from '../roles/judge.ts'
 import { draftNames, pastedCount, pastedName, versionDir, versionsOf } from '../roles/maker.ts'
 import { createRuns, Stopped } from '../runs.ts'
-import { saveVoiceSamples, VoiceSamplesInput, voiceSamples } from '../settings.ts'
+import { inferenceSettings, saveInference, saveVoiceSamples, VoiceSamplesInput, voiceSamples } from '../settings.ts'
 import { createHub, type SseMessage } from './sse.ts'
 import { createStop, isStorageError } from './stop.ts'
 import { caseView, DEFAULTS, homeView, toCard } from './views.ts'
@@ -93,7 +96,7 @@ export type ServerOptions = {
   gmailLabel?: string // 取り込みの目印（設定の Issue までは既定の libretto）
   slack?: Slack // Slack の連携（6.6 (2)）。無ければ設定の画面で入れたトークンで
   slackEmoji?: string // 取り込みの目印（設定の Issue までは既定の memo）
-  tools?: Tools // 起動時の事前点検で見つけた LibreOffice と poppler（6.8 (5)）
+  tools?: Tools // 起動時の事前点検で見つけた LibreOffice と poppler（6.10 (5)）
 }
 
 export function createServer(o: ServerOptions) {
@@ -162,14 +165,14 @@ export function createServer(o: ServerOptions) {
     const r = await readThread(google, candidateId.replace(/^gmail:/, ''), account, signal)
     return r.ok ? r.thread.body : undefined
   }
-  // 今選べる保存先（6.5 (2)・6.8 (3)）。Google に保存できる連携と、LibreOffice・poppler の有無
+  // 今選べる保存先（6.5 (2)・6.10 (3)）。Google に保存できる連携と、LibreOffice・poppler の有無
   const tools = o.tools ?? {}
   const ready = () => {
     const s = google.status()
     return { google: s.state === 'connected' && s.docs, files: !!tools.soffice && !!tools.pdftoppm }
   }
   const choices = () => destChoices(ready())
-  // 保存先を変える・足すときの選択肢。表の依頼は表だけ、文書の依頼は表のほかだけ（6.8 (1)）
+  // 保存先を変える・足すときの選択肢。表の依頼は表だけ、文書の依頼は表のほかだけ（6.10 (1)）
   const caseChoices = (now: readonly DeliveryTarget[]) => choices().filter((k) => !mixesTables([...now, TARGET[k]]))
   const candidatesChanged = () => hub.emit('candidates.changed', {})
   const poller = createPoller({
@@ -181,6 +184,7 @@ export function createServer(o: ServerOptions) {
     runs,
     label: () => gmailLabel,
     emoji: () => slackEmoji,
+    inference: () => inferenceSettings(home),
     candidatesChanged,
     connectionsChanged: () => hub.emit('connections.changed', {}),
     log,
@@ -383,8 +387,22 @@ export function createServer(o: ServerOptions) {
       },
       slack: slackView(),
       tools: { soffice: !!tools.soffice, pdftoppm: !!tools.pdftoppm },
+      inference: {
+        classifiedToday: ledger.classifiedCount(now()),
+        dailyLimit: inferenceSettings(home).dailyLimit,
+        ...poller.inferenceView(),
+        recall: ledger.recallSince(jst(new Date(now().getTime() - 30 * 86_400_000))),
+        suppressions: ledger.listSuppressions().map(({ value: _, ...x }) => x),
+      },
     }
     return c.json(view)
+  })
+
+  // 自動検出で見るチャンネルの候補（6.9 (10)）。トークンが無い・読めなければ空
+  app.get('/api/connections/slack/channels', async (c) => {
+    if (!slack.configured()) return c.json({ channels: [] })
+    const r = await channelList(slack, c.req.raw.signal)
+    return c.json({ channels: r.ok ? r.channels.sort((a, b) => a.name.localeCompare(b.name)) : [] })
   })
 
   // Slack のトークン・Google の OAuth クライアントを入れた・入れ直した・消した: 連携の欄を取り直させ、入っていれば取り込む（6.6 (2)・6.4 (10)）
@@ -500,7 +518,46 @@ export function createServer(o: ServerOptions) {
     if (r instanceof Response) return r
     if (!r.ok) return refused(r)
     candidatesChanged()
-    return c.json({})
+    return c.json(CandidateActionResult.parse({ ...(r.askSuppress && { askSuppress: r.askSuppress }) }))
+  })
+
+  // 低をまとめて見送る（6.9 (7)）。出したままの推測・低だけを「依頼ではない」で。除外しますかは聞かない
+  app.post('/api/candidates/dismiss-low', async (c) => {
+    const body = DismissLow.safeParse(await c.req.json().catch(() => undefined))
+    if (!body.success) return c.json({ reason: 'invalid' }, 400)
+    if (stop.isStopped()) return c.json({ reason: 'stopped' }, 409)
+    const r = writing(c, () =>
+      ledger.transaction(() =>
+        body.data.ids.filter((candidateId) => {
+          const x = ledger.getCandidate(candidateId)
+          if (x?.origin !== '推測' || x.confidence !== '低' || x.status !== 'presented') return false
+          return transition(ledger, { type: 'candidate.dismiss', candidateId, reason: '依頼ではない', bulk: true }).ok
+        }),
+      ),
+    )
+    if (r instanceof Response) return r
+    candidatesChanged()
+    return c.json({ dismissed: r.length })
+  })
+
+  // 除外する・戻す（6.9 (7)）。行は消さず removed_at を埋める
+  app.post('/api/suppressions', async (c) => {
+    const body = SuppressionInput.safeParse(await c.req.json().catch(() => undefined))
+    if (!body.success) return c.json({ reason: 'invalid' }, 400)
+    const { kind, value, label } = body.data
+    const r = writing(c, () => ledger.addSuppression(kind, value, '依頼ではない', label))
+    if (r instanceof Response) return r
+    hub.emit('connections.changed', {})
+    return c.json({ id: r })
+  })
+  app.delete('/api/suppressions/:id', (c) => {
+    const id = Number(c.req.param('id'))
+    if (!Number.isInteger(id)) return c.json({ reason: 'invalid' }, 400)
+    const r = writing(c, () => ledger.removeSuppression(id))
+    if (r instanceof Response) return r
+    if (!r) return c.json({ reason: 'not_found' }, 404)
+    hub.emit('connections.changed', {})
+    return c.body(null, 204)
   })
 
   // 候補から作る案件の intake.json（6.4 (5)・6.6 (6)・6.7 (4)）。Slack の threadId は <channelId>:<ts>、会議メモはファイルの id
@@ -570,7 +627,15 @@ export function createServer(o: ServerOptions) {
           .listMeetNotes(email, since, 10)
           .flatMap(({ title, heldAt, link, result }) => (result === 'items' ? [] : [{ title, heldAt, link, result }]))
       : []
-    return c.json(homeView(ledger, { ...status }, { connected, running, ...(lastAt && { lastAt }) }, meetNotes))
+    return c.json(
+      homeView(
+        ledger,
+        { ...status },
+        { connected, running, ...(lastAt && { lastAt }) },
+        meetNotes,
+        inferenceSettings(home).showLow,
+      ),
+    )
   })
 
   // 一覧（5.2）。完了した依頼（/done）が使う。新しく変わった順
@@ -825,6 +890,19 @@ export function createServer(o: ServerOptions) {
     return c.json(r)
   })
 
+  // 自動検出の範囲・上限・表示（6.9 (10)）
+  app.get('/api/settings/inference', (c) => c.json(inferenceSettings(home)))
+  app.put('/api/settings/inference', async (c) => {
+    const body = InferenceSettings.safeParse(await c.req.json().catch(() => undefined))
+    if (!body.success) return c.json({ reason: 'invalid' }, 400)
+    const r = writing(c, () => saveInference(home, body.data))
+    if (r instanceof Response) return r
+    hub.emit('settings.changed', {})
+    hub.emit('connections.changed', {})
+    candidatesChanged()
+    return c.json(r)
+  })
+
   // あなたの文体の見本（6.3.2 (10)）。GET /api/settings ができたらその voiceSamples に移す
   app.get('/api/settings/voice-samples', (c) => c.json({ samples: voiceSamples(home) }))
   app.put('/api/settings/voice-samples', async (c) => {
@@ -846,7 +924,7 @@ export function createServer(o: ServerOptions) {
     return r instanceof Response ? r : c.body(null, 204)
   })
 
-  // 手元のファイルのダウンロード（5.2・6.8 (4)）。その形式で保存した（送付済の）版だけ
+  // 手元のファイルのダウンロード（5.2・6.10 (4)）。その形式で保存した（送付済の）版だけ
   const FILE_TYPES = {
     pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
     xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

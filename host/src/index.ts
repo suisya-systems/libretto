@@ -45,7 +45,7 @@ const sandboxCheck = await checkSandbox({ home, claude })
 console.error(
   `libretto: isolation ${sandboxCheck.isolation}${sandboxCheck.reason ? ` (${sandboxCheck.reason})` : ''}, claude ${sandboxCheck.claudeVersion ?? 'unknown'}`,
 )
-// ファイルを作る道具の事前点検（6.8 (5)）。起動時に 1 回。入れたらホストを起こし直す
+// ファイルを作る道具の事前点検（6.10 (5)）。起動時に 1 回。入れたらホストを起こし直す
 const tools = await preflight({
   soffice: process.env.LIBRETTO_SOFFICE ?? 'soffice',
   pdftoppm: process.env.LIBRETTO_PDFTOPPM ?? 'pdftoppm',

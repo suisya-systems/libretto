@@ -32,7 +32,7 @@ let server: ReturnType<typeof createServer>
 let fake: ReturnType<typeof createFake>
 let cookie: string
 let google: Google | undefined // Google ドキュメントの届け先の節だけ（6.5）
-let tools: Tools | undefined // 表・スライド・手元のファイルの節だけ（6.8）
+let tools: Tools | undefined // 表・スライド・手元のファイルの節だけ（6.10）
 let n = 0
 const uuid = () => `00000000-0000-4000-8000-${String(++n).padStart(12, '0')}`
 
@@ -1539,7 +1539,7 @@ describe('Google ドキュメントの届け先（6.5）', () => {
     expect(docs()).toHaveLength(1)
   })
 
-  // --- 表とスライド（6.8 (4)）
+  // --- 表とスライド（6.10 (4)）
   // 判定役・文章の節（section）を増やさないよう、表は最後の節の中に置く
   const TABLE = '\n| 地域 | 売上 |\n| --- | --- |\n| 東 | 120 |\n| 西 | 80 |\n'
   const TABLE_HTML =
@@ -1657,7 +1657,7 @@ describe('libretto のフォルダ（6.5 (3)）', () => {
 })
 
 // 偽の soffice / pdftoppm は /bin/sh の起動口なので Windows では飛ばす
-describe.skipIf(process.platform === 'win32')('手元のファイル（6.8 (4)）', () => {
+describe.skipIf(process.platform === 'win32')('手元のファイル（6.10 (4)）', () => {
   afterEach(() => {
     tools = undefined
   })

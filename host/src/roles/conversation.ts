@@ -168,7 +168,7 @@ function proposalViolations(r: CandidateReply, attachments: readonly string[]): 
   return v
 }
 
-// 保存先の選択肢（6.5 (3)・6.8 (3)）。folderId 'libretto' は libretto フォルダ。pptx / xlsx / docx は手元のファイル
+// 保存先の選択肢（6.5 (3)・6.10 (3)）。folderId 'libretto' は libretto フォルダ。pptx / xlsx / docx は手元のファイル
 type DestKind = DestChoice
 export const TARGET = DEST_TARGET
 export const choiceOf = destChoiceOf
@@ -182,7 +182,7 @@ export const DEST_NOTE: Record<DestKind, string> = {
   xlsx: 'ダウンロードして使う Excel のファイル（表）',
   docx: 'ダウンロードして使う Word のファイル',
 }
-// 今選べる種類（6.8 (3)）。google = Google に保存できる連携、files = LibreOffice と poppler がある（スライドの見た目の判定に要る）
+// 今選べる種類（6.10 (3)）。google = Google に保存できる連携、files = LibreOffice と poppler がある（スライドの見た目の判定に要る）
 export type Ready = { google: boolean; files: boolean }
 const NEEDS: Partial<Record<DestKind, (r: Ready) => boolean>> = {
   gdoc: (r) => r.google,
@@ -228,7 +228,7 @@ type Deps = {
   storage: (written: boolean) => void
   log: (line: string) => void
   newCaseId?: () => string
-  destChoices?: () => DestChoice[] // 今選べる保存先（Google の連携と道具の有無。6.5 (2)(3)・6.8 (3)）
+  destChoices?: () => DestChoice[] // 今選べる保存先（Google の連携と道具の有無。6.5 (2)(3)・6.10 (3)）
 }
 
 export type PostResult =

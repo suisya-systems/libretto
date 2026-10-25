@@ -122,7 +122,12 @@ export const CandidateEvent = z.discriminatedUnion('type', [
   }),
   candidateEvent('promoted_to_signal', { signal: z.enum(['gmail_label', 'slack_emoji']) }),
   candidateEvent('proposal_changed', {}),
-  candidateEvent('not_request', { source: Source }),
+  // historyId は Gmail のスレッドの版（返信で変わったら分類し直す）、prefiltered は前さばきで落とした（6.9 (4)）
+  candidateEvent('not_request', {
+    source: Source,
+    historyId: z.string().optional(),
+    prefiltered: z.boolean().optional(),
+  }),
   candidateEvent('presented', {}),
   candidateEvent('proceeded', { caseId: z.string() }),
   candidateEvent('auto_entered', { caseId: z.string() }),
@@ -230,7 +235,7 @@ export const DecisionRecord = z.object({
 })
 export type DecisionRecord = z.infer<typeof DecisionRecord>
 
-// 会話で聞き取った依頼（6.2.1 (4)）。必須は表 4-1 の 何を・誰が読むか・届け先。保存先は DestChoice（Google は連携しているとき、ファイルは道具があるときだけ。6.5 (3)・6.8 (3)）
+// 会話で聞き取った依頼（6.2.1 (4)）。必須は表 4-1 の 何を・誰が読むか・届け先。保存先は DestChoice（Google は連携しているとき、ファイルは道具があるときだけ。6.5 (3)・6.10 (3)）
 export const IntakeDraft = z.object({
   title: z.string().trim().min(1).max(40),
   summary: z.string().trim().min(1).max(300),

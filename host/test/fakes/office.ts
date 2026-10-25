@@ -1,4 +1,4 @@
-// 偽の LibreOffice（soffice）と poppler（pdftoppm）（docs/implementation.md 6.8 (3)）。
+// 偽の LibreOffice（soffice）と poppler（pdftoppm）（docs/implementation.md 6.10 (3)）。
 // soffice --convert-to pdf: 「PDF」はページごとの白黒を 1 行ずつ書いた字（pptx はスライドの数、字の無いスライドは blank）。
 // soffice --convert-to xlsx: 式を「計算し直した」xlsx（/0 を含む式はエラー、ほかは 1）。
 // pdftoppm: -gray は PGM（blank は真っ白、ほかは黒い帯）、-png は PNG の代わりの字

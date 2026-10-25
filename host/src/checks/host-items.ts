@@ -12,7 +12,7 @@ const code = (fn: Extract<Check['judge'], { by: 'code' }>['fn'], title: string, 
   judge: { by: 'code', fn, args: {} },
   summary,
 })
-// 見た目は描き出したページごとに「判定役・画像」が見る（6.8 (3)）
+// 見た目は描き出したページごとに「判定役・画像」が見る（6.10 (3)）
 export const LOOKS_QUESTION = 'このページの文字や図が、枠からはみ出さず、重ならず、欠けずに収まっている'
 const LOOKS: Item = {
   category: '見た目',

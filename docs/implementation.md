@@ -293,12 +293,14 @@ stateDiagram-v2
 | `GET /api/cases/:id` | 案件の全部（入口・進行・承認・成果の面はこれ 1 本から描く） | — | `CaseView`（5.3）。`revision` と各指紋を含み、承認系の操作はそれを添えて送る（4.1） |
 | `GET /api/cases/:id/drafts/:n` | 版の本文 | `format=md\|html\|paste` | 本文（`text/markdown` / `text/html` / `text/plain`）。`paste` は仕立てた貼り付け用の文で、仕立ての前は `404`（6.2.8 (5)） |
 | `GET /api/cases/:id/diff?from=1&to=2` | 2 版の変更点（段落単位） | — | `{ changes: { kind: 'added'\|'removed'\|'changed', before?, after?, note? }[] }` |
-| `GET /api/cases/:id/files/:n` | 手元のファイル（pptx / xlsx / docx）のダウンロード。その形式で保存した版だけ（6.8 (4)） | `format=pptx\|xlsx\|docx` | バイナリ（`Content-Disposition`）。保存していない形式・版は `404` |
+| `GET /api/cases/:id/files/:n` | 手元のファイル（pptx / xlsx / docx）のダウンロード。その形式で保存した版だけ（6.10 (4)） | `format=pptx\|xlsx\|docx` | バイナリ（`Content-Disposition`）。保存していない形式・版は `404` |
 | `POST /api/cases/:id/actions` | 本人の操作（4.2 の本人イベント） | `CaseAction`（`type` で判別する union。全部が `eventId` を持つ。5.3・5.3.1） | `{ state, turn, revision, replayed, newCaseId? }`（`newCaseId` は `restart_as_new` のときだけ。5.7 (5)）または `409 { reason: 'stale' \| 'invalid_transition', current: CaseCard }`（画面は「もう進んでいます。読み直します」と出して取り直す）。同じ `eventId` の二度目は 5.3.1 のとおり 1 回目と同じ結果を返す |
 | `POST /api/cases/:id/materials` | 資料を渡す。S1 は貼り付けた文だけ（6.2.4 (3)） | `MaterialsPost { type: 'materials.provided', eventId, expectedRevision, text }`（JSON。`text` は前後の空白を落として 1〜100,000 字）。ファイル・画像を渡す形（`multipart/form-data`）は後の Issue で足す | `/actions` と同じ（`{ state, turn, revision, replayed }` か `409 { reason, current }`）。初めての操作で状態・turn・`expectedRevision` が合うときだけ `work/materials/pasted-NN.md` を書いてから `materials.provided`（T10）を流す |
 | `POST /api/candidates/:id/actions` | 候補カードの操作 | `{ type: 'proceed' } \| { type: 'dismiss', reason } \| { type: 'change', note } \| { type: 'keep' }`（低の「やっぱり残す」） | `{ caseId? }`。`change` は話し相手に `note` を渡して `candidate_cards` の行 の `proposal` を書き換え、`candidate_events` に `proposal_changed` を書く（案件はまだ作らない） |
-| `POST /api/candidates/dismiss-low` | 低をまとめて見送る | `{ ids }` | — |
-| `POST /api/suppressions` / `DELETE /api/suppressions/:id` | 「拾わないようにする」/ 戻す | `{ kind: 'sender'\|'channel', value }` | — |
+| `POST /api/candidates/dismiss-low` | 低をまとめて見送る（理由は「依頼ではない」。6.9 (7)） | `{ ids }` | `{ dismissed }` |
+| `POST /api/suppressions` / `DELETE /api/suppressions/:id` | 「拾わないようにする」/ 戻す（6.9 (7)） | `{ kind: 'sender'\|'channel', value, label }` | `{ id }` / `204` |
+| `GET /api/settings/inference` / `PUT /api/settings/inference` | 自動検出の範囲・上限・表示（6.9 (10)） | `InferenceSettings` | `InferenceSettings` |
+| `GET /api/connections/slack/channels` | 自動検出で見るチャンネルの候補（6.9 (10)） | — | `{ channels: { id, name }[] }` |
 | `GET /api/conversation?caseId=` | 会話欄の履歴（案件無し・空なら「依頼を始める」の会話 `lobby` の直近 50 行） | — | `{ messages: ConversationMessage[], pending: boolean }`（`pending` は返事を作っている最中か。6.2.1 (2)） |
 | `POST /api/conversation/messages` | 本人の発話・選択肢の押下 | `{ requestId, lastSeq, text, caseId? } \| { requestId, lastSeq, choiceId, caseId? }`（6.2.1 (3)。`caseId` 付きは案件の中で話す。6.2.2 (8)） | `202 { seq, replayed }`。返事は SSE `conversation.message` で届く。`409 { reason: 'busy' \| 'stopped' \| 'stale' }`（6.2.1 (3)） |
 | `POST /api/intake/refresh` | 「いま探し直す」 | — | `202`。終われば SSE `candidates.changed` |
@@ -385,7 +387,7 @@ type Settings = {
   costCapYenPerCase: number, costCapYenPerMonth: number | null     // P3: 月の上限は本人が入力する。null = 未入力（案件上限だけで動き、入力を促す 1 行を出す）
   entranceDefaults: Record<'会話'|'gmail'|'slack'|'meet', Mode>     // 入口ごとの既定（設計書 4.2.3）
   signals: { gmailLabel: string, slackEmoji: string }
-  inference: { gmailDays: 3|7|14, slackChannels: string[], slackIncludeDm: boolean, dailyLimit: number, showLow: boolean, useJev: boolean }
+  inference: { gmailDays: 3|7|14, slackChannels: string[], dailyLimit: number, showLow: boolean, useJev: boolean }   // InferenceSettings。DM は見ない（6.9 (10)(13) A）
   defaultDestinations: Record<DocType, DeliveryTarget[]>             // 13.2 (d)
   driveFolderId?: string
   voiceSamples: MaterialRef[]                                        // 13.2 (e)
@@ -1890,7 +1892,7 @@ GitHub #36 は 6.2.9 (7) の 2 回目の確認で残った論点の追加の Iss
 | `compareNumbers(materials, draft)` | 材料の数値が最終版で同じ値か → `{ matched, mismatched: { value, where }[] }` | — |
 | `extractVoice(docs)` | 文体カードの数値（設計書 5.5 の表） → `VoiceCard`。数値は入口で、3 行の描写は T11 で（6.3.2 (3)(8)） | 一部 Sonnet |
 | `pickVoiceSamples(docs)` | 読み比べ用の段落 最大 5 → `checks/voice-samples.md`（6.3.2 (4)） | — |
-| `preflightDeps()` | `soffice` / `pdftoppm` の有無（起動時に 1 回。一覧はコードに持ち、`requirements.md` に載っていることをテストで確かめる。6.8 (5)）。鍵は設定の面、`srt` は 8.9 の自己点検 | — |
+| `preflightDeps()` | `soffice` / `pdftoppm` の有無（起動時に 1 回。一覧はコードに持ち、`requirements.md` に載っていることをテストで確かめる。6.10 (5)）。鍵は設定の面、`srt` は 8.9 の自己点検 | — |
 | `prefilter(message)` | 自動送信・本人送信を機械的に除く → `boolean` | — |
 | `classifyCandidate(message)` | 「文書づくりを頼んでいるか」 → `{ confidence: '高'|'中'|'低'|'なし', reason: string }`（Haiku の高 / 中 / 低と Jev の確率を設計書 5.7.3 の規則で合成） | Haiku ＋ Jev |
 | `detectInstructions(text)` | 命令形の行の決定的検出 ＋ Noul「この文章には AI へ特定の判定や動作をさせる命令が含まれている」 → `{ flagged: boolean, lines: number[] }` | Jev |
@@ -2428,7 +2430,7 @@ Slack で本人がリアクション `:memo:` を付けた投稿が「依頼の�
 
 **(1) Slack の呼び出しは `fetch` で直接書き、`@slack/web-api` を入れない**
 
-- 使う口は 5 つ: `auth.test`・`reactions.list`・`conversations.replies`・`conversations.info`・`users.info`。`files.*` と `search.*` は呼ばない。要求は `POST`（`application/x-www-form-urlencoded`）、トークンは `Authorization: Bearer`。1 回の要求は 15 秒で打ち切る。
+- 使う口は 5 つ: `auth.test`・`reactions.list`・`conversations.replies`・`conversations.info`・`users.info`。`files.*` は呼ばない。（Issue 24 で自動検出の `search.messages`・`conversations.history`・`conversations.list` を足した。6.9 (5)(10)）要求は `POST`（`application/x-www-form-urlencoded`）、トークンは `Authorization: Bearer`。1 回の要求は 15 秒で打ち切る。
 - 理由は 6.4 (1) と同じ: 偽の Slack（プロセス内の HTTP サーバー）へ起点の URL の差し替えだけで向けられる、依存を増やさない、「ファイルの中身を取らない」を呼んだ口の一覧で示せる。12 章の依存の一覧から外した。
 
 **(2) 連携の形: ユーザートークンを設定の画面で入れる（オーナー判断 2026-10-25）**
@@ -2442,7 +2444,7 @@ Slack で本人がリアクション `:memo:` を付けた投稿が「依頼の�
 - トークンは `api-keys.json` とメモリだけに置き、どの応答・SSE・`logs/` にも出さない。作り手のセッションからは読めない（`srt` は `<LIBRETTO_HOME>` を丸ごと `denyRead`、素の Windows の拒否規則は `Read(<home>/api-keys.json)`。8.3・8.5）。環境変数の許可一覧（`allowedEnv`。6.1.2）にも無い。
 - 合わせて、**`.env.local` の実際の場所（ホストのコードの置き場の直下。Issue 44 までは Google の OAuth クライアントの秘密を置いていた）を、`srt` の `denyRead` と CLI の読み取り拒否規則の両方に足した**（設計レビュー: 拒否はホーム・`<LIBRETTO_HOME>`・claude の設定の置き場だけで、コードをホームの外（`/opt` など）に置くと `.env.local` が読めた）。
 
-**(3) 権限（User Token Scopes）は 10 個**
+**(3) 権限（User Token Scopes）は 11 個**（`search:read` は Issue 24 で足した。6.9 (5)）
 
 | 権限 | 使う口 | 何のため |
 |---|---|---|
@@ -2450,6 +2452,7 @@ Slack で本人がリアクション `:memo:` を付けた投稿が「依頼の�
 | `channels:history`・`groups:history`・`im:history`・`mpim:history` | `conversations.replies` | 印を付けた投稿のスレッドを読む（公開チャンネル・非公開チャンネル・DM・グループ DM で権限が分かれる） |
 | `channels:read`・`groups:read`・`im:read`・`mpim:read` | `conversations.info` | チャンネル名（カードの見出し） |
 | `users:read` | `users.info` | 投稿者と、本文の中のメンションの名前 |
+| `search:read` | `search.messages` | 自動検出（推測）の本人宛てメンション（6.9 (5)）。無ければメンションの自動検出だけ飛ばす |
 
 - 設計書 3.5 の一覧から変えた点: `users:read`・`*:read`・`mpim:history` を足し、`search:read` は推測の Issue 24 まで取らない（使わない権限を先に取らない。設計書 10.3）。`files:read` は取らない（ファイルは名前だけ）。ボットトークンの権限は足さない。
 - 足りない権限があっても、取れる範囲でカードを出す（本人が付けた印を落とさない）: スレッドが読めなければ印を付けた投稿だけを本文に、チャンネル名が引けなければ見出しは「Slack」、名前が引けなければ「Slack のメンバー」。`reactions:read` が無いと何も見つけられないので、その回は終える。
@@ -2500,20 +2503,21 @@ Slack で本人がリアクション `:memo:` を付けた投稿が「依頼の�
 **(9) オーナーが用意すること**
 
 1. <https://api.slack.com/apps> で「Create New App」→ **「From a manifest」** を選び、使っているワークスペースを選ぶ。
-2. 形式を JSON にして、下のマニフェストをそのまま貼り付け、「Next」→「Create」。(3) の 10 個の権限（User Token Scopes）と、トークンのローテーションを切る設定（`token_rotation_enabled: false`）が入っている。ボットの権限は無い。
+2. 形式を JSON にして、下のマニフェストをそのまま貼り付け、「Next」→「Create」。(3) の 11 個の権限（User Token Scopes。11 個目の `search:read` は自動検出の本人宛てメンション。6.9 (5)）と、トークンのローテーションを切る設定（`token_rotation_enabled: false`）が入っている。ボットの権限は無い。
 
    ```json
-   {"display_information":{"name":"libretto"},"oauth_config":{"scopes":{"user":["reactions:read","channels:history","groups:history","im:history","mpim:history","channels:read","groups:read","im:read","mpim:read","users:read"]}},"settings":{"org_deploy_enabled":false,"socket_mode_enabled":false,"token_rotation_enabled":false}}
+   {"display_information":{"name":"libretto"},"oauth_config":{"scopes":{"user":["reactions:read","channels:history","groups:history","im:history","mpim:history","channels:read","groups:read","im:read","mpim:read","users:read","search:read"]}},"settings":{"org_deploy_enabled":false,"socket_mode_enabled":false,"token_rotation_enabled":false}}
    ```
 
 3. 左の「Install App」（または「OAuth & Permissions」）で「Install to Workspace」を押して許可する。ワークスペースによっては管理者の承認が要る（承認されるまでトークンは出ない）。
 4. 「OAuth Tokens」に出る **「User OAuth Token」**（`xoxp-` で始まる。「Bot User OAuth Token」ではない）をコピーし、libretto の設定の「連携」の Slack の行に貼り付けて「保存」を押す。再起動は要らない。
 5. トークンのローテーション（Token Rotation）は**有効にしない**（マニフェストで切ってある）。有効にするとトークンが 12 時間で切れ、取り込みが止まる。
-- マニフェストが使えないとき: 「Blank app」で作り、「OAuth & Permissions」の「User Token Scopes」に (3) の 10 個を 1 つずつ足し（「Bot Token Scopes」には足さない）、3 から続ける。
+- マニフェストが使えないとき: 「Blank app」で作り、「OAuth & Permissions」の「User Token Scopes」に (3) の 11 個を 1 つずつ足し（「Bot Token Scopes」には足さない）、3 から続ける。
 6. libretto の設定の「連携」で Slack が「連携済み」になり、足りない権限の注記が出ていないことを確かめる。Slack で投稿にリアクション :memo: を付け、ホームの「今すぐ取り込む」を押すと、依頼の候補に出る。
 - 権限が足りないと出たら: 2 で足りない権限を足し、3 でもう一度入れ直す。トークンが変わっていれば、4 のトークンを「入れ直す」から貼り付ける。
 - 「Slack がこのトークンを受け付けませんでした」と出たら: トークンが取り消されたか切れた。3 でもう一度入れ直し、出たトークンを「入れ直す」から貼り付ける。
 - 取り込みを止めたいときは、Slack の行の「削除」を押す。
+- Issue 24 より前にアプリを作った人: 「OAuth & Permissions」の「User Token Scopes」に `search:read` を足し、3 でアプリを入れ直す（トークンが変わったら「入れ直す」から貼り付ける）。足すまでは設定の面に足りない権限として出て、自動検出の本人宛てメンションだけが動かない（合図とチャンネルの自動検出は動く）。
 
 **(10) オーナーの判断（2026-10-25。窓口経由）**
 
@@ -2602,7 +2606,7 @@ Google Meet の「Gemini によるメモ」の行動項目のうち、本人が�
 **(7) 既知の制限**
 
 - 同じメモが 2 つのアカウントに共有されていて、アカウントを替えて連携し直すと、候補 id がアカウントによらないので、前のアカウントで出した・見送った項目は新しいアカウントでは出ない（1 人用で、アカウントを替えることがまれなため）。
-- 見送りで外した会議の一覧と戻す画面は Issue 24 で作る（外す仕組みと、外したものを出さないところはここで作った）。
+- 見送りで外した会議の一覧と戻す画面は Issue 24 で作る（外す仕組みと、外したものを出さないところはここで作った）。→ 作った（設定の「自動検出」の除外の一覧。6.9 (7)(10)）
 
 **(8) オーナーの判断（2026-10-25。窓口経由）**
 
@@ -2735,9 +2739,118 @@ GitHub #29 は、本物のモデルで依頼を流したオーナーの所感（
 | D | 候補の知らせに可能性「低」を入れるか | **(a) 入れない**（画面でも折りたたむもの） | (b) 入れる |
 | E | Slack の文面に題を入れるか（D を選んだとき） | **(a) 入れる**（届くのは本人だけが見るアプリの DM） | (b) 題を伏せて「確認待ちが 1 件あります」だけにする（題が他人のメールの件名から来ることがあり、会社の Slack に残るため） |
 
+### 6.9 推測の分類と抑え方の決め事（Issue 24 の着手前の設計レビューで決めたこと）
+
+Gmail と Slack の文から「文書づくりを頼まれていそうだ」と libretto が見つけたものを、可能性（高・中・低）と見つけた理由付きの候補にし、見送りの学習・1 日の上限・見落としの自己測定を動かすまでを決める（設計書 4.2.2・5.7.3・10.1〜10.3）。中身は `host/src/intake/classify.ts`（`prefilter`・`classifyCandidate`・合成の `combine`）と `infer.ts`（読む範囲と回）、`poller.ts`（回の順）、設定の「自動検出」の欄。画面の言葉は ui-wording.md の対応表のとおり（推測 → 自動検出、確信度 → 可能性、拾った理由 → 見つけた理由、拾い漏れ → 見落とし、拾わないようにする → 除外する）。作らないもの: Slack の DM の推測（(13) A）、低の「やっぱり残す」（`keep`。(13) D）、過去 30 日に遡って分類し直すスクリプト（(13) C）。
+
+**(1) 回の順**
+
+- 取り込みの回は **推測 → Gmail の合図 → Slack の合図 → 会議メモ** の順。どれかの失敗はほかを止めない。推測は「止めた」「全体の費用上限」「1 日の上限」で止まるが、合図と会議メモは止めない（4.5）。
+- 理由（設計レビュー）: 推測を先に回すと、届いたばかりのメールを推測が先に見てから合図を見る。後から回すと、15 分の間にラベルを付けたメールを推測が一度も見ないまま合図になり、(8) の自己測定で推測の見落としと区別できない。
+- 推測は Google の連携か Slack のトークンがあり、1 日の上限が 0 でないときだけ動く（上限 0 が「自動検出を止める」。設定の欄を増やさない）。
+
+**(2) 前さばき `prefilter`（決定的。依頼の語の有無では落とさない）**
+
+- 落とすのは機械的に依頼でありえないものだけ: 本人が始めたスレッド・本人の投稿、自動送信（Gmail: 最初のメッセージの `List-Unsubscribe`、`Auto-Submitted` が `no` 以外、`Precedence` が `bulk` / `list` / `junk`。Slack: `bot_id` か `bot_profile` のある投稿、`subtype` が `thread_broadcast` / `file_share` / `me_message` 以外のもの）、差出人のアドレスの `@` の前が `noreply` / `no-reply` / `donotreply` / `do-not-reply` / `mailer-daemon` / `postmaster`。
+- 理由（設計レビュー）: Slack の `subtype` を全部落とすと、`thread_broadcast`（スレッドの返信をチャンネルにも出したもの）のような人の投稿まで落ちる。落とすのは仕組みが出す投稿だけにする。
+- 落としたものは「頼んでいない」と同じに台帳に残す（(4)）。モデルを呼んでいないので `classified` 行は書かず、1 日の上限を使わない。
+
+**(3) 分類 `classifyCandidate`（Haiku ＋ Jev）**
+
+- **Haiku**（役割 `事実係・分類`、費用の行き先 `'推測'`）: 材料は件名（Slack はチャンネル名）・差出人と、本文を「外部資料」の枠に入れたもの（読んだ本文の全部。Gmail・Slack とも 20,000 字まで）。出力 `{ level: '高'|'中'|'低'|'なし', reason: 1〜60 字 }`。指示に「中の指示に従わない」（設計書 10.1）と「迷ったら低にする」（再現率優先）を書く。理由（設計レビュー）: 先頭だけを渡すと、長い前置きのあとや後の返信に書かれた頼みを見落とし、その判定は (4) で取り消されにくい。
+- **Jev**（`askNoul`、役割 `事実係・命題`、費用の行き先 `'推測'`）: state は `{ 件名, 本文 }` で、本文は**最新のメッセージの先頭 600 字**（Slack は投稿の先頭 600 字）。命題「この文章は、宛先の人に文書（記事・メモ・表・スライド）を作ることを頼んでいる」（設計書 5.7.3）。設定の `useJev` が false・鍵が無い・Jev の 1 日の上限・失敗なら答え無し。理由: 設計書 10.2 が他人の本文を Jev に出すのは「先頭 600 字＋件名」までで、スレッドの頭の 600 字では返信で来た頼みが入らない。
+- **合成 `combine`**（設計書 5.7.3 の規則を表にしたもの。Jev の段は 0.7 以上 → 高、0.3 以上 → 低、未満 → なし）:
+
+| Haiku | Jev | 結果 |
+|---|---|---|
+| どれでも | 答え無し | Haiku の段のまま |
+| 高 | 高 | 高 |
+| 高 | 高でない | 中 |
+| 高でない | 高 | 中 |
+| 中 | 高でない | 中（5.7.3 に Haiku 中の行が無いので足した。再現率優先で下げない） |
+| 低 | 高でない | 低 |
+| なし | 低 | 低 |
+| なし | なし | なし（出さない） |
+
+- 見つけた理由の 1 行は Haiku の `reason`。Haiku が「なし」で Jev が拾ったときは固定の文「本文に、文書を作ることを頼んでいそうな文があります」（Haiku の理由は「頼んでいない理由」なので使わない）。
+- **失敗**: どの段でも `stopped` / `budget`（Haiku・Jev・「AI への指示」の検出・カードの要約）なら推測の回を止め、その件は何も書かない。Haiku のそれ以外の失敗（出力が通らない・ログイン切れ・時間切れ）は、その件を書かずに次の回へ回す（`classified` も書かない）。Jev の失敗は答え無しとして続ける。理由（設計レビュー）: 今の `flagInstructions` と `draftCard` は失敗を真偽値と `stopped` に畳むので、費用上限に当たっても次の件へ進み、呼び出しを続けていた。推測では失敗の種類をそのまま受けて止める。
+
+**(4) 候補にする・しない**
+
+- 高 / 中 / 低: 合図と同じに「AI への指示」の印（`detectInstructions`。`useJev` が false なら決定的な規則だけ）と、カードの要約・作るもの・保存先（`draftCard`）を通して T1（`origin: '推測'`、`confidence`、`card.reason`）。同じトランザクションで `classified` 行。要約が `stopped` / `budget` 以外で失敗したときは合図と同じ固定の文で出す（6.4 (4)）。
+- なし（前さばきで落としたものを含む）: `candidates` に `status = not_request`・`origin = '推測'`・**`sender_key = ''`**（差出人を残さない。設計書 10.2）の行と、出来事 `not_request { candidateId, source, historyId?, prefiltered? }` を 1 つのトランザクションで。件名・差出人・本文はどこにも書かない。
+- **再分類**: 台帳に行のある id は推測で読まない。例外は Gmail の `not_request` で、`threads.list` の `historyId` が判定したときと変わった（返信が来た）スレッドだけはもう一度分類する。理由（設計レビュー）: スレッドの id で一度「頼んでいない」とすると、後の返信で来た頼みを二度と見ない。`historyId` は返信で変わり、一覧の応答に載るので、読み直す前に分かる。分類したら行を書き換える（候補にするなら T1 の書き換え（(8)）、また「なし」なら `not_request` を足す）。
+- **`classified` 行の `item_id`** は Slack が候補 id、Gmail が `<候補 id>@<historyId>`。理由: 一意の索引（1 回の分類に 1 行。9.2）を保ったまま、返信の後の分類も数える。
+
+**(5) 読む範囲**
+
+- 既定は設計書 4.2.2・10.3 のとおり（Gmail は直近 7 日のメイン、Slack はチャンネル指定なし＋本人宛てメンション）。範囲は設定の「自動検出」で変える（(10)）。
+- **Gmail**: `threads.list?q=in:inbox category:primary newer_than:<gmailDays>d {to:me cc:me} -from:me`。除外した差出人は `-from:<アドレス>` をクエリに足し、読んだ後も差出人を確かめる（除外されていれば何も書かない）。最後のページまでたどって id と `historyId` を集める（6.4 (3) と同じ理由）。
+- **Slack**: (a) 本人宛てメンションは `search.messages`（`query: <@本人> after:<7 日前の日付>`、`sort: timestamp`、`count: 100`、10 ページまで）。**`im` / `mpim` の会話（`channel.is_im` / `is_mpim`、id が `D` で始まる）は外す**（(13) A。設計レビュー: 検索は DM も返すので、DM を作らないと決めても、外さなければ読んでしまう）。(b) 設定で選んだチャンネルは `conversations.history`（`oldest` = 7 日前、`limit: 200`、続きの位置で 10 ページまで）。除外したチャンネルは (a) でも (b) でも見ない。投稿は合図と同じ `readPost` で読む（検索の結果はスレッドの位置を持たないことがあるので、投稿を渡さず ts で引き直す。設計レビュー）。
+- **`search:read` を Slack の権限に足す**（6.6 (3) の「Issue 24 まで取らない」の続き。11 個目）。無ければ設定の面に足りない権限として出し、メンションの推測だけ飛ばす（チャンネルの推測と合図は続く）。オーナーの手順は 6.6 (9) に足した。
+- **見つけたものの数と読む数を分ける**: 見つけるのは全部（上のページの上限まで）、台帳に無いものを**古い順**に、Gmail と Slack を**交互に**取って **1 回 20 件まで**読んで分類する。理由（設計レビュー）: 先頭の 1 ページだけを毎回見ると、それより古いものにいつまでも届かない。古い順なら窓から先に落ちるものを先に読む。交互にすれば、片方が多くても 1 日の上限をもう片方の分まで使い切らない。
+
+**(6) 1 日の上限（既定 300 件）**
+
+- 1 件を分類する前に `classifiedCount()`（JST の 1 日の `classified` 行の数）が上限以上なら推測の回をやめ、まだ読んでいない id の数（重なりなし）を「今日見られなかった数」としてメモリに持つ（JST の日付が変わったら捨てる）。設定の面に「今日は N 件を見られませんでした。明日の取り込みで見ます」。
+- 拾い上げは同時に 1 本なので、数えてから書くまでに別の分類は割り込まない（Jev の上限（7.6 (4)）のように予約のトランザクションに入れる必要はない）。
+- **既知の制限**: 上限を超える量が何日も続くと、窓（7 日）の端のものは読まれないまま窓から出る。古い順に読むので出るのは最後の手段で、出た数は「見られなかった数」に含まれる（黙って落とさない）。台帳に「後で読む」の行を足すことはしない（他人のメールの id を、候補でも判定でもない理由で残すことになる）。
+
+**(7) 見送りの学習と「除外しますか」**
+
+- 4 つ目の理由「この人・この場所からは拾わなくてよい」は今どおり推測のカードだけ（T3 で `suppressions` に 1 行。Gmail はアドレス、Slack はチャンネル、会議メモは会議名）。
+- **「依頼ではない」が 3 回続いたら 1 回だけ聞く**: 同じ `sender_key` の推測の候補の結果（見送り・進めた）を新しい順に並べ、先頭から続く「依頼ではない」の見送りが**ちょうど 3 になったとき**（まだ除外していなければ）だけ、見送りの応答に `askSuppress: { kind, value, label, count }` を返す。画面は候補の欄の上に「<label> からの自動検出を、今後は除外しますか」と「除外する」「しない」を出す。4 回目以降は聞かない（勝手には外さない）。理由（設計レビュー）: 今の数え方は理由ごとの総数で、合図のカードの見送りや、間に挟まった別の理由・進めたものも数えていた。「続いたら」は間に別の結果が無いこと。
+- `POST /api/suppressions { kind, value, label }` / `DELETE /api/suppressions/:id`（`removed_at` を埋める）。`suppressions` に列 `label` を足す（マイグレーション 0008。画面に出す名前。Slack はカードの `#チャンネル名`、Gmail はアドレス、会議メモは会議名）。T3 も `label` を書く。
+- 低の「まとめて見送る」は `POST /api/candidates/dismiss-low { ids }`。理由は「依頼ではない」で、出しているままの推測・低の候補だけを 1 件ずつ T3 に通す（ほかは飛ばす）。「除外しますか」は聞かない（まとめて見送った中の 1 人に聞く場面にならない）。
+- `HomeView.askSuppress`（使われていなかった）は消し、`CandidateActionResult` に移した。
+
+**(8) 合図への昇格と自己測定 `recall_sample`**
+
+- 標本にするのは**推測の範囲の中で合図が付いた候補 1 件につき 1 回**。`inferredBefore` は、その候補 id に推測が `found`（由来が推測）か `not_request` を書いたことがあるか（今の状態は問わない）。
+  - 台帳の行が推測で `presented` → 今の `promoted_to_signal` と同じトランザクションで `recall_sample { inferredBefore: true }`。
+  - 台帳の行が推測で、見送った・進めた → 合図としては出さない（見送った候補は再提案しない。4.2.3）が、まだ標本が無ければ `recall_sample { inferredBefore: true }` を 1 回。
+  - 台帳の行が **`not_request`** → **合図として出す**（今は台帳にあると飛ばしていて、推測が「頼んでいない」としたメールにラベルを付けても出なかった）。T1 を広げ、既にある行が `not_request` で入れる由来が合図なら、行を書き換え（由来・可能性・印・`sender_key`・`status = presented`）、`found` → `presented` とカードを書き、`recall_sample { inferredBefore: false }` を同じトランザクションで。推測の再分類で候補にするときも同じ書き換え（標本は書かない）。
+  - 台帳に行が無い → 合図の候補を出すときに、推測の範囲の中なら `recall_sample { inferredBefore: false }`。範囲の中 = 推測が動いている（上限が 0 でない）かつ、Gmail は受信箱のメイン（スレッドのどれかのメッセージに `INBOX` と `CATEGORY_PERSONAL`）・本人が To / Cc・最初の差出人が本人でない・最後のメッセージが窓の中・除外していない。Slack は DM でない・選んだチャンネルか本人宛てのメンション（`search:read` がある）・7 日の中・除外していない。前さばきで落ちるもの（自動送信など）も範囲の中に数える（落としたなら見落としで、前さばきを緩める材料になる）。
+- `signalAt` は合図を見つけた時刻。理由（設計レビュー）: 推測が見た行だけを標本にすると、推測が上限・失敗・ページの打ち切りで見なかったものが分母から消え、受け入れ (4) の「推測の範囲内のもの」の割合にならない。範囲をコードで決めて、行の有無によらず数える。
+- 設定の面に「ラベル・リアクションを付けた N 件のうち、自動検出が先に見つけていたのは M 件（x%）」（直近 30 日）。見落とした候補は、設計書 4.2.2 のとおり分類の文を直す材料にする（読み直すのは件名・差出人まで）。
+
+**(9) 受け入れ (4) の測定手順**
+
+- `npm run measure -- recall`（データベースを読むだけ。何も書かず、モデルも外部も呼ばない）: 直近 30 日の `recall_sample` の数・先に見つけていた割合・見落とした候補（候補 id と、Gmail ならスレッドを開くリンク。件名は台帳に残っているときだけ）。9 割を下回ったら前さばきと分類の文を緩める（精度を上げる向きには直さない。設計書 3.5 (4)）。手順は [`docs/verification/recall.md`](./verification/recall.md)。
+- 設計書 3.5 (4) の「過去 30 日に合図を付けた依頼を集める」は、使い始めてから 30 日の台帳で測る形にした（(13) C）。
+
+**(10) 設定と画面**
+
+- `settings.json` の `inference`: `{ gmailDays: 3|7|14 = 7, slackChannels: string[]（チャンネル id。20 個まで）= [], dailyLimit: 0〜1000 = 300, showLow: true, useJev: true }`。`GET` / `PUT /api/settings/inference`。読めない・欄が無いときは既定（`voiceSamples` と同じ書き方）。変えたら SSE `settings.changed` と `candidates.changed`。
+- `showLow = false` ならホームの低の欄を出さない（候補は台帳に残り、戻せば出る。設計書 4.2.2 の「閾値は設けない」）。
+- `GET /api/connections` に `inference: { classifiedToday, dailyLimit, skippedToday?, lastAt?, recall: { hit, total }, suppressions: [{ id, kind, label, addedAt }] }`。Slack のチャンネルの候補は `GET /api/connections/slack/channels`（`conversations.list`、公開と非公開、アーカイブを除く、1,000 件まで。`{ channels: [{ id, name }] }`）。
+- 設定の面の「自動検出」の欄: できることの文（何を読み、何を残さないか）、Gmail の日数、Slack のチャンネル（チェックボックス）、1 日の上限（0 で止まる）、可能性 低の表示、Jev を使うか、今日の件数と見られなかった数、見落としの割合、除外した差出人・チャンネル・会議（「戻す」）。
+- 候補のカードのしるしは「自動検出・可能性 高 / 中 / 低」（会議メモの担当が曖昧なものも同じ文）、理由は「見つけた理由: …」、低の折りたたみは「ほかに N 件、依頼かどうかはっきりしないものがあります」と「まとめて見送る」。
+
+**(11) テスト（偽 Google・偽 Slack・`fake` の台本）**
+
+- `combine` の表の全行、`prefilter` の条件ごと。
+- 推測の回: 高・中・低が候補になる（由来・可能性・理由）、なしと前さばきが `not_request`（差出人・件名・本文がデータベースと `<LIBRETTO_HOME>` に無い）、再分類しない・`historyId` が変われば分類し直す、除外した差出人・チャンネルを読まない、DM のメンションを読まない、1 日の上限で止まり見られなかった数が出る、全体の費用上限で推測だけ止まり合図は続く、Jev 無しは Haiku だけ、`useJev = false` で Jev を一度も呼ばない、Jev に送る本文が最新のメッセージの先頭 600 字、20 件の打ち切りと交互、2 ページ目のものに届く。
+- 昇格と `recall_sample` の 4 つの場合、範囲の外の合図は標本にしない、`askSuppress` が「続いて 3 回目」だけ、`POST` / `DELETE /api/suppressions`、まとめて見送る、`showLow`。
+
+**(12) 既知の制限**
+
+- Slack の投稿は書き直されても分類し直さない（Gmail の `historyId` に当たる軽い印が一覧に無い）。スレッドの返信は 100 件まで（6.6 (4) の `readPost` のまま）。
+- 投稿を読めなかった（履歴の権限が無い・消された）メンションは、判定を残さずに次の回にもう一度読む（差分レビュー: 空の本文で「頼んでいない」と残すと、権限を足しても読み直さなかった）。読めるまで毎回 1 件分の読み取りを使う。
+- 「今日見られなかった数」はメモリに持つので、ホストを起こし直すと次の回まで 0 に見える。
+
+**(13) オーナーに確認する事項（おすすめ付き）**
+
+| # | 問い | おすすめ | 理由 |
+|---|---|---|---|
+| A | Slack の DM（`slackIncludeDm`）の推測を作るか | **作らない**（今回は欄も出さない） | 他人の DM を読む範囲を広げる。設計書 10.3 は本人が明示的に入れたときだけ。必要になれば欄と `conversations.list?types=im` を足す |
+| B | 連携済みの人に、推測を既定で動かすか | **既定で動かす**（設計書 4.2.2 の既定。止めるときは 1 日の上限を 0） | 拾い漏れを嫌う方針（Q7）。ただし更新した日から受信箱の直近 7 日の本文を Haiku に、件名と先頭 600 字を Jev に送り始める |
+| C | 受け入れ (4) の測り方 | **使い始めてから 30 日の台帳（`recall_sample`）で測る** | 過去 30 日に遡って分類するスクリプトは、本物のアカウントで推測を一括で回すことになり、費用と他人の本文を外へ出す量が増える |
+| D | 低の「やっぱり残す」（`keep`） | **作らない** | 見送らなければ候補は残るので、残す操作が要らない。「まとめて見送る」は作った |
+
 ---
 
-### 6.8 スプレッドシート・スライド・手元のファイルと見た目の判定の決め事（Issue 26 の着手前の設計レビューで決めたこと）
+### 6.10 スプレッドシート・スライド・手元のファイルと見た目の判定の決め事（Issue 26 の着手前の設計レビューで決めたこと）
 
 保存先 `gsheet` / `gslide` / `file`（`pptx`・`xlsx`・`docx`）を、仕立て（T20）から送付（T22〜T26）まで通す。状態機械（4.2）は揃っていて、足すのはホストの仕事と画面。中身は `host/src/deliver/xlsx.ts`（表の取り出し・xlsx の書き出しと読み戻し・照合）・`pptx.ts`（スライドの組み立て・pptx の書き出しと読み戻し）・`render.ts`（LibreOffice と poppler の呼び出し・事前点検）・`gdoc.ts`（Google の 3 種類の作成と照合）・`run.ts`、判定は `checks/judgeable.ts` と `roles/judge.ts`。作らないもの: 構成案ゲート（Issue 27）、`xlsxTotalsMatch`（合計を元データと照合。元データを本人から受け取る形が S1 の貼り付けた文だけなので、表の照合（`sheetsRoundTrip`）で足りる）。
 
@@ -3461,7 +3574,8 @@ CREATE TABLE suppressions (
   value      TEXT NOT NULL,
   reason     TEXT NOT NULL,
   added_at   TEXT NOT NULL,
-  removed_at TEXT
+  removed_at TEXT,
+  label      TEXT                          -- 画面に出す名前（0008。6.9 (7)）
 );
 CREATE INDEX suppressions_active ON suppressions(kind, value) WHERE removed_at IS NULL;
 
@@ -3602,7 +3716,7 @@ CREATE UNIQUE INDEX conversation_one_per_request ON conversation_messages(reques
 | （`candidate_cards`） | 出来事ではなく消せる行: `{ subject, from（表示名）, at, link, reason?, summary（頼まれていそうなこと 1 行）, proposal: { docType, destination }, attachmentsNeeded?: string[] }`。見送りで行を消す |
 | `promoted_to_signal` | `candidateId`, `signal: 'gmail_label'|'slack_emoji'`（推測で先に出ていた候補に合図が付いた。由来を合図に昇格。重複は 1 件のまま） |
 | `proposal_changed` | `candidateId`（「内容を変える」。中身は `candidate_cards` の行を書き換え） |
-| `not_request` | `candidateId`, `source`（推測で「頼んでいない」と判定したもの。件名・差出人は書かない） |
+| `not_request` | `candidateId`, `source`, `historyId?`（Gmail。返信が来たら分類し直す）, `prefiltered?`（前さばきで落とした）（推測で「頼んでいない」と判定したもの。件名・差出人は書かない。6.9 (4)） |
 | `presented` | `candidateId` |
 | `proceeded` | `candidateId`, `caseId` |
 | `auto_entered` | `candidateId`, `caseId` |
@@ -3858,7 +3972,7 @@ libretto/
     src/facts/              6.3 の関数
     src/checks/             7.2 の受け入れ規則、7.3 の judge()、CodeFn の実装
     src/intake/             poller.ts、gmail.ts、slack.ts、meet.ts、classify.ts（推測）
-    src/deliver/            page.ts、paste.ts、gdoc.ts（Google の 3 種類）、docx.ts・xlsx.ts・pptx.ts（依存を足さずに書く。6.8 (2)）、render.ts（soffice / pdftoppm と事前点検。6.8 (3)(5)）
+    src/deliver/            page.ts、paste.ts、gdoc.ts（Google の 3 種類）、docx.ts・xlsx.ts・pptx.ts（依存を足さずに書く。6.10 (2)）、render.ts（soffice / pdftoppm と事前点検。6.10 (3)(5)）
     test/                   11 章。test/scripts/*.json が台本、test/fakes/ が偽サーバー
   page/
     index.html, vite.config.ts

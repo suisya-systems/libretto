@@ -1,4 +1,4 @@
-// Google ドキュメント・スプレッドシート・スライドの届け先（docs/implementation.md 6.5 (6)・6.8 (4)）。
+// Google ドキュメント・スプレッドシート・スライドの届け先（docs/implementation.md 6.5 (6)・6.10 (4)）。
 // docx / xlsx / pptx を変換付きで作り、書き出して読み戻し照合する。
 // 作成を送る前に印を書き、印のある attempt は二度と作らずに探して確かめる（作成が届いたか分からないまま再起動しても二度作らない）
 import { randomBytes } from 'node:crypto'
@@ -31,7 +31,7 @@ export const GDOC_SAY = {
     `保存した文書の本文が元の本文と食い違っています（欠けた段落 ${missing}・増えた段落 ${extra}）`,
 } as const
 
-// 種類ごとの違い（6.8 (4)）: 変換先・上げる中身・書き出しの形・照合と食い違いの文
+// 種類ごとの違い（6.10 (4)）: 変換先・上げる中身・書き出しの形・照合と食い違いの文
 type Kind = 'gdoc' | 'gsheet' | 'gslide'
 type Check = { ok: true } | { ok: false; reason: string }
 const KIND: Record<

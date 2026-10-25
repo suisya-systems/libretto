@@ -46,7 +46,7 @@ export const DeliveryTarget = z.discriminatedUnion('kind', [
 ])
 export type DeliveryTarget = z.infer<typeof DeliveryTarget>
 
-// 会話・候補・画面で選ぶ保存先の種類（6.8 (3)）。pptx / xlsx / docx は手元のファイル
+// 会話・候補・画面で選ぶ保存先の種類（6.10 (3)）。pptx / xlsx / docx は手元のファイル
 export const DestChoice = z.enum(['page', 'paste', 'gdoc', 'gsheet', 'gslide', 'pptx', 'xlsx', 'docx'])
 export type DestChoice = z.infer<typeof DestChoice>
 // 選んだ種類 → 保存先。Google の 3 つは libretto フォルダ（6.5 (3)）
@@ -61,7 +61,7 @@ export const DEST_TARGET: Record<DestChoice, DeliveryTarget> = {
   docx: { kind: 'file', format: 'docx' },
 }
 export const destChoiceOf = (t: DeliveryTarget): DestChoice => (t.kind === 'file' ? t.format : t.kind)
-// 表（gsheet・xlsx）とほかの保存先は混ぜない（6.8 (1)）。ページ・ドキュメント・貼り付け用は表を通さない
+// 表（gsheet・xlsx）とほかの保存先は混ぜない（6.10 (1)）。ページ・ドキュメント・貼り付け用は表を通さない
 export const isTable = (t: DeliveryTarget) => t.kind === 'gsheet' || (t.kind === 'file' && t.format === 'xlsx')
 export const mixesTables = (ts: readonly DeliveryTarget[]) => ts.some(isTable) && ts.some((t) => !isTable(t))
 
@@ -296,7 +296,7 @@ export const CaseView = CaseCard.extend({
   outlineFingerprint: z.string().optional(), // 承認待ち（kind=構成案）のとき。outline.approve に添える（4.6 (4)）
   deliveryPlan: DeliveryPlan,
   deliveries: z.array(Delivery),
-  // 保存先を変える・足すときに選べる種類（Google は保存できる連携、ファイルは道具があるときだけ。表と文書は混ぜない。6.5 (3)・6.8 (3)）
+  // 保存先を変える・足すときに選べる種類（Google は保存できる連携、ファイルは道具があるときだけ。表と文書は混ぜない。6.5 (3)・6.10 (3)）
   destinationChoices: z.array(DestChoice),
   events: z.array(EventRow),
   stopReason: z.string().optional(),
@@ -407,8 +407,19 @@ export const ConnectionsView = z.object({
     lastAt: z.string().optional(),
     problem: z.enum(['rate_limited', 'network']).optional(),
   }),
-  // ファイルを作る道具（起動時の事前点検。6.8 (5)）。LibreOffice（soffice）と poppler（pdftoppm）
+  // ファイルを作る道具（起動時の事前点検。6.10 (5)）。LibreOffice（soffice）と poppler（pdftoppm）
   tools: z.object({ soffice: z.boolean(), pdftoppm: z.boolean() }),
+  // 自動検出（6.9 (6)(8)(10)）。recall は直近 30 日の合図のうち、自動検出が先に見つけていた数
+  inference: z.object({
+    classifiedToday: z.number().int(),
+    dailyLimit: z.number().int(),
+    skippedToday: z.number().int().optional(),
+    lastAt: z.string().optional(),
+    recall: z.object({ hit: z.number().int(), total: z.number().int() }),
+    suppressions: z.array(
+      z.object({ id: z.number().int(), kind: z.enum(['sender', 'channel']), label: z.string(), addedAt: z.string() }),
+    ),
+  }),
 })
 export type ConnectionsView = z.infer<typeof ConnectionsView>
 
@@ -432,14 +443,23 @@ export const CandidateCard = z.object({
 })
 export type CandidateCard = z.infer<typeof CandidateCard>
 
-// POST /api/candidates/:id/actions（6.4 (5)）。「内容を修正」は候補の中の会話（ConversationPost の candidateId）、keep は推測の Issue で足す
+// POST /api/candidates/:id/actions（6.4 (5)）。「内容を修正」は候補の中の会話（ConversationPost の candidateId）。低の「やっぱり残す」（keep）は作らない（6.9 (13) D）
 export const DismissReason = z.enum(['依頼ではない', '自分の仕事ではない', 'もう済んだ', '拾わなくてよい'])
 export const CandidateAction = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('proceed') }),
   z.strictObject({ type: z.literal('dismiss'), reason: DismissReason }),
 ])
 export type CandidateAction = z.infer<typeof CandidateAction>
-export const CandidateActionResult = z.object({ caseId: z.string().optional() })
+// askSuppress は「依頼ではない」が続いて 3 回目のときだけ（6.9 (7)）
+export const AskSuppress = z.object({
+  kind: z.enum(['sender', 'channel']),
+  value: z.string(),
+  label: z.string(),
+  count: z.number().int(),
+})
+export type AskSuppress = z.infer<typeof AskSuppress>
+export const CandidateActionResult = z.object({ caseId: z.string().optional(), askSuppress: AskSuppress.optional() })
+export const DismissLow = z.object({ ids: z.array(z.string().min(1)).min(1).max(200) })
 
 export const EntranceDefaults = z.record(z.enum(['会話', 'gmail', 'slack', 'meet']), Mode)
 
@@ -466,7 +486,6 @@ export const HomeView = z.object({
   // 取り込み（6.4 (7)）。connected でないときは候補の欄を、候補があるときだけ出す
   intake: z.object({ connected: z.boolean(), running: z.boolean(), lastAt: z.string().optional() }),
   host: HostStatus,
-  askSuppress: z.object({ sender: z.string(), count: z.number().int() }).optional(),
 })
 export type HomeView = z.infer<typeof HomeView>
 
@@ -515,20 +534,23 @@ export const ApiKeyStatus = z.discriminatedUnion('set', [
 ])
 export type ApiKeyStatus = z.infer<typeof ApiKeyStatus>
 
+// 自動検出（推測）の範囲・上限・表示（6.9 (10)）。dailyLimit 0 で止まる。Slack の DM は見ない（6.9 (13) A）
+export const InferenceSettings = z.object({
+  gmailDays: z.union([z.literal(3), z.literal(7), z.literal(14)]),
+  slackChannels: z.array(z.string().regex(/^[CG][A-Z0-9]+$/)).max(20),
+  dailyLimit: z.number().int().min(0).max(1000),
+  showLow: z.boolean(),
+  useJev: z.boolean(),
+})
+export type InferenceSettings = z.infer<typeof InferenceSettings>
+
 export const Settings = z.object({
   usdJpy: z.number().positive(),
   costCapYenPerCase: z.number().positive(),
   costCapYenPerMonth: z.number().positive().nullable(), // null = 未入力（P3）
   entranceDefaults: EntranceDefaults,
   signals: z.object({ gmailLabel: z.string().min(1), slackEmoji: z.string().min(1) }),
-  inference: z.object({
-    gmailDays: z.union([z.literal(3), z.literal(7), z.literal(14)]),
-    slackChannels: z.array(z.string()),
-    slackIncludeDm: z.boolean(),
-    dailyLimit: z.number().int().min(0),
-    showLow: z.boolean(),
-    useJev: z.boolean(),
-  }),
+  inference: InferenceSettings,
   defaultDestinations: z.record(DocType, z.array(DeliveryTarget)),
   driveFolderId: z.string().optional(),
   voiceSamples: z.array(MaterialRef),
@@ -536,6 +558,14 @@ export const Settings = z.object({
   apiKeys: z.record(ApiKeyKind, ApiKeyStatus), // 読み取り専用。PUT /api/settings では無視する
 })
 export type Settings = z.infer<typeof Settings>
+
+// POST /api/suppressions（6.9 (7)）
+export const SuppressionInput = z.object({
+  kind: z.enum(['sender', 'channel']),
+  value: z.string().min(1).max(320),
+  label: z.string().min(1).max(200),
+})
+export type SuppressionInput = z.infer<typeof SuppressionInput>
 
 // SSE の event 名 → data の形（5.2）
 export const SseData = {

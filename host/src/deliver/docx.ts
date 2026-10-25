@@ -9,7 +9,7 @@ const R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
 const HYPERLINK = `${R}/hyperlink`
 export const xml = (body: string) => `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n${body}`
 
-// ブロックの中（エスケープ済みの字・strong・em・a・br）を、字・改行・リンクの開け閉めの列に（docx と pptx で共有。6.8 (2)）
+// ブロックの中（エスケープ済みの字・strong・em・a・br）を、字・改行・リンクの開け閉めの列に（docx と pptx で共有。6.10 (2)）
 export type Inline =
   | { text: string; b: boolean; i: boolean; link: boolean }
   | { br: true }

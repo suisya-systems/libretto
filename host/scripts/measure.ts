@@ -1,12 +1,16 @@
-// 受け入れ (5) と判定不能の帯の見直しの測定（docs/implementation.md 7.6 (11)）。案件フォルダを読むだけで、何も書かず、モデルを呼ばない
+// 受け入れ (5) と判定不能の帯の見直し（docs/implementation.md 7.6 (11)）、受け入れ (4) の見落とし（6.9 (9)）の測定。
+// 案件フォルダとデータベースを読むだけで、何も書かず、モデルも外部も呼ばない
 //   npm run measure -- codex <別系統で書いた案件 id> <同系統で書いた案件 id>
 //   npm run measure -- band
+//   npm run measure -- recall
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Review } from '@libretto/shared/checks'
 import { ChecksFile } from '@libretto/shared/ledger'
+import Database from 'better-sqlite3'
 import { caseDir, resolveHome } from '../src/ledger/db.ts'
+import { jst, Ledger } from '../src/ledger/ledger.ts'
 
 const read = <T>(path: string, schema: { parse: (v: unknown) => T }) =>
   schema.parse(JSON.parse(readFileSync(path, 'utf-8')))
@@ -106,6 +110,18 @@ export function bandReport(units: readonly BandUnit[]) {
   return { total: units.length, bins, decided: decided.length, agree, edges }
 }
 
+// --- 受け入れ (4): 直近 30 日に合図を付けた候補のうち、推測が先に見つけていた割合（6.9 (9)）
+
+export function recallReport(ledger: Ledger, now: Date) {
+  const since = jst(new Date(now.getTime() - 30 * 86_400_000))
+  const { hit, total } = ledger.recallSince(since)
+  const misses = ledger.recallMisses(since).map((m) => {
+    const thread = /^gmail:(.+)$/.exec(m.candidateId)?.[1]
+    return { ...m, ...(thread && { link: `https://mail.google.com/mail/#all/${thread}` }) }
+  })
+  return { since, hit, total, rate: total ? hit / total : undefined, misses }
+}
+
 function main(argv: string[]) {
   const home = resolveHome()
   if (argv[0] === 'codex' && argv[1] && argv[2]) {
@@ -135,7 +151,20 @@ function main(argv: string[]) {
       console.log(`  ${u.caseId} v${u.version} ${u.checkId} #${u.index} noul=${u.noul.toFixed(3)}`)
     return
   }
-  console.log('usage: npm run measure -- codex <case A> <case B> | band')
+  if (argv[0] === 'recall') {
+    const db = new Database(join(home, 'libretto.db'), { readonly: true, fileMustExist: true })
+    const r = recallReport(new Ledger(db), new Date())
+    db.close()
+    console.log(
+      `since ${r.since}: ${r.hit} / ${r.total} found first${r.rate === undefined ? '' : ` (${(r.rate * 100).toFixed(1)}%)`}`,
+    )
+    if (r.rate !== undefined && r.rate < 0.9) console.log('below 90%: loosen the prefilter and the classifier wording')
+    console.log('missed:')
+    for (const m of r.misses)
+      console.log(`  ${m.candidateId}${m.link ? ` ${m.link}` : ''}${m.subject ? ` ${m.subject}` : ''}`)
+    return
+  }
+  console.log('usage: npm run measure -- codex <case A> <case B> | band | recall')
   process.exitCode = 2
 }
 

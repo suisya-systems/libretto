@@ -1,4 +1,4 @@
-// Gmail の合図の読み取り（docs/implementation.md 6.4 (3)）。添付は中身を読まず名前だけ。本文はメモリで渡して捨てる
+// Gmail の合図と自動検出の読み取り（docs/implementation.md 6.4 (3)・6.9 (5)）。添付は中身を読まず名前だけ。本文はメモリで渡して捨てる
 import { jst } from '../ledger/ledger.ts'
 import type { Google, GoogleFail } from './google.ts'
 
@@ -13,7 +13,11 @@ export type Part = {
   body?: { data?: string; attachmentId?: string; size?: number }
   parts?: Part[]
 }
-export type RawThread = { id: string; messages?: { id: string; internalDate?: string; payload?: Part }[] }
+export type RawThread = {
+  id: string
+  historyId?: string
+  messages?: { id: string; internalDate?: string; labelIds?: string[]; payload?: Part }[]
+}
 
 export type Thread = {
   threadId: string
@@ -23,7 +27,14 @@ export type Thread = {
   receivedAt: string
   link: string
   body: string // 保存しない
+  latest: string // 最新のメッセージの本文（Jev に先頭だけ渡す。6.9 (3)）。保存しない
   attachments: string[]
+  historyId?: string
+  self: boolean // 本人が始めたスレッド
+  bulk: boolean // 最初のメッセージが自動送信（List-Unsubscribe・Auto-Submitted・Precedence。6.9 (2)）
+  toMe: boolean // どれかのメッセージの To / Cc に本人
+  primary: boolean // 受信箱のメイン（INBOX と CATEGORY_PERSONAL）
+  lastMs: number
 }
 
 export async function labelId(g: Google, name: string, signal: AbortSignal) {
@@ -44,6 +55,24 @@ export async function threadIds(g: Google, label: string, signal: AbortSignal) {
     page = r.json.nextPageToken
   } while (page)
   return { ok: true as const, ids }
+}
+
+// 自動検出の窓（6.9 (5)）。最後のページまで（10 ページ = 5,000 件で打ち切る）。新しい順で返る
+export async function inboxThreads(g: Google, q: string, signal: AbortSignal) {
+  const threads: { id: string; historyId?: string }[] = []
+  let page: string | undefined
+  for (let i = 0; i < 10; i++) {
+    const p = new URLSearchParams({ q, maxResults: '500', ...(page && { pageToken: page }) })
+    const r = await g.get<{ threads?: { id: string; historyId?: string }[]; nextPageToken?: string }>(
+      `${U}/threads?${p}`,
+      signal,
+    )
+    if (!r.ok) return r
+    threads.push(...(r.json.threads ?? []))
+    page = r.json.nextPageToken
+    if (!page) break
+  }
+  return { ok: true as const, threads }
 }
 
 export async function readThread(
@@ -105,13 +134,17 @@ export function parseThread(raw: RawThread, account: string): Thread {
   const from = parseFrom(header(first, 'From'))
   const bodies: string[] = []
   const attachments: string[] = []
+  let latest = ''
   for (const m of messages) {
     const out = { plain: [] as string[], html: [] as string[], attachments }
     if (m.payload) walk(m.payload, out)
     const text = (out.plain.length ? out.plain : out.html).join('\n').trim()
     if (text) bodies.push(text)
+    latest = text
   }
   const last = Number(messages.at(-1)?.internalDate ?? 0)
+  const me = account.toLowerCase()
+  const auto = header(first, 'Auto-Submitted').trim().toLowerCase()
   return {
     threadId: raw.id,
     subject: header(first, 'Subject').trim() || '（件名なし）',
@@ -120,6 +153,24 @@ export function parseThread(raw: RawThread, account: string): Thread {
     receivedAt: jst(new Date(last)),
     link: `https://mail.google.com/mail/?authuser=${encodeURIComponent(account)}#all/${raw.id}`,
     body: bodies.join('\n\n---\n\n').slice(0, MAX_BODY),
+    latest,
     attachments: [...new Set(attachments)],
+    ...(raw.historyId && { historyId: raw.historyId }),
+    self: !!me && from.key === me,
+    bulk:
+      !!header(first, 'List-Unsubscribe') ||
+      (!!auto && auto !== 'no') ||
+      /^(bulk|list|junk)$/i.test(header(first, 'Precedence').trim()),
+    toMe:
+      !!me &&
+      messages.some((m) =>
+        ['To', 'Cc'].some((h) =>
+          header(m.payload, h)
+            .split(',')
+            .some((a) => parseFrom(a).key === me),
+        ),
+      ),
+    primary: messages.some((m) => m.labelIds?.includes('INBOX') && m.labelIds.includes('CATEGORY_PERSONAL')),
+    lastMs: last,
   }
 }

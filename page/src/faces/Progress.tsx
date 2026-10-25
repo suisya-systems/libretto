@@ -37,7 +37,7 @@ function stepOf(c: CaseView): Step {
   return (last?.from && AT[last.from]) || 'entrance'
 }
 
-// 中身を確かめられなかった Google のファイル（照合に落ちた・確かめられないまま止まった）。本人に消してもらう（6.5 (6)・6.8 (4)）
+// 中身を確かめられなかった Google のファイル（照合に落ちた・確かめられないまま止まった）。本人に消してもらう（6.5 (6)・6.10 (4)）
 const GOOGLE = new Set(['gdoc', 'gsheet', 'gslide'])
 export function Leftovers({ c }: { c: CaseView }) {
   const left = c.deliveries.filter((d) => d.status === '失敗' && GOOGLE.has(d.target.kind) && d.link)

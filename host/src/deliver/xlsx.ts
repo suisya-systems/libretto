@@ -1,4 +1,4 @@
-// 表（docs/implementation.md 6.8 (1)(2)(4)）。作り手の HTML の table 1 つが 1 シート。xlsx は依存を足さずに書く（docx.ts の zip）。
+// 表（docs/implementation.md 6.10 (1)(2)(4)）。作り手の HTML の table 1 つが 1 シート。xlsx は依存を足さずに書く（docx.ts の zip）。
 // セルの字が = で始まれば式、数だけなら数、ほかは字。同じ入力から同じバイト列
 import { decode, escapeHtml, plain } from '../checks/text.ts'
 import { unzip, xml, zip } from './docx.ts'

@@ -100,7 +100,7 @@ export const JUDGE_INSTRUCTION = `あなたは libretto の「判定役」です
 出力は次の形の JSON だけにしてください（形だけの例）。
 ${JSON.stringify(JUDGE_EXAMPLE)}`
 
-// 見た目の判定（6.8 (3)）。ページは材料の画像ファイル「ページ 0」「ページ 1」…で、index はその番号
+// 見た目の判定（6.10 (3)）。ページは材料の画像ファイル「ページ 0」「ページ 1」…で、index はその番号
 export const NO_PAGES = '見た目を確かめるページがありませんでした'
 export const TOO_MANY_PAGES = `ページが多すぎて見た目を確かめられませんでした（${MAX_PAGES} ページまで）`
 export const IMAGE_INSTRUCTION = `あなたは libretto の「判定役」です。文書やスライドを画像にしたページを見て、決められた確認項目ごとに判定します。文書を直したり書いたりはしません。
@@ -344,7 +344,7 @@ export async function judge(
       reasons[c.id] = NO_SAMPLES
       results.set(c.id, { id: c.id, verdict: 'unable', by: 'claude', reasonRef: c.id })
     }
-  // 見た目（6.8 (3)）: 描き出したページを 1 回の「判定役・画像」のセッションで。単位 = ページ
+  // 見た目（6.10 (3)）: 描き出したページを 1 回の「判定役・画像」のセッションで。単位 = ページ
   const looks = model.filter((x) => needsImages(x) && !results.has(x.id))
   if (!codeFailed && looks.length) {
     const pages: Page[] = []
@@ -697,7 +697,7 @@ type Deps = {
   log: (line: string) => void
   now?: () => Date
   fetch?: Fetch // 出典の取り寄せ（テストは偽物。6.3.1 (5)）
-  tools?: Tools // 事前点検で見つけた LibreOffice と poppler（6.8 (5)）
+  tools?: Tools // 事前点検で見つけた LibreOffice と poppler（6.10 (5)）
 }
 
 async function run(
@@ -760,7 +760,7 @@ async function run(
     // 書き込みの失敗だけ runner へ（保存の帯）。入力の読み込みと表の不足は中止の面に出す（6.2.5 (4)）
     if (isStorageError(e)) throw e
     d.log(`judge ${c.caseId} ${how.name}: ${e instanceof Error ? e.stack : String(e)}`)
-    // 描き出し・計算し直しの道具が無い・失敗した（10 章の LibreOffice / poppler の行。6.8 (3)）
+    // 描き出し・計算し直しの道具が無い・失敗した（10 章の LibreOffice / poppler の行。6.10 (3)）
     if (e instanceof ToolFailure) return signal.aborted ? false : fail('道具の失敗')
     return fail('判定できなかった')
   }
@@ -826,7 +826,7 @@ export function judgeBody(d: Deps, c: CaseRecord, signal: AbortSignal): Promise<
   )
 }
 
-// 仕立ての成果物は形式ごとに 1 つ（6.8 (2)）。Google の 3 つは手元のファイルと同じ中身を変換付きで上げる。
+// 仕立ての成果物は形式ごとに 1 つ（6.10 (2)）。Google の 3 つは手元のファイルと同じ中身を変換付きで上げる。
 // gdoc.docx は Issue 21 からの名前のまま（前の版の outputs.json をそのまま読める）
 export const OUTPUT_FILES = {
   page: 'page.html',
@@ -846,7 +846,7 @@ export const outputOf = (t: DeliveryTarget): OutputFormat =>
         : t.kind === 'gslide'
           ? 'pptx'
           : t.kind
-// 同じ判定か（code は関数、claude は問い）。同じ関数を複数の保存先が使う（xlsxNoFormulaErrors は gsheet と xlsx など。6.8 (3)）
+// 同じ判定か（code は関数、claude は問い）。同じ関数を複数の保存先が使う（xlsxNoFormulaErrors は gsheet と xlsx など。6.10 (3)）
 const judgeKey = (c: Pick<Check, 'judge'>) =>
   c.judge.by === 'code' ? c.judge.fn : `${c.judge.by}:${JSON.stringify(c.judge)}`
 

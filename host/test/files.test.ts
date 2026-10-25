@@ -1,4 +1,4 @@
-// 表・スライド・手元のファイルと見た目の判定（docs/implementation.md 6.8）
+// 表・スライド・手元のファイルと見た目の判定（docs/implementation.md 6.10）
 import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -51,7 +51,7 @@ const SLIDE_MD = `# 四半期の報告
 2. 広告
 `
 
-describe('表（6.8 (1)(2)）', () => {
+describe('表（6.10 (1)(2)）', () => {
   it('HTML の table と Markdown の表が同じ表になり、xlsx に書いて読み戻すと同じセル', () => {
     const fromHtml = htmlTables(TABLE_HTML)
     expect(fromHtml).toEqual([
@@ -146,7 +146,7 @@ describe('表（6.8 (1)(2)）', () => {
   })
 })
 
-describe('スライド（6.8 (1)(2)）', () => {
+describe('スライド（6.10 (1)(2)）', () => {
   it('h1 が表紙、h2 ごとに 1 枚。読み戻すと本文の段落とリンクに一致する（slidesRoundTrip）', () => {
     const html = renderHtml(SLIDE_MD)
     expect(slidesOf(html).map((s) => [s.cover, s.body.length])).toEqual([
@@ -164,7 +164,7 @@ describe('スライド（6.8 (1)(2)）', () => {
   })
 })
 
-describe('描き出し（6.8 (3)(5)）', () => {
+describe('描き出し（6.10 (3)(5)）', () => {
   it('PGM の白いページを空白と読む', () => {
     const pgm = (fill: number, ink = 0) => {
       const px = Buffer.alloc(100 * 100, fill)
@@ -177,7 +177,7 @@ describe('描き出し（6.8 (3)(5)）', () => {
     expect(() => blankPgm(Buffer.from('nope'))).toThrow(ToolFailure)
   })
 
-  it('事前点検が確かめる道具は requirements.md に全部載っている（6.8 (5)）', () => {
+  it('事前点検が確かめる道具は requirements.md に全部載っている（6.10 (5)）', () => {
     const req = readFileSync(fileURLToPath(new URL('../../requirements.md', import.meta.url)), 'utf-8')
     for (const t of ['soffice', 'pdftoppm', 'LIBRETTO_SOFFICE', 'LIBRETTO_PDFTOPPM', 'npm run verify:files'])
       expect(req).toContain(t)
@@ -218,7 +218,7 @@ const check = (id: string, judge: Check['judge']): Check => ({
   selfReport: '依頼に書いてある',
 })
 
-describe('形式の機械判定（6.8 (3)）', () => {
+describe('形式の機械判定（6.10 (3)）', () => {
   const signal = new AbortController().signal
   it.skipIf(win)('xlsxNoFormulaErrors: 式が無ければ道具なしで合格、あれば計算し直してエラーを数える', async () => {
     const c = check('C01', { by: 'code', fn: 'xlsxNoFormulaErrors', args: {} })
@@ -270,7 +270,7 @@ describe('形式の機械判定（6.8 (3)）', () => {
   })
 })
 
-describe('見た目の判定（6.8 (3)）', () => {
+describe('見た目の判定（6.10 (3)）', () => {
   const looks = withHostItems([], [{ kind: 'file', format: 'pptx' }], 'x'.repeat(32)).find(
     (c) => c.judge.by === 'claude',
   ) as Check
@@ -339,7 +339,7 @@ describe('見た目の判定（6.8 (3)）', () => {
   })
 })
 
-describe('保存先の選び方と形式の項目（6.8 (1)(3)）', () => {
+describe('保存先の選び方と形式の項目（6.10 (1)(3)）', () => {
   it('Google の連携と道具の有無で選べる種類が決まる', () => {
     expect(destChoices({ google: false, files: false })).toEqual(['page', 'paste'])
     expect(destChoices({ google: true, files: false })).toEqual(['page', 'paste', 'gdoc', 'gsheet'])

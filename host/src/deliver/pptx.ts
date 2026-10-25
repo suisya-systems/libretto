@@ -1,4 +1,4 @@
-// スライド（docs/implementation.md 6.8 (1)(2)(4)）。作り手の HTML のブロック（pageBlocks）から組む: h1 が表紙、h2 ごとに 1 枚。
+// スライド（docs/implementation.md 6.10 (1)(2)(4)）。作り手の HTML のブロック（pageBlocks）から組む: h1 が表紙、h2 ごとに 1 枚。
 // pptx は依存を足さずに書く（docx.ts の zip）。16:9、題と本文のテキストボックスだけ。同じ入力から同じバイト列
 import { decode, escapeHtml } from '../checks/text.ts'
 import { type DocText, inlines, unzip, xml, zip } from './docx.ts'
@@ -172,7 +172,7 @@ ${slides.map((_, i) => ct(`ppt/slides/slide${i + 1}.xml`, 'presentationml.slide'
   return zip(files.map(([name, body]) => [name, Buffer.from(body, 'utf-8')]))
 }
 
-// スライドの段落（字のあるもの）とリンクの行き先を、スライドの順・図形の順に。slidesRoundTrip の材料（6.8 (3)(4)）。
+// スライドの段落（字のあるもの）とリンクの行き先を、スライドの順・図形の順に。slidesRoundTrip の材料（6.10 (3)(4)）。
 // 仕立てた pptx と Google の書き出しの pptx を同じ関数で読む
 const attr = (s: string, name: string) => new RegExp(`\\b${name}="([^"]*)"`).exec(s)?.[1]
 export function pptxText(buf: Buffer): DocText {

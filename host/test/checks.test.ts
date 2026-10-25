@@ -138,7 +138,7 @@ describe('ホストが足す項目', () => {
     expect(checksViolations(all.slice(7), shape, { minority: false }).join()).not.toContain('肯定形')
   })
 
-  it('7.2・6.8 の表のとおり: 表は照合と式、スライドは字の照合・空白・見た目、docx は照合と見た目', () => {
+  it('7.2・6.10 の表のとおり: 表は照合と式、スライドは字の照合・空白・見た目、docx は照合と見た目', () => {
     const fns = (t: Parameters<typeof withHostItems>[1]) =>
       withHostItems([], t, 'x'.repeat(32))
         .slice(1)

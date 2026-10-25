@@ -1,5 +1,5 @@
-// 偽の Slack（docs/implementation.md 11.1・6.6 (8)）。5 つの口（auth.test・reactions.list・conversations.replies・
-// conversations.info・users.info）をプロセス内の HTTP で受け、受けた要求を記録する。テストは「files.* を呼んでいない」をこの記録で確かめる
+// 偽の Slack（docs/implementation.md 11.1・6.6 (8)・6.9 (11)）。口（auth.test・reactions.list・conversations.replies・
+// conversations.info・users.info と、自動検出の search.messages・conversations.history・conversations.list）をプロセス内の HTTP で受け、受けた要求を記録する。テストは「files.* を呼んでいない」をこの記録で確かめる
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { type RawMessage, type ReactionItem, SLACK_SCOPES } from '../../src/intake/slack.ts'
@@ -19,6 +19,9 @@ export async function startFakeSlack() {
     threads: new Map<string, RawMessage[]>(), // `${channel}:${thread_ts}`
     channels: new Map<string, { name?: string; is_im?: boolean; is_mpim?: boolean }>(),
     users: new Map<string, string>([[ME, '本人']]),
+    history: new Map<string, RawMessage[]>(), // チャンネルの投稿（新しい順に返す）
+    mentions: [] as { channel: string; ts: string; is_im?: boolean; is_mpim?: boolean }[], // search.messages の結果
+    searchPageSize: 100,
     fail: new Map<string, { status?: number; error?: string; needed?: string }>(), // 口ごとの失敗
   }
   const server: Server = createServer(async (req, res) => {
@@ -67,10 +70,48 @@ export async function startFakeSlack() {
           k === `${params.channel}:${params.ts}` ||
           (k.startsWith(`${params.channel}:`) && m.some((x) => x.ts === params.ts)),
       )?.[1]
+      // スレッドでない投稿の ts なら、その投稿だけを返す（公式文書のとおり）
+      const one = state.history.get(params.channel ?? '')?.find((x) => x.ts === params.ts)
+      if (!t && one) return json({ ok: true, messages: [one] })
       return t
         ? json({ ok: true, messages: t.slice(0, Number(params.limit ?? 1000)) })
         : json({ ok: false, error: 'thread_not_found' })
     }
+    if (method === 'search.messages') {
+      const page = Number(params.page ?? 1)
+      const size = state.searchPageSize
+      const all = state.mentions
+      return json({
+        ok: true,
+        messages: {
+          matches: all.slice((page - 1) * size, page * size).map(({ channel, ts, is_im, is_mpim }) => ({
+            ts,
+            channel: { id: channel, is_im: !!is_im, is_mpim: !!is_mpim },
+          })),
+          paging: { page, pages: Math.max(1, Math.ceil(all.length / size)) },
+        },
+      })
+    }
+    if (method === 'conversations.history') {
+      const all = (state.history.get(params.channel ?? '') ?? [])
+        .filter((m) => Number(m.ts) >= Number(params.oldest ?? 0))
+        .sort((a, b) => Number(b.ts) - Number(a.ts))
+      const at = Number(params.cursor ?? 0)
+      const next = at + Number(params.limit ?? 100)
+      return json({
+        ok: true,
+        messages: all.slice(at, next),
+        response_metadata: { next_cursor: next < all.length ? String(next) : '' },
+      })
+    }
+    if (method === 'conversations.list')
+      return json({
+        ok: true,
+        channels: [...state.channels]
+          .filter(([, c]) => !c.is_im && !c.is_mpim)
+          .map(([id, c]) => ({ id, name: c.name })),
+        response_metadata: { next_cursor: '' },
+      })
     if (method === 'conversations.info') {
       const c = state.channels.get(params.channel ?? '')
       return c ? json({ ok: true, channel: c }) : json({ ok: false, error: 'channel_not_found' })

@@ -8,9 +8,9 @@ import { W, w } from '../wording.ts'
 import { CaseHeader, History, Leftovers, Versions } from './Progress.tsx'
 
 export const destLabel = (t: DeliveryTarget) => W[`dest.${destChoiceOf(t)}`]
-// 画面から選べる保存先の種類（CaseView.destinationChoices）を保存先に。Google の 3 つは libretto フォルダ（6.5 (3)・6.8 (3)）
+// 画面から選べる保存先の種類（CaseView.destinationChoices）を保存先に。Google の 3 つは libretto フォルダ（6.5 (3)・6.10 (3)）
 export const targetOf = (k: CaseView['destinationChoices'][number]): DeliveryTarget => DEST_TARGET[k]
-// Google に作るものの注記と、成果の面の「開く」（6.8 (6)）
+// Google に作るものの注記と、成果の面の「開く」（6.10 (6)）
 const GOOGLE_NOTE = { gdoc: 'deliver.gdocNote', gsheet: 'deliver.gsheetNote', gslide: 'deliver.gslideNote' } as const
 const GOOGLE_OPEN = { gdoc: 'result.openDoc', gsheet: 'result.openSheet', gslide: 'result.openSlides' } as const
 

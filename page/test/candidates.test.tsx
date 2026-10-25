@@ -247,3 +247,107 @@ describe('会議メモ（6.7 (5)）', () => {
     r.done()
   })
 })
+
+describe('自動検出の候補（6.9 (7)(10)）', () => {
+  const inferred = (id: string, confidence: '高' | '中' | '低'): CandidateCard => ({
+    ...card,
+    id,
+    origin: '推測',
+    confidence,
+    aiInstructionFlag: false,
+    reason: '「資料をお願いします」という文があります',
+  })
+  beforeEach(() => {
+    home = view({
+      candidates: {
+        signal: [],
+        meeting: [],
+        inferred: {
+          high: [inferred('gmail:h', '高')],
+          mid: [],
+          low: [inferred('gmail:l1', '低'), inferred('gmail:l2', '低')],
+        },
+      },
+    })
+  })
+
+  it('しるしは「自動検出・可能性」、見つけた理由。低は折りたたんでまとめて見送れる', async () => {
+    const r = await render()
+    expect(r.text()).toContain(W['cand.mark.inferred.高'])
+    expect(r.text()).toContain(w('cand.why', { why: '「資料をお願いします」という文があります' }))
+    expect(r.text()).toContain(w('home.lowFold', { n: 2 }))
+    await r.click(r.button(W['home.lowDismiss']))
+    const dialog = document.querySelector('.dialog') as HTMLElement
+    expect(dialog.textContent).toContain(w('home.lowDismissBody', { n: 2 }))
+    await r.click(r.button(W['home.lowDismiss'], dialog))
+    expect(sent).toEqual([
+      { method: 'POST', path: '/api/candidates/dismiss-low', body: { ids: ['gmail:l1', 'gmail:l2'] } },
+    ])
+    r.done()
+  })
+
+  it('見送りの理由は 4 つ。続いて 3 回目なら除外するかを 1 回聞き、除外するで送る', async () => {
+    const ask = { kind: 'sender', value: 'a@example.com', label: 'a@example.com', count: 3 }
+    answer = (path) => new Response(JSON.stringify(path.endsWith('/actions') ? { askSuppress: ask } : { id: 1 }))
+    const r = await render()
+    const first = r.el.querySelector('.cand') as HTMLElement
+    await r.click(r.button(W['cand.dismiss'], first))
+    const dialog = document.querySelector('.dialog') as HTMLElement
+    expect([...dialog.querySelectorAll('.radio-label')].map((x) => x.textContent)).toContain(
+      W['cand.reason.拾わなくてよい'],
+    )
+    await r.click(dialog.querySelectorAll('[role=radio]')[0])
+    await r.click(r.button(W['cand.dismiss'], dialog))
+    expect(r.text()).toContain(w('home.askSuppress', { label: 'a@example.com' }))
+    await r.click(r.button(W['home.askSuppressYes']))
+    expect(sent.at(-1)).toEqual({
+      method: 'POST',
+      path: '/api/suppressions',
+      body: { kind: 'sender', value: 'a@example.com', label: 'a@example.com' },
+    })
+    expect(r.text()).toContain(w('home.askSuppressDone', { label: 'a@example.com' }))
+    r.done()
+  })
+
+  it('まとめて見送るは 200 件ずつ送る', async () => {
+    const low = Array.from({ length: 201 }, (_, i) => inferred(`gmail:l${i}`, '低'))
+    home = view({ candidates: { signal: [], meeting: [], inferred: { high: [], mid: [], low } } })
+    const r = await render()
+    await r.click(r.button(W['home.lowDismiss']))
+    await r.click(r.button(W['home.lowDismiss'], document.querySelector('.dialog') as HTMLElement))
+    expect(sent.map((x) => (x.body as { ids: string[] }).ids.length)).toEqual([200, 1])
+    r.done()
+  })
+
+  it('除外が保存できなかった（503）ときは除外したと出さず、もう一度押せる', async () => {
+    const ask = { kind: 'sender', value: 'a@example.com', label: 'a@example.com', count: 3 }
+    answer = (path) =>
+      path.endsWith('/actions')
+        ? new Response(JSON.stringify({ askSuppress: ask }))
+        : new Response('{"reason":"storage"}', { status: 503 })
+    const r = await render()
+    await r.click(r.button(W['cand.dismiss'], r.el.querySelector('.cand') as HTMLElement))
+    const dialog = document.querySelector('.dialog') as HTMLElement
+    await r.click(dialog.querySelectorAll('[role=radio]')[0])
+    await r.click(r.button(W['cand.dismiss'], dialog))
+    await r.click(r.button(W['home.askSuppressYes']))
+    expect(r.text()).not.toContain(w('home.askSuppressDone', { label: 'a@example.com' }))
+    expect(r.text()).toContain(W['band.sendFailed'])
+    expect(r.button(W['home.askSuppressYes'])).toBeTruthy()
+    r.done()
+  })
+
+  it('除外しないで閉じる', async () => {
+    answer = () =>
+      new Response(JSON.stringify({ askSuppress: { kind: 'channel', value: 'C1', label: '#general', count: 3 } }))
+    const r = await render()
+    await r.click(r.button(W['cand.dismiss'], r.el.querySelector('.cand') as HTMLElement))
+    const dialog = document.querySelector('.dialog') as HTMLElement
+    await r.click(dialog.querySelectorAll('[role=radio]')[0])
+    await r.click(r.button(W['cand.dismiss'], dialog))
+    await r.click(r.button(W['home.askSuppressNo']))
+    expect(r.text()).not.toContain(w('home.askSuppress', { label: '#general' }))
+    expect(sent.some((x) => x.path === '/api/suppressions')).toBe(false)
+    r.done()
+  })
+})

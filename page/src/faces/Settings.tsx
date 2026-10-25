@@ -1,6 +1,12 @@
 // 設定の面（画面 7）。連携の節（Google と Slack。docs/implementation.md 6.4 (7)・6.6 (7)）、API キーの節（6.1.3 (6)。値は画面のどこにも出さない。設計書 D17）と
-// 動作環境の確認の節（8.10 (6)）
-import { type ApiKeyStatus, ConnectionsView, MaterialRef, Settings as SettingsSchema } from '@libretto/shared/api'
+// 自動検出の節（6.9 (10)）と動作環境の確認の節（8.10 (6)）
+import {
+  type ApiKeyStatus,
+  ConnectionsView,
+  InferenceSettings,
+  MaterialRef,
+  Settings as SettingsSchema,
+} from '@libretto/shared/api'
 import { type ReactNode, useEffect, useId, useState } from 'react'
 import { z } from 'zod'
 import { send, useLoad } from '../load.ts'
@@ -401,7 +407,7 @@ function EnvSection({ v, tools, reload }: { v: Isolation; tools: ConnectionsView
             </p>
           )}
         </li>
-        {/* ファイルを作る道具（起動時の事前点検。6.8 (5)） */}
+        {/* ファイルを作る道具（起動時の事前点検。6.10 (5)） */}
         <li className="key-row">
           <div className="key-head">
             <div className="grow">
@@ -755,10 +761,180 @@ function LinkSection({
   )
 }
 
+// 自動検出（6.9 (10)）。範囲・上限・表示を 1 回で保存し、今日の件数・見落としの割合・除外したものを出す
+const Channels = z.object({ channels: z.array(z.object({ id: z.string(), name: z.string() })) })
+const DAYS = [3, 7, 14] as const
+type InferNotice = 'saved' | 'invalid' | 'failed'
+
+// Slack と連携しているときだけ出す（チャンネルの一覧を引く）
+function SlackChannels({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) {
+  const channels = useLoad('/api/connections/slack/channels', Channels)
+  return (
+    <fieldset className="stack">
+      <legend className="small strong">{W['settings.infer.slackChannels']}</legend>
+      <p className="muted small">{W['settings.infer.slackNote']}</p>
+      {channels.data && !channels.data.channels.length && (
+        <p className="muted small">{W['settings.infer.slackEmpty']}</p>
+      )}
+      {channels.data?.channels.map((c) => (
+        <label key={c.id} className="row-gap small">
+          <input
+            type="checkbox"
+            checked={value.includes(c.id)}
+            onChange={(e) => onChange(e.target.checked ? [...value, c.id] : value.filter((x) => x !== c.id))}
+          />
+          #{c.name}
+        </label>
+      ))}
+    </fieldset>
+  )
+}
+
+function InferSection({
+  set: loaded,
+  v,
+  slack,
+  reload,
+}: {
+  set: InferenceSettings
+  v: ConnectionsView['inference']
+  slack: boolean
+  reload: () => void
+}) {
+  const id = useId()
+  const [set, setSet] = useState(loaded)
+  useEffect(() => setSet(loaded), [loaded])
+  const [limit, setLimit] = useState(String(loaded.dailyLimit))
+  useEffect(() => setLimit(String(loaded.dailyLimit)), [loaded.dailyLimit])
+  const [busy, setBusy] = useState(false)
+  const [notice, setNotice] = useState<InferNotice>()
+  const save = async () => {
+    setBusy(true)
+    setNotice(undefined)
+    let r: InferNotice = 'failed'
+    try {
+      const res = await fetch('/api/settings/inference', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json', accept: 'application/json' },
+        body: JSON.stringify({ ...set, dailyLimit: Number(limit) }),
+      })
+      r = res.ok ? 'saved' : res.status === 400 ? 'invalid' : 'failed'
+    } catch {}
+    setBusy(false)
+    setNotice(r)
+    if (r === 'saved') reload()
+  }
+  const pct = v.recall.total ? Math.round((v.recall.hit / v.recall.total) * 100) : 0
+  return (
+    <section aria-labelledby="h-infer" className="card pad stack">
+      <h2 id="h-infer">{W['settings.infer.heading']}</h2>
+      <p className="muted small">{W['settings.infer.use']}</p>
+      <p className="small">{w('settings.infer.today', { n: v.classifiedToday, limit: v.dailyLimit })}</p>
+      {v.skippedToday !== undefined && (
+        <p className="note-warn small">{w('settings.infer.skipped', { n: v.skippedToday })}</p>
+      )}
+      {v.lastAt && <p className="muted small">{w('settings.infer.lastAt', { at: when(v.lastAt) })}</p>}
+      <p className="small">
+        {v.recall.total
+          ? w('settings.infer.recall', { total: v.recall.total, hit: v.recall.hit, pct })
+          : W['settings.infer.recallNone']}
+      </p>
+      <form
+        className="stack"
+        onSubmit={(e) => {
+          e.preventDefault()
+          void save()
+        }}
+      >
+        <label className="voice-field">
+          <span className="small strong">{W['settings.infer.gmailDays']}</span>
+          <select
+            value={set.gmailDays}
+            onChange={(e) => setSet({ ...set, gmailDays: Number(e.target.value) as InferenceSettings['gmailDays'] })}
+          >
+            {DAYS.map((n) => (
+              <option key={n} value={n}>
+                {w('settings.infer.days', { n })}
+              </option>
+            ))}
+          </select>
+        </label>
+        {slack && (
+          <SlackChannels value={set.slackChannels} onChange={(slackChannels) => setSet({ ...set, slackChannels })} />
+        )}
+        <label className="voice-field">
+          <span className="small strong">{W['settings.infer.limit']}</span>
+          <input
+            type="number"
+            inputMode="numeric"
+            min={0}
+            max={1000}
+            value={limit}
+            aria-describedby={`${id}-limit`}
+            onChange={(e) => setLimit(e.target.value)}
+          />
+          <span id={`${id}-limit`} className="muted small">
+            {W['settings.infer.limitNote']}
+          </span>
+        </label>
+        <label className="row-gap small">
+          <input
+            type="checkbox"
+            checked={set.showLow}
+            onChange={(e) => setSet({ ...set, showLow: e.target.checked })}
+          />
+          {W['settings.infer.showLow']}
+        </label>
+        <label className="row-gap small">
+          <input type="checkbox" checked={set.useJev} onChange={(e) => setSet({ ...set, useJev: e.target.checked })} />
+          {W['settings.infer.useJev']}
+        </label>
+        <div>
+          <button type="submit" className="btn btn-primary" disabled={busy} aria-busy={busy || undefined}>
+            {W['settings.infer.save']}
+          </button>
+        </div>
+        {notice && (
+          <p
+            className={notice === 'saved' ? 'muted small' : 'note-alert small'}
+            role={notice === 'saved' ? 'status' : 'alert'}
+          >
+            {W[`settings.infer.${notice}`]}
+          </p>
+        )}
+      </form>
+      <h3 className="small strong">{W['settings.infer.excluded']}</h3>
+      {v.suppressions.length ? (
+        <ul className="voice-list">
+          {v.suppressions.map((x) => (
+            <li key={x.id} className="voice-row">
+              <span className="grow">{x.label}</span>
+              <button
+                type="button"
+                className="btn btn-quiet btn-sm"
+                aria-label={w('settings.infer.restoreLabel', { label: x.label })}
+                onClick={async () => {
+                  await send('DELETE', `/api/suppressions/${x.id}`)
+                  reload()
+                }}
+              >
+                {W['settings.infer.restore']}
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="muted small">{W['settings.infer.excludedNone']}</p>
+      )}
+    </section>
+  )
+}
+
 export function Settings() {
   const keys = useLoad('/api/settings/keys', Keys, (s) => s.event === 'settings.changed')
   const env = useLoad('/api/connections', ConnectionsView, (s) => s.event === 'connections.changed')
   const voice = useLoad('/api/settings/voice-samples', Samples, (s) => s.event === 'settings.changed')
+  const infer = useLoad('/api/settings/inference', InferenceSettings, (s) => s.event === 'settings.changed')
   return (
     <section className="face">
       <h1 className="face-title">{W['nav.settings']}</h1>
@@ -785,6 +961,17 @@ export function Settings() {
             </ul>
           </section>
         )
+      )}
+      {infer.data && env.data && (
+        <InferSection
+          set={infer.data}
+          v={env.data.inference}
+          slack={env.data.slack.state === 'connected'}
+          reload={() => {
+            infer.reload()
+            env.reload()
+          }}
+        />
       )}
       {voice.data && <VoiceSection samples={voice.data.samples} reload={voice.reload} />}
       {env.data && <EnvSection v={env.data.isolation} tools={env.data.tools} reload={env.reload} />}

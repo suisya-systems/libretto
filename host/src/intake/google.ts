@@ -256,7 +256,7 @@ export function createGoogle(o: {
       return call<T>(`${ep.gmail}${path}`, {}, signal, 'json')
     },
     // Drive。作成（POST）が届いたか分からないときは network（呼ぶ側が「不明」にする。6.5 (6)）
-    // bytes は書き出しの xlsx / pptx（6.8 (4)）
+    // bytes は書き出しの xlsx / pptx（6.10 (4)）
     drive<T>(path: string, init: RequestInit, signal: AbortSignal, as: 'json' | 'text' | 'bytes' = 'json') {
       return call<T>(`${ep.drive}${path}`, init, signal, as)
     },

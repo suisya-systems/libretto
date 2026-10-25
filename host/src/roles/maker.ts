@@ -41,7 +41,7 @@ export const SOURCES_RULE = `出典と要確認の印（この依頼は出典付
 - materials/ の pasted-01.md などは、本人が貼った資料。そこから取った主張は、資料の言い方と数のまま書く（リンクは要らない）
 - 出典を示せない事実の主張は、その文の終わり（句点の後）に ${MARK} を付ける。出典をこしらえない`
 
-// スライドと表にする依頼の形（6.8 (1)）。保存先にあるときだけ足す。tables は式を使えるか（LibreOffice で計算し直せるか）
+// スライドと表にする依頼の形（6.10 (1)）。保存先にあるときだけ足す。tables は式を使えるか（LibreOffice で計算し直せるか）
 export type Shape = { slides?: boolean; tables?: 'formulas' | 'values' }
 export const shapeOf = (destination: readonly DeliveryTarget[], soffice: boolean): Shape => ({
   ...(destination.some((t) => t.kind === 'gslide' || (t.kind === 'file' && t.format === 'pptx')) && { slides: true }),
@@ -247,7 +247,7 @@ type Deps = {
   emit: (caseId: string, r: ReturnType<typeof transition>) => boolean
   onAuthExpired: (caseId: string) => void
   now?: () => Date
-  soffice?: boolean // 表の式を計算し直せるか（6.8 (1)）
+  soffice?: boolean // 表の式を計算し直せるか（6.10 (1)）
 }
 
 export async function make(d: Deps, c: CaseRecord, signal: AbortSignal): Promise<boolean> {

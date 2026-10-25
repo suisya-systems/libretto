@@ -1,7 +1,7 @@
-// 拾い上げ（docs/implementation.md 4.5・6.4 (3)・6.6 (4)・6.7 (2)）。Gmail のラベルの付いたスレッドと、Slack で本人が :memo: を付けた投稿と、
-// 会議メモの本人担当の行動項目を候補にする（T1）。
+// 拾い上げ（docs/implementation.md 4.5・6.4 (3)・6.6 (4)・6.7 (2)・6.9 (1)）。推測（infer.ts）の後に、Gmail のラベルの付いたスレッドと、
+// Slack で本人が :memo: を付けた投稿と、会議メモの本人担当の行動項目を候補にする（T1）。
 // 時刻のカーソルは持たない。同時に 1 本。runs で起こすので、STOP の間は起きず、すべて停止で切れる
-import type { DestChoice } from '@libretto/shared/api'
+import type { DestChoice, InferenceSettings } from '@libretto/shared/api'
 import { transition } from '../case/transition.ts'
 import type { Ledger } from '../ledger/ledger.ts'
 import { jst } from '../ledger/ledger.ts'
@@ -10,6 +10,7 @@ import { type Runs, Stopped } from '../runs.ts'
 import { draftCard, flagInstructions, toCardContent } from './card.ts'
 import { labelId, readThread, threadIds } from './gmail.ts'
 import type { Google, GoogleFail } from './google.ts'
+import { createInference, SLACK_DAYS } from './infer.ts'
 import { createMeet, type MeetProblem } from './meet.ts'
 import {
   markedBy,
@@ -26,6 +27,7 @@ export const RUN_KEY = '拾い上げ'
 const PER_RUN = 20 // 1 回に読むスレッド・投稿の数。残りは次の回（6.4 (3)・6.6 (4)）
 const SWEEP_PAGES = 4 // 先頭の 1 ページに加えて、前の回の続きから読むリアクションの一覧のページ数（6.6 (4)）
 export const POLL_MS = 15 * 60_000
+const DAY_MS = 86_400_000
 
 type Deps = {
   home: string
@@ -36,11 +38,12 @@ type Deps = {
   runs: Runs
   label: () => string
   emoji: () => string
+  inference: () => InferenceSettings
   candidatesChanged: () => void
   connectionsChanged: () => void
   log: (line: string) => void
   now?: () => Date
-  destChoices: () => DestChoice[] // 今選べる保存先（6.8 (3)）
+  destChoices: () => DestChoice[] // 今選べる保存先（6.10 (3)）
 }
 
 export type Poller = ReturnType<typeof createPoller>
@@ -59,6 +62,7 @@ export function createPoller(d: Deps) {
   const sl: { lastAt?: string; problem: Problem; sweep?: string | undefined } = { problem: undefined }
   const mt: { lastAt?: string; problem?: MeetProblem | undefined } = {}
   const meet = createMeet({ ...d, now })
+  const inference = createInference({ ...d, settings: d.inference, now })
 
   // 失敗は連携の欄に出す。auth_expired は google / slack の側が覚える
   const why = (f: GoogleFail | SlackFail): Problem =>
@@ -72,20 +76,30 @@ export function createPoller(d: Deps) {
     if (f.why !== 'rejected') sl.problem = why(f) ?? sl.problem
   }
 
-  // 推測で先に出ていた候補に合図が付いた: 1 件のまま由来を合図に（設計書 4.2.2）。新しいものなら true
+  // 推測で先に出ていた候補に合図が付いた: 1 件のまま由来を合図に（設計書 4.2.2）。推測が先に見つけていたので
+  // 自己測定は「見つけていた」（6.9 (8)）。新しいもの・推測が「頼んでいない」としたものは true（合図として出す）
   function fresh(candidateId: string, signal: 'gmail_label' | 'slack_emoji'): boolean {
     const c = d.ledger.getCandidate(candidateId)
-    if (!c) return true
-    if (c.origin === '推測' && c.status === 'presented') {
-      d.ledger.transaction(() =>
+    if (!c || c.status === 'not_request') return true
+    if (c.origin !== '推測') return false
+    const sample = { type: 'recall_sample' as const, candidateId, signalAt: jst(now()), inferredBefore: true }
+    if (c.status === 'presented') {
+      d.ledger.transaction(() => {
         d.ledger.appendCandidateEvent(
           { type: 'promoted_to_signal', candidateId, signal },
           { status: 'presented', origin: '合図' },
-        ),
-      )
+        )
+        if (!d.ledger.hasRecallSample(candidateId)) d.ledger.appendCandidateEvent(sample)
+      })
       d.candidatesChanged()
-    }
+    } else if (!d.ledger.hasRecallSample(candidateId)) d.ledger.appendCandidateEvent(sample) // 見送った・進めた
     return false
+  }
+
+  // 新しい合図が推測の範囲の中か（自己測定の分母。6.9 (8)）。推測が「頼んでいない」とした行は範囲の中
+  const recallIf = (candidateId: string, inScope: boolean) => {
+    const was = d.ledger.getCandidate(candidateId)?.status === 'not_request'
+    return was || (inScope && d.inference().dailyLimit > 0) ? { recall: { signalAt: jst(now()) } } : {}
   }
 
   async function gmailOnce(signal: AbortSignal) {
@@ -121,6 +135,13 @@ export function createPoller(d: Deps) {
       const drafted = await draftCard(deps, t)
       if (!drafted.ok && drafted.stopped) return
       if (g.generation() !== generation) return
+      const set = d.inference()
+      const inScope =
+        t.primary &&
+        t.toMe &&
+        !t.self &&
+        t.lastMs >= now().getTime() - set.gmailDays * DAY_MS &&
+        !d.ledger.isSuppressed('sender', t.senderKey)
       transition(d.ledger, {
         type: 'candidate.presented',
         candidate: {
@@ -131,6 +152,7 @@ export function createPoller(d: Deps) {
           senderKey: t.senderKey,
         },
         card: toCardContent(t, drafted.ok ? drafted.draft : undefined, account),
+        ...recallIf(`gmail:${id}`, inScope),
       })
       d.candidatesChanged()
     }
@@ -183,6 +205,15 @@ export function createPoller(d: Deps) {
       if (!drafted.ok && drafted.stopped) return
       // 要約を待つ間にトークンを入れ直された・消された（その回は止めてある）: 前のトークンで読んだ投稿を出さない
       if (signal.aborted) return
+      // チャンネル（DM でない）で、選んだチャンネルか本人宛てのメンション（検索の権限があるとき）、7 日の中、除外していない
+      const set = d.inference()
+      const mentioned =
+        (message.text ?? '').includes(`<@${me.userId}>`) && !s.status().missingScopes.includes('search:read')
+      const inScope =
+        p.subject.startsWith('#') &&
+        (set.slackChannels.includes(channel) || mentioned) &&
+        Number(message.ts) * 1000 >= now().getTime() - SLACK_DAYS * DAY_MS &&
+        !d.ledger.isSuppressed('channel', channel)
       transition(d.ledger, {
         type: 'candidate.presented',
         candidate: {
@@ -193,6 +224,7 @@ export function createPoller(d: Deps) {
           senderKey: p.senderKey,
         },
         card: toCardContent(p, drafted.ok ? drafted.draft : undefined, me.userId),
+        ...recallIf(p.candidateId, inScope),
       })
       d.candidatesChanged()
     }
@@ -208,9 +240,17 @@ export function createPoller(d: Deps) {
     if (!r) mt.lastAt = jst(now())
   }
 
-  // Gmail の後に Slack、その後に会議メモ。どれかの失敗はほかを止めない（6.6 (4)・6.7 (2)）
+  // 推測の後に Gmail、Slack、会議メモ。どれかの失敗はほかを止めない（6.6 (4)・6.7 (2)・6.9 (1)）。推測を先に見るのは、
+  // 届いたばかりのものを推測が見てから合図を見るため（自己測定。6.9 (1)）
   async function once(signal: AbortSignal) {
     const google = () => d.google.status()
+    try {
+      await inference.once(signal)
+    } catch (e) {
+      if (signal.aborted) return
+      d.log(`inference: ${e instanceof Error ? e.stack : String(e)}`)
+    }
+    if (signal.aborted) return
     if (google().state === 'connected') await gmailOnce(signal)
     if (d.slack?.configured() && !signal.aborted) await slackOnce(d.slack, signal)
     if (google().state === 'connected' && google().meet && !signal.aborted) await meetOnce(signal)
@@ -257,6 +297,7 @@ export function createPoller(d: Deps) {
       ...(docsProblem && { docsProblem }),
     }),
     slackView: () => ({ ...(sl.lastAt && { lastAt: sl.lastAt }), ...(sl.problem && { problem: sl.problem }) }),
+    inferenceView: () => inference.view(),
     meetView: () => ({ ...(mt.lastAt && { meetLastAt: mt.lastAt }), ...(mt.problem && { meetProblem: mt.problem }) }),
   }
 }
