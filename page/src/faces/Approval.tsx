@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'wouter'
 import type { z } from 'zod'
 import { useCaseAction } from '../action.ts'
+import { useResync } from '../load.ts'
 import { Segment } from '../parts/Choice.tsx'
 import { IsolationBand } from '../parts/IsolationBand.tsx'
 import { W, w } from '../wording.ts'
@@ -40,7 +41,9 @@ function useDraft(caseId: string, n: number) {
   const [html, setHtml] = useState<string>()
   const [changes, setChanges] = useState<Changes>()
   const [failed, setFailed] = useState(false)
+  const resync = useResync()
   useEffect(() => {
+    void resync // SSE がつながり直したら取り直す（5.8 (7)）
     const ac = new AbortController()
     const base = `/api/cases/${encodeURIComponent(caseId)}`
     setFailed(false)
@@ -58,7 +61,7 @@ function useDraft(caseId: string, n: number) {
         .catch(() => !ac.signal.aborted && setFailed(true))
     else setChanges(undefined)
     return () => ac.abort()
-  }, [caseId, n])
+  }, [caseId, n, resync])
   return { html, changes, failed }
 }
 
