@@ -9,6 +9,7 @@ import {
   CaseState,
   DeliveryStatus,
   DeliveryTarget,
+  DestChoice,
   DocType,
   FamilyFallback,
   LEAVE_IT,
@@ -229,13 +230,13 @@ export const DecisionRecord = z.object({
 })
 export type DecisionRecord = z.infer<typeof DecisionRecord>
 
-// 会話で聞き取った依頼（6.2.1 (4)）。必須は表 4-1 の 何を・誰が読むか・届け先。保存先は作れる 3 つ（gdoc は連携しているときだけ。6.5 (3)）
+// 会話で聞き取った依頼（6.2.1 (4)）。必須は表 4-1 の 何を・誰が読むか・届け先。保存先は DestChoice（Google は連携しているとき、ファイルは道具があるときだけ。6.5 (3)・6.8 (3)）
 export const IntakeDraft = z.object({
   title: z.string().trim().min(1).max(40),
   summary: z.string().trim().min(1).max(300),
   docType: DocType,
   audience: z.string().trim().min(1),
-  destinations: z.array(z.enum(['page', 'paste', 'gdoc'])).min(1),
+  destinations: z.array(DestChoice).min(1),
   shape: z.string().optional(),
   deadline: z.string().optional(),
   mustNot: z.array(z.string()).optional(),

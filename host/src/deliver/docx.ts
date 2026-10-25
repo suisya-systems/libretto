@@ -7,41 +7,56 @@ import { pageBlocks, safeHref } from './page.ts'
 const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
 const R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
 const HYPERLINK = `${R}/hyperlink`
-const xml = (body: string) => `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n${body}`
+export const xml = (body: string) => `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n${body}`
 
-// ブロックの中（エスケープ済みの字・strong・em・a・br）を w:r の列に
-function runs(html: string, link: (href: string) => string): string {
-  const out: string[] = []
+// ブロックの中（エスケープ済みの字・strong・em・a・br）を、字・改行・リンクの開け閉めの列に（docx と pptx で共有。6.8 (2)）
+export type Inline =
+  | { text: string; b: boolean; i: boolean; link: boolean }
+  | { br: true }
+  | { open: string } // リンクの行き先（http / https だけ）
+  | { close: true }
+export function inlines(html: string): Inline[] {
+  const out: Inline[] = []
   const on = { b: 0, i: 0 }
-  let open: string | undefined // 開いている hyperlink の r:id
+  let link = false
   let at = 0
   const text = (s: string) => {
-    if (!s) return
-    // w:rPr の中は rStyle → b → i の順（OOXML の並び）
-    const pr = `${open ? '<w:rStyle w:val="Hyperlink"/>' : ''}${on.b ? '<w:b/>' : ''}${on.i ? '<w:i/>' : ''}`
-    out.push(`<w:r>${pr && `<w:rPr>${pr}</w:rPr>`}<w:t xml:space="preserve">${escapeHtml(decode(s))}</w:t></w:r>`)
+    if (s) out.push({ text: decode(s), b: on.b > 0, i: on.i > 0, link })
   }
   for (const m of html.matchAll(/<(\/?)(strong|em|a|br)\b([^>]*)>/g)) {
     text(html.slice(at, m.index))
     at = m.index + m[0].length
     const close = m[1] === '/'
-    if (m[2] === 'br') out.push('<w:r><w:br/></w:r>')
+    if (m[2] === 'br') out.push({ br: true })
     else if (m[2] === 'a') {
       if (!close) {
         const href = safeHref(/href="([^"]*)"/.exec(m[3] as string)?.[1])
         if (href) {
-          open = link(href)
-          out.push(`<w:hyperlink r:id="${open}">`)
+          link = true
+          out.push({ open: href })
         }
-      } else if (open) {
-        open = undefined
-        out.push('</w:hyperlink>')
+      } else if (link) {
+        link = false
+        out.push({ close: true })
       }
     } else on[m[2] === 'strong' ? 'b' : 'i'] += close ? -1 : 1
   }
   text(html.slice(at))
-  if (open) out.push('</w:hyperlink>')
-  return out.join('')
+  if (link) out.push({ close: true })
+  return out
+}
+
+function runs(html: string, link: (href: string) => string): string {
+  return inlines(html)
+    .map((x) => {
+      if ('br' in x) return '<w:r><w:br/></w:r>'
+      if ('open' in x) return `<w:hyperlink r:id="${link(x.open)}">`
+      if ('close' in x) return '</w:hyperlink>'
+      // w:rPr の中は rStyle → b → i の順（OOXML の並び）
+      const pr = `${x.link ? '<w:rStyle w:val="Hyperlink"/>' : ''}${x.b ? '<w:b/>' : ''}${x.i ? '<w:i/>' : ''}`
+      return `<w:r>${pr && `<w:rPr>${pr}</w:rPr>`}<w:t xml:space="preserve">${escapeHtml(x.text)}</w:t></w:r>`
+    })
+    .join('')
 }
 
 const STYLES = xml(`<w:styles xmlns:w="${W}">
@@ -125,7 +140,7 @@ ${paras.join('\n')}
 }
 
 // 無圧縮の zip。日時は 1980-01-01 00:00 に固定
-function zip(entries: [string, Buffer][]): Buffer {
+export function zip(entries: [string, Buffer][]): Buffer {
   const local: Buffer[] = []
   const central: Buffer[] = []
   let offset = 0
@@ -167,7 +182,7 @@ function zip(entries: [string, Buffer][]): Buffer {
 }
 
 // zip の 1 つのファイル（無圧縮と deflate）。無ければ undefined
-function unzip(buf: Buffer, name: string): string | undefined {
+export function unzip(buf: Buffer, name: string): string | undefined {
   const end = buf.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]))
   if (end < 0) return undefined
   let p = buf.readUInt32LE(end + 16)

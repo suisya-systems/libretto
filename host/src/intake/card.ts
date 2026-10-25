@@ -1,21 +1,20 @@
 // 候補カードの中身（docs/implementation.md 6.4 (4)(5)・6.6 (5)）。「頼まれていそうなこと」と提案は事実係・分類が 1 回で書く。
 // 失敗しても候補は出す（本人の付けた印を落とさない）。止めたときだけ出さない
-import { DocType } from '@libretto/shared/api'
+import { DestChoice, DocType } from '@libretto/shared/api'
 import { z } from 'zod'
 import { detectInstructions, JEV_HEAD, ruleHit } from '../facts/instructions.ts'
 import type { CardContent } from '../ledger/ledger.ts'
 import { type Job, type Outcome, withoutNulls } from '../model/invoke.ts'
-import { destMaterial, destViolations, TARGET } from '../roles/conversation.ts'
+import { destChoices, destMaterial, destViolations, TARGET } from '../roles/conversation.ts'
 
 export const CARD_LIMITS = { maxYen: 20, timeoutMs: 120_000 }
 export const CARD_FALLBACK = '内容を読み取れませんでした。メールを開いて確かめてください'
 export const CARD_FALLBACK_SLACK = '内容を読み取れませんでした。Slack で投稿を開いて確かめてください'
 
-const Dest = z.enum(['page', 'paste', 'gdoc'])
 export const CardDraft = z.object({
   summary: z.string().trim().min(1).max(80),
   docType: DocType,
-  destinations: z.array(Dest).min(1),
+  destinations: z.array(DestChoice).min(1),
   attachmentsNeeded: z.array(z.string()),
 })
 export type CardDraft = z.infer<typeof CardDraft>
@@ -44,15 +43,20 @@ export const CARD_INSTRUCTION = `あなたは libretto の事実係です。本�
 出力は次の形の JSON だけにしてください。
 ${JSON.stringify(CARD_EXAMPLE)}`
 
-export function cardViolations(d: CardDraft, attachments: readonly string[], gdoc = false): string[] {
+const BASIC = destChoices({ google: false, files: false })
+export function cardViolations(
+  d: CardDraft,
+  attachments: readonly string[],
+  dests: readonly DestChoice[] = BASIC,
+): string[] {
   const v = d.attachmentsNeeded
     .filter((a) => !attachments.includes(a))
     .map((a) => `attachmentsNeeded の「${a}」は添付の名前にありません。添付の名前からそのまま選んでください`)
   if (new Set(d.destinations).size !== d.destinations.length) v.push('destinations に同じものを 2 回書かないでください')
-  return [...v, ...destViolations(d.destinations, gdoc)]
+  return [...v, ...destViolations(d.destinations, dests)]
 }
 
-type Deps = { home: string; invoke: (job: Job) => Promise<Outcome>; signal: AbortSignal; gdoc?: boolean }
+type Deps = { home: string; invoke: (job: Job) => Promise<Outcome>; signal: AbortSignal; dests?: DestChoice[] }
 export type CardSource = { subject: string; from: string; attachments: string[]; body?: string; slack?: boolean }
 
 // 要約と提案。ok:false は失敗（stopped なら止めた）。書き直しは話し相手が候補の中の会話で行う（6.4 (5)）
@@ -68,14 +72,14 @@ export async function draftCard(
       { name: src.slack ? 'チャンネル' : '件名', text: src.subject },
       { name: src.slack ? '投稿者' : '差出人', text: src.from },
       { name: '添付の名前', text: JSON.stringify(src.attachments) },
-      destMaterial(!!d.gdoc),
+      destMaterial(d.dests ?? BASIC),
       ...(src.body ? [{ name: src.slack ? '外部資料（Slack の投稿）' : '外部資料（メール）', text: src.body }] : []),
     ],
     access: 'none',
     output: {
       kind: 'json',
       schema: withoutNulls(CardDraft),
-      accept: (x) => cardViolations(x as CardDraft, src.attachments, !!d.gdoc),
+      accept: (x) => cardViolations(x as CardDraft, src.attachments, d.dests),
     },
     limits: CARD_LIMITS,
     signal: d.signal,

@@ -12,16 +12,13 @@ const code = (fn: Extract<Check['judge'], { by: 'code' }>['fn'], title: string, 
   judge: { by: 'code', fn, args: {} },
   summary,
 })
+// 見た目は描き出したページごとに「判定役・画像」が見る（6.8 (3)）
+export const LOOKS_QUESTION = 'このページの文字や図が、枠からはみ出さず、重ならず、欠けずに収まっている'
 const LOOKS: Item = {
   category: '見た目',
-  title: '文字や図がすべて枠の中に収まっている',
-  judge: {
-    by: 'claude',
-    question: '文字や図がすべて枠の中に収まっているか',
-    materials: ['images'],
-    scope: 'document',
-  },
-  summary: '枠からはみ出した文字や図があります',
+  title: 'どのページも、文字や図が枠からはみ出さず、重ならず、欠けずに収まっている',
+  judge: { by: 'claude', question: LOOKS_QUESTION, materials: ['images'], scope: 'document' },
+  summary: '枠からはみ出したり、重なったり、欠けたりしている文字や図があります',
 }
 const PAGE = code(
   'pageRoundTrip',
@@ -35,15 +32,20 @@ const PASTE = code(
 )
 const DOCS = code(
   'docsRoundTrip',
-  'Google ドキュメントに保存した本文が元の本文と段落ごとに一致する',
+  '文書に保存した本文が元の本文と段落ごとに一致する',
   '保存した文書の本文が元の本文と食い違っています',
 )
 const SHEETS = code(
   'sheetsRoundTrip',
-  'Google スプレッドシートに保存した値が元の表と一致する',
+  '表に保存したセルの値と式が元の表と一致する',
   '保存した表の値が元の表と食い違っています',
 )
 const FORMULAS = code('xlsxNoFormulaErrors', '表の式がすべて計算結果を返す', '表の式にエラーが出ています')
+const SLIDES = code(
+  'slidesRoundTrip',
+  'スライドに保存した題と本文が元の本文と段落ごとに一致する',
+  '保存したスライドの字が元の本文と食い違っています',
+)
 const PAGES = code(
   'pptxNoBlankPages',
   'スライドを画像にしたとき、すべてのページに内容がある',
@@ -136,9 +138,9 @@ function itemsFor(t: DeliveryTarget): Item[] {
     case 'gsheet':
       return [SHEETS, FORMULAS]
     case 'gslide':
-      return [PAGES, LOOKS]
+      return [SLIDES, PAGES, LOOKS]
     case 'file':
-      return t.format === 'pptx' ? [PAGES, LOOKS] : t.format === 'xlsx' ? [FORMULAS] : [LOOKS]
+      return t.format === 'pptx' ? [SLIDES, PAGES, LOOKS] : t.format === 'xlsx' ? [SHEETS, FORMULAS] : [DOCS, LOOKS]
   }
 }
 

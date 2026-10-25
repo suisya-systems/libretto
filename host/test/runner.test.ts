@@ -1444,7 +1444,7 @@ describe('Google ドキュメントの届け先（6.5）', () => {
       name: 'x',
       parents: ['root'],
       appProperties: { librettoAttempt: a.attemptId },
-      docx: readFileSync(join(caseDir(home, id), 'versions/01/outputs', OUTPUT_FILES.gdoc)),
+      docx: readFileSync(join(caseDir(home, id), 'versions/01/outputs', OUTPUT_FILES.docx)),
       mimeType: 'application/vnd.google-apps.document',
     })
     ledger.close()

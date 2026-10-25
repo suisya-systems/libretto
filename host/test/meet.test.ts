@@ -174,9 +174,9 @@ describe('会議メモの読み取り（6.7 (2)(3)）', () => {
   })
   it('出力の例は型と受け入れ規則に通り、無い番号・重なった番号は落ちる', () => {
     expect(MeetDraft.parse(MEET_EXAMPLE)).toEqual(MEET_EXAMPLE)
-    expect(meetViolations(MEET_EXAMPLE, 2, false)).toEqual([])
-    expect(meetViolations(MEET_EXAMPLE, 1, false)).toHaveLength(1)
-    expect(meetViolations({ items: [pick(1, '本人'), pick(1, '曖昧')] }, 2, false)).toHaveLength(1)
+    expect(meetViolations(MEET_EXAMPLE, 2, ['page', 'paste'])).toEqual([])
+    expect(meetViolations(MEET_EXAMPLE, 1, ['page', 'paste'])).toHaveLength(1)
+    expect(meetViolations({ items: [pick(1, '本人'), pick(1, '曖昧')] }, 2, ['page', 'paste'])).toHaveLength(1)
   })
   it('候補 id は項目の文の空白を詰めた指紋', () => {
     expect(meetCandidateId('f1', 'a b')).toBe(meetCandidateId('f1', 'ab'))

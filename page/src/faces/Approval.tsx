@@ -1,5 +1,5 @@
 // 承認の面（画面 4。docs/implementation.md 6.2.5 (8)）。承認待ち kind=完成稿。本文・前の版との違い・チェックの結果を 1 画面に
-import { type CaseView, DraftDiff, type HostStatus } from '@libretto/shared/api'
+import { type CaseView, DraftDiff, destChoiceOf, type HostStatus } from '@libretto/shared/api'
 import { JEV_PARTIAL } from '@libretto/shared/checks'
 import { useEffect, useState } from 'react'
 import { Link } from 'wouter'
@@ -76,7 +76,7 @@ export function ApprovalFace({
   const [changing, setChanging] = useState(false)
   const [picked, setPicked] = useState<ReadonlySet<string>>(new Set())
   const startChange = () => {
-    setPicked(new Set(c.deliveryPlan.targets.map((t) => t.kind)))
+    setPicked(new Set(c.deliveryPlan.targets.map(destChoiceOf)))
     setChanging(true)
   }
   const change = async () => {
