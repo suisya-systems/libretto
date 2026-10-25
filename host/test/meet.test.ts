@@ -172,6 +172,11 @@ describe('会議メモの読み取り（6.7 (2)(3)）', () => {
     const items = actionItems(text)?.items ?? []
     expect(items).toEqual(['[岩間 涼] 資料を作る', '[山田 花子] 予約する', '【チーム】 共有する'])
     expect(items.map(assigneeOf)).toEqual(['岩間 涼', '山田 花子', 'チーム'])
+    // 「Gemini で」で始まる項目では切らない（注意書きは「Gemini で作成…」）
+    expect(actionItems('Next steps\nGemini で資料の下書きを作る\n* [岩間 涼] 送る')?.items).toEqual([
+      'Gemini で資料の下書きを作る',
+      '[岩間 涼] 送る',
+    ])
     expect(actionItems('推奨される次のステップ\nこの会議では推奨される次のステップは見つかりませんでした。')).toEqual({
       items: [],
       truncated: false,

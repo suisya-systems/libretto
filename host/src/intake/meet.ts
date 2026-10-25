@@ -41,7 +41,7 @@ const BULLET = /^\s*(?:[*\-•・●○◦▪■]|\d+[.)．])\s*/
 // チェックリストの印（書き出しで `☐` か `[ ]` になる）。残すと `[ ]` を担当と読み、後ろの `[担当]` を取りこぼす
 const CHECK = /^(?:[☐☑☒]|\[[ xX]?\])\s*/
 // 末尾の注意書き（「Gemini が作成したメモは…」「You should review Gemini's notes…」）。項目の中の「Gemini」では切らない
-const FOOTER = /^(Gemini\s?(が|は|に|の|で|can|may|makes)|You should review Gemini)/i
+const FOOTER = /^(Gemini\s?(が|は|に|の|で作成|can|may|makes)|You should review Gemini)/i
 const NOTHING =
   /^(なし|ありません|特にありません|.*次のステップ(は|が)(ありません|見つかりませんでした)|None|No (suggested )?next steps.*)[。.]?$/i
 const plain = (line: string) => line.replace(/^[#\s📝]+/u, '').replace(/[:：\s]+$/, '')
