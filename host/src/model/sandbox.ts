@@ -44,8 +44,9 @@ export const rulePath = (p: string) => {
   return m ? `//${m[1]?.toLowerCase()}/${m[2]?.replaceAll('\\', '/')}` : `/${p}`
 }
 
-// 作り手の CLI に --settings で渡す読み取り拒否（8.5 の並び＋ undecided・jobs・calls。8.9 (4)）。configDir は claude の設定の置き場
-export function denyRules(home: string, configDir: string): string[] {
+// 作り手の CLI に --settings で渡す読み取り拒否（8.5 の並び＋ undecided・jobs・calls。8.9 (4)）。configDir は claude の設定の置き場。
+// secrets はコードの置き場の .env.local（ホームの外に置かれても読ませない。6.6 (2)）
+export function denyRules(home: string, configDir: string, secrets: readonly string[] = []): string[] {
   const h = rulePath(home)
   return [
     `Read(${h}/cases/**/checks/**)`,
@@ -60,6 +61,7 @@ export function denyRules(home: string, configDir: string): string[] {
     `Read(${h}/google.json)`,
     `Read(${h}/calls/**)`,
     `Read(${rulePath(configDir)}/**)`,
+    ...secrets.map((f) => `Read(${rulePath(f)})`),
   ]
 }
 
@@ -76,13 +78,14 @@ export type SettingsInput = {
   rgArgv0?: boolean // rg が無く、claude を ripgrep として起こす
   rg?: string | undefined
   reopen?: string[] // 隔離の点検の対照で開け直すディレクトリ（8.10 (4)）
+  secrets?: readonly string[] // .env.local（6.6 (2)）
 }
 
 // 案件ごとの srt の設定（8.3・8.9 (3)）。純関数
 export function srtSettings(i: SettingsInput) {
   return {
     filesystem: {
-      denyRead: [i.userHome, i.home, i.configDir],
+      denyRead: [i.userHome, i.home, i.configDir, ...(i.secrets ?? [])],
       // npm で入れた claude（JS）はパッケージのディレクトリごと要る
       allowRead: [
         i.work,
@@ -123,6 +126,7 @@ export type SandboxOptions = {
   userHome?: string
   rg?: string // ripgrep として起こす claude の実体。既定は claude 自身（偽の CLI で包む確認用）
   reopen?: string[] // 対照: srt の allowRead に足し、CLI の拒否規則を渡さない（8.10 (4)）
+  secrets?: readonly string[] // 読ませないファイル（.env.local。あるものだけ渡す。6.6 (2)）
 }
 
 // ホームの一覧に出てよい名前: allowRead のうちホームの下にあるものの一番上の名前と、CLI が使い捨てのホームに書く .claude.json（8.4・8.10 (4)）
@@ -158,6 +162,7 @@ export function createSandbox(o: SandboxOptions) {
       rgArgv0: !onPath('rg', env) && !isScript(o.rg ?? claude),
       rg: o.rg,
       ...(o.reopen && { reopen: o.reopen }),
+      ...(o.secrets && { secrets: o.secrets }),
     })
   }
   return {
@@ -172,9 +177,13 @@ export function createSandbox(o: SandboxOptions) {
       const cleanup = () => rm(tmp, { recursive: true, force: true })
       const env = envOf(parentEnv)
       const deny = join(tmp, 'settings.json')
-      writeFileSync(deny, JSON.stringify({ permissions: { deny: denyRules(o.home, configDirOf(env, userHome)) } }), {
-        mode: 0o600,
-      })
+      writeFileSync(
+        deny,
+        JSON.stringify({ permissions: { deny: denyRules(o.home, configDirOf(env, userHome), o.secrets) } }),
+        {
+          mode: 0o600,
+        },
+      )
       // 対照は CLI の拒否規則を渡さない（strong でも拒否規則が checks/ を拒むので。8.10 (4)）
       const denyArgs = o.reopen ? [] : ['--settings', deny]
       const [, ...rest] = o.claude

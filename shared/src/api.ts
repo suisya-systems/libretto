@@ -372,6 +372,17 @@ export const ConnectionsView = z.object({
     problem: z.enum(['rate_limited', 'network', 'api_disabled']).optional(),
     docsProblem: z.literal('api_disabled').optional(), // Google Drive API が有効でない（連携のときに先に問い合わせる。6.5）
   }),
+  // Slack（6.6 (7)）。configured は .env.local にトークンがあるか。missingScopes は足りない権限の名前
+  slack: z.object({
+    configured: z.boolean(),
+    state: z.enum(['none', 'connected', 'expired']),
+    team: z.string().optional(),
+    user: z.string().optional(),
+    emoji: z.string(),
+    missingScopes: z.array(z.string()),
+    lastAt: z.string().optional(),
+    problem: z.enum(['rate_limited', 'network']).optional(),
+  }),
 })
 export type ConnectionsView = z.infer<typeof ConnectionsView>
 
@@ -390,7 +401,8 @@ export const CandidateCard = z.object({
   proposal: z.object({ docType: DocType, destination: z.array(DeliveryTarget) }),
   attachmentsNeeded: z.array(z.string()).optional(),
   attachments: z.array(z.string()).optional(), // 添付の名前の全部（中身は読まない。6.4 (4)）
-  account: z.string().optional(), // 取り込んだ本人のアドレス（読み直すときの照合。6.4 (5)）
+  account: z.string().optional(), // 取り込んだ本人のアドレス（Slack は user_id）。読み直すときの照合（6.4 (5)・6.6 (6)）
+  othersPost: z.boolean().optional(), // 他人の Slack の投稿（「○○さんの投稿を資料にします」。6.6 (5)）
 })
 export type CandidateCard = z.infer<typeof CandidateCard>
 
@@ -460,7 +472,8 @@ export const ConversationAccepted = z.object({ seq: z.number().int(), replayed: 
 export const ConversationRejected = z.object({ reason: z.enum(['busy', 'stopped', 'stale']) })
 
 // 識別子の値（'openai' など）は「出さない語」の検査の対象外（11.2）
-export const ApiKeyKind = z.enum(['openai', 'jev'])
+// slack は Slack アプリのユーザートークン（オーナー判断 2026-10-25。6.6 (2)）
+export const ApiKeyKind = z.enum(['openai', 'jev', 'slack'])
 export const ApiKeyStatus = z.discriminatedUnion('set', [
   z.object({ kind: ApiKeyKind, set: z.literal(false) }),
   z.object({ kind: ApiKeyKind, set: z.literal(true), last4: z.string().length(4), savedAt: z.string() }),

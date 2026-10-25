@@ -429,15 +429,19 @@ export const W = {
   'home.candHeading': '依頼の候補',
   'home.candRefresh': '今すぐ取り込む',
   'home.candRefreshing': '取り込んでいます',
-  'home.candEmpty': '依頼の候補はありません。メールにラベル libretto を付けると、ここに出ます',
+  'home.candEmpty':
+    '依頼の候補はありません。メールにラベル libretto を、Slack の投稿にリアクション :memo: を付けると、ここに出ます',
   'home.candLast': '{at} に取り込み',
   'cand.mark.gmail': 'ラベル libretto',
+  'cand.mark.slack': 'リアクション :memo:',
   'cand.from': '{from}・{at}',
   'cand.askLabel': '頼まれていそうなこと',
   'cand.make': '作るもの: {doc}　保存先: {dest}',
   'cand.attach': '添付「{names}」の中身は読んでいません。進めたあと、資料として貼り付けてください',
   'cand.aiNote': 'プロンプトインジェクションの疑いがある文章が入っています。libretto はその文章を無視して作業します',
   'cand.open': 'メールを開く',
+  'cand.openSlack': 'Slack で開く',
+  'cand.othersPost': '{from}さんの投稿を資料にします。引用するときは {from}さんに一言伝えてください',
   'cand.proceed': '進める',
   'cand.dismiss': '見送る',
   'cand.dismissTitle': 'この候補を見送りますか',
@@ -488,6 +492,27 @@ export const W = {
   'settings.google.result.failed': '連携できませんでした。もう一度お試しください。',
   'settings.google.startFailed': '連携を始められませんでした。もう一度お試しください。',
   'settings.google.disconnectFailed': '連携を解除できませんでした。もう一度お試しください。',
+  'settings.slack.label': 'Slack',
+  'settings.slack.use':
+    'あなたがリアクション :memo: を付けた投稿と、そのスレッドを読みます。添付のファイルは読みません。投稿やリアクションはしません',
+  'settings.slack.unsetNote':
+    'Slack から取り込むには、Slack アプリを作り、その「User OAuth Token」（xoxp- で始まるもの）をここに貼り付けてください。',
+  'settings.slack.input': 'トークンを貼り付け',
+  'settings.slack.saved': '保存しました。Slack からの取り込みを始めます。',
+  'settings.slack.invalid':
+    'Slack アプリの「User OAuth Token」（xoxp- で始まるもの）を貼り付けてください。「Bot User OAuth Token」（xoxb- で始まるもの）では取り込めません。',
+  'settings.slack.deleteTitle': 'Slack のトークンを削除しますか',
+  'settings.slack.deleteBody': 'Slack からの取り込みを止めます。出ている依頼の候補はそのまま残ります。',
+  'settings.slack.signal':
+    '取り込みの目印はリアクション :{emoji}: です。このリアクションを付けた投稿が依頼の候補に出ます。',
+  'settings.slack.as': '{team} の {user} で連携しています',
+  'settings.slack.expiredNote':
+    'Slack がこのトークンを受け付けませんでした（取り消されたか、期限が切れました）。Slack アプリの設定画面でアプリをワークスペースに入れ直し、出た「User OAuth Token」を「入れ直す」から貼り付けてください。',
+  'settings.slack.missing':
+    'Slack アプリに権限 {scopes} がありません。Slack アプリの設定画面の「OAuth & Permissions」で「User Token Scopes」に足し、アプリをワークスペースに入れ直してください。トークンが変わったら「入れ直す」から貼り付けてください。',
+  'settings.slack.problem.rate_limited': 'Slack が混み合っていたので、取り込みを次の回に回しました。',
+  'settings.slack.problem.network': 'Slack につながりませんでした。15 分後にもう一度見ます。',
+  'settings.slack.lastAt': '{at} に取り込み',
 } as const
 
 export type WKey = keyof typeof W

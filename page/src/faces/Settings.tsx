@@ -1,7 +1,7 @@
-// 設定の面（画面 7）。連携の節（Google。docs/implementation.md 6.4 (7)）、API キーの節（6.1.3 (6)。値は画面のどこにも出さない。設計書 D17）と
+// 設定の面（画面 7）。連携の節（Google と Slack。docs/implementation.md 6.4 (7)・6.6 (7)）、API キーの節（6.1.3 (6)。値は画面のどこにも出さない。設計書 D17）と
 // 動作環境の確認の節（8.10 (6)）
 import { type ApiKeyStatus, ConnectionsView, MaterialRef, Settings as SettingsSchema } from '@libretto/shared/api'
-import { useEffect, useId, useState } from 'react'
+import { type ReactNode, useEffect, useId, useState } from 'react'
 import { z } from 'zod'
 import { send, useLoad } from '../load.ts'
 import { Confirm } from '../parts/Dialog.tsx'
@@ -34,23 +34,42 @@ async function sendKey(kind: Kind, value?: string): Promise<'ok' | 'invalid' | '
 
 const day = (at: string) => at.slice(0, 10).replaceAll('-', '/')
 
-// 文は種類ごと（用途・未設定の注記・削除の確かめ。7.6 (10)）
-const TEXT: Record<Kind, Record<'label' | 'use' | 'unsetNote' | 'deleteBody', WKey>> = {
+// 文は種類ごと（用途・未設定の注記・削除の確かめ。7.6 (10)）。Slack は貼るものの名前・保存の後・形の誤りの文も自分のもの（6.6 (7)）
+type Texts = Record<'label' | 'use' | 'unsetNote' | 'deleteBody' | 'deleteTitle' | 'input' | 'saved' | 'invalid', WKey>
+const KEY_TEXT = {
+  deleteTitle: 'settings.key.deleteTitle',
+  input: 'settings.key.input',
+  saved: 'settings.key.saved',
+  invalid: 'settings.key.invalid',
+} as const
+const TEXT: Record<Kind, Texts> = {
   openai: {
+    ...KEY_TEXT,
     label: 'settings.openai.label',
     use: 'settings.openai.use',
     unsetNote: 'settings.openai.unsetNote',
     deleteBody: 'settings.openai.deleteBody',
   },
   jev: {
+    ...KEY_TEXT,
     label: 'settings.jev.label',
     use: 'settings.jev.use',
     unsetNote: 'settings.jev.unsetNote',
     deleteBody: 'settings.jev.deleteBody',
   },
+  slack: {
+    label: 'settings.slack.label',
+    use: 'settings.slack.use',
+    unsetNote: 'settings.slack.unsetNote',
+    deleteBody: 'settings.slack.deleteBody',
+    deleteTitle: 'settings.slack.deleteTitle',
+    input: 'settings.slack.input',
+    saved: 'settings.slack.saved',
+    invalid: 'settings.slack.invalid',
+  },
 }
 
-function KeyRow({ status, reload }: { status: ApiKeyStatus; reload: () => void }) {
+function KeyRow({ status, reload, children }: { status: ApiKeyStatus; reload: () => void; children?: ReactNode }) {
   const t = TEXT[status.kind]
   const id = useId()
   const [editing, setEditing] = useState(false)
@@ -101,7 +120,7 @@ function KeyRow({ status, reload }: { status: ApiKeyStatus; reload: () => void }
           }}
         >
           <label className="sr-only" htmlFor={`${id}-i`}>
-            {W['settings.key.input']}
+            {W[t.input]}
           </label>
           <input
             id={`${id}-i`}
@@ -109,7 +128,7 @@ function KeyRow({ status, reload }: { status: ApiKeyStatus; reload: () => void }
             type="password"
             autoComplete="off"
             spellCheck={false}
-            placeholder={W['settings.key.input']}
+            placeholder={W[t.input]}
             aria-describedby={notice ? `${id}-n` : undefined}
             value={value}
             onChange={(e) => setValue(e.target.value)}
@@ -144,7 +163,7 @@ function KeyRow({ status, reload }: { status: ApiKeyStatus; reload: () => void }
           </button>
           <Confirm
             trigger={W['settings.key.delete']}
-            title={W['settings.key.deleteTitle']}
+            title={W[t.deleteTitle]}
             body={W[t.deleteBody]}
             confirm={W['settings.key.delete']}
             cancel={W['settings.key.cancel']}
@@ -161,9 +180,10 @@ function KeyRow({ status, reload }: { status: ApiKeyStatus; reload: () => void }
           className={notice === 'saved' || notice === 'deleted' ? 'muted small' : 'note-alert small'}
           role={notice === 'saved' || notice === 'deleted' ? 'status' : 'alert'}
         >
-          {W[NOTICE[notice]]}
+          {W[notice === 'saved' || notice === 'invalid' ? t[notice] : NOTICE[notice]]}
         </p>
       )}
+      {children}
     </li>
   )
 }
@@ -405,8 +425,48 @@ function useResult(): Result | undefined {
   return r
 }
 
-// 連携の節。Google の行（6.4 (7)）
-function LinkSection({ g, reload }: { g: Google; reload: () => void }) {
+type SlackView = ConnectionsView['slack']
+
+// Slack の行（6.6 (7)）。トークンは API キーと同じく貼り付けて入れる（オーナー判断 2026-10-25）。下に連携の状態
+function SlackRow({ s, status, reload }: { s: SlackView; status: ApiKeyStatus; reload: () => void }) {
+  return (
+    <KeyRow status={status} reload={reload}>
+      {s.state === 'connected' && s.team && s.user && (
+        <p className="muted small">{w('settings.slack.as', { team: s.team, user: s.user })}</p>
+      )}
+      {s.state === 'expired' && (
+        <p className="note-alert small" role="alert">
+          {W['settings.slack.expiredNote']}
+        </p>
+      )}
+      {s.state === 'connected' && s.missingScopes.length > 0 && (
+        <p className="note-warn small" role="status">
+          {withCode(w('settings.slack.missing', { scopes: s.missingScopes.map((x) => `\`${x}\``).join('、') }))}
+        </p>
+      )}
+      {s.configured && <p className="muted small">{w('settings.slack.signal', { emoji: s.emoji })}</p>}
+      {s.state === 'connected' && s.problem && (
+        <p className="note-warn small">{W[`settings.slack.problem.${s.problem}`]}</p>
+      )}
+      {s.state === 'connected' && s.lastAt && (
+        <p className="muted small">{w('settings.slack.lastAt', { at: when(s.lastAt) })}</p>
+      )}
+    </KeyRow>
+  )
+}
+
+// 連携の節。Google の行（6.4 (7)）と Slack の行（6.6 (7)）
+function LinkSection({
+  g,
+  s,
+  slackKey,
+  reload,
+}: {
+  g: Google
+  s: SlackView
+  slackKey?: ApiKeyStatus | undefined
+  reload: () => void
+}) {
   const result = useResult()
   const [busy, setBusy] = useState(false)
   const [failed, setFailed] = useState<WKey>()
@@ -518,6 +578,7 @@ function LinkSection({ g, reload }: { g: Google; reload: () => void }) {
             </p>
           )}
         </li>
+        {slackKey && <SlackRow s={s} status={slackKey} reload={reload} />}
       </ul>
     </section>
   )
@@ -530,7 +591,17 @@ export function Settings() {
   return (
     <section className="face">
       <h1 className="face-title">{W['nav.settings']}</h1>
-      {env.data && <LinkSection g={env.data.google} reload={env.reload} />}
+      {env.data && (
+        <LinkSection
+          g={env.data.google}
+          s={env.data.slack}
+          slackKey={keys.data?.slack}
+          reload={() => {
+            env.reload()
+            keys.reload()
+          }}
+        />
+      )}
       {keys.problem && !keys.data ? (
         <ProblemView problem={keys.problem} retry={keys.reload} />
       ) : (
