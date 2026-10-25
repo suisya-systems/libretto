@@ -70,16 +70,18 @@ export function createSlackDm(o: { bot: Slack; user: Slack; origin?: string | un
   }
 
   const send: Sender = async (_target, notices) => {
-    gen += 1
+    const g = ++gen
+    // 送っているあいだに始めた確かめの結果は上書きしない
+    const settle = (s: SlackDmState) => g === gen && set(s)
     if (!o.bot.configured()) {
-      set('none')
+      settle('none')
       return 'gone'
     }
     const signal = AbortSignal.timeout(CALL_MS)
     const u = await who(signal)
     if (u === 'retry') return 'retry'
     if (u === 'noUser') {
-      set('noUser')
+      settle('noUser')
       return 'gone'
     }
     const r = await o.bot.call(
@@ -88,12 +90,12 @@ export function createSlackDm(o: { bot: Slack; user: Slack; origin?: string | un
       signal,
     )
     if (r.ok) {
-      set('on')
+      settle('on')
       return 'sent'
     }
     const f = failure(r)
     if (f === 'retry') return 'retry'
-    set(f)
+    settle(f)
     return 'gone'
   }
 
