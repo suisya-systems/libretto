@@ -222,26 +222,30 @@ describe('見ている端末（6.8 (2)）', () => {
     })
     ledger.putPushSubscription('s1', { endpoint: 'https://push.test/a', ...browser().sub.keys })
     const n = { id: 1, at: '', text: 't', kind: 'done' as const, path: '/', outside: true }
-    push.presence.set('s1', 'tab', true) // つながっていないタブ
+    push.presence.set('s1', 'tab', 1, true) // つながっていないタブ
     expect(await push.sender('push:s1', [n])).toBe('sent')
     expect(sent).toHaveLength(1)
 
     const away = push.presence.connect('s1', 'tab')
     const other = push.presence.connect('s1', 'back') // 裏のタブ
-    push.presence.set('s1', 'tab', true)
-    push.presence.set('s1', 'back', false)
+    push.presence.set('s1', 'tab', 2, true)
+    push.presence.set('s1', 'back', 3, false)
+    expect(await push.sender('push:s1', [n])).toBe('sent')
+    expect(sent).toHaveLength(1)
+    // 遅れて届いた前の POST（番号が古い）では上書きしない
+    push.presence.set('s1', 'tab', 1, false)
     expect(await push.sender('push:s1', [n])).toBe('sent')
     expect(sent).toHaveLength(1)
 
     // つなぎ直し: 新しいつなぎの後に前のつなぎの切れが届いても、新しいほうを消さない
     const again = push.presence.connect('s1', 'tab')
     away()
-    push.presence.set('s1', 'tab', true)
+    push.presence.set('s1', 'tab', 4, true)
     expect(await push.sender('push:s1', [n])).toBe('sent')
     expect(sent).toHaveLength(1)
 
     again()
-    push.presence.set('s1', 'tab', true)
+    push.presence.set('s1', 'tab', 5, true)
     expect(await push.sender('push:s1', [n])).toBe('sent')
     expect(sent).toHaveLength(2)
     other()

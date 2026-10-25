@@ -61,12 +61,13 @@ export async function enable(): Promise<DeviceState> {
 }
 
 // 前に出して見ているか（6.8 (2)）。変わるたびと、SSE がつながるたびにホストへ
+let sent = 0
 function presence() {
   const visible = document.visibilityState === 'visible' && document.hasFocus()
   void fetch('/api/devices/presence', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ tab: TAB, visible }),
+    body: JSON.stringify({ tab: TAB, n: ++sent, visible }),
   }).catch(() => {})
 }
 

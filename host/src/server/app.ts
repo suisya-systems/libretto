@@ -990,7 +990,7 @@ export function createServer(o: ServerOptions) {
   app.post('/api/devices/presence', async (c) => {
     const body = Presence.safeParse(await c.req.json().catch(() => undefined))
     if (!body.success) return c.json({ reason: 'invalid' }, 400)
-    push.presence.set(sessionOf(c), body.data.tab, body.data.visible)
+    push.presence.set(sessionOf(c), body.data.tab, body.data.n, body.data.visible)
     return c.body(null, 204)
   })
 

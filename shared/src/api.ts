@@ -382,7 +382,8 @@ export const PushSubscriptionInput = z.object({
 // GET /api/devices/push。subscribed はこの端末の登録をホストが持っているか、unreachable は前に送ったとき配信元に届かなかったか
 export const PushStatus = z.object({ publicKey: z.string(), subscribed: z.boolean(), unreachable: z.boolean() })
 export type PushStatus = z.infer<typeof PushStatus>
-export const Presence = z.object({ tab: z.string().min(1).max(64), visible: z.boolean() })
+// n はタブの中の通し番号（遅れて届いた前の POST で上書きしない）
+export const Presence = z.object({ tab: z.string().min(1).max(64), n: z.number().int(), visible: z.boolean() })
 
 // 止めたのは本人、保存できないのはホスト。別の欄（5.7 (8)）。signIn は Claude のログインし直し待ち（6.2.3 (7)）
 // isolation は作り手の隔離（8.9 (5)）。入口・承認の帯と設定の面が読む（8.10 (6)）

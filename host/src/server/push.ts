@@ -11,6 +11,8 @@ import type { Sender } from './notices.ts'
 // 配信元が困ったときの連絡先（RFC 8292）。127.0.0.1 や https://localhost は Safari の配信元が受け付けない
 const SUBJECT = 'https://github.com/suisya-systems/libretto'
 const TTL = 24 * 60 * 60 // 送り残しを捨てる 24 時間（6.8 (5)）と同じ
+// 配信元が応答しないまま止まっても、ほかの端末への送り出しを待たせない（届かないとして送り直す）
+const TIMEOUT_MS = 30_000
 
 const Keys = z.object({ publicKey: z.string(), privateKey: z.string() })
 // VAPID の鍵の組。初めて要るときに作り、<home>/push-keys.json（0600）に持つ（6.8 (2)）
@@ -35,7 +37,7 @@ export function createPush(d: {
 }) {
   const send = d.fetch ?? fetch
   // 端末 → タブ → 見ているか。SSE がつながっているタブだけ（切れたら見ていない。遅れて届いた POST で生き返らせない）
-  const tabs = new Map<string, Map<string, { conn: object; visible: boolean }>>()
+  const tabs = new Map<string, Map<string, { conn: object; n: number; visible: boolean }>>()
   // 配信元に届かなかった端末（ホストの外向きの通信。(7) の文）。届いたら下ろす
   const down = new Set<string>()
 
@@ -43,14 +45,16 @@ export function createPush(d: {
     connect(sessionId: string, tab: string) {
       const conn = {}
       const m = tabs.get(sessionId) ?? new Map()
-      tabs.set(sessionId, m.set(tab, { conn, visible: false }))
+      tabs.set(sessionId, m.set(tab, { conn, n: 0, visible: false }))
       return () => {
         if (m.get(tab)?.conn === conn) m.delete(tab)
       }
     },
-    set(sessionId: string, tab: string, visible: boolean) {
+    set(sessionId: string, tab: string, n: number, visible: boolean) {
       const t = tabs.get(sessionId)?.get(tab)
-      if (t) t.visible = visible
+      if (!t || n <= t.n) return
+      t.n = n
+      t.visible = visible
     },
   }
   const watching = (sessionId: string) => [...(tabs.get(sessionId)?.values() ?? [])].some((t) => t.visible)
@@ -73,7 +77,12 @@ export function createPush(d: {
       )
       let res: Response
       try {
-        res = await send(r.endpoint, { method: r.method, headers: r.headers, body: new Uint8Array(r.body) })
+        res = await send(r.endpoint, {
+          method: r.method,
+          headers: r.headers,
+          body: new Uint8Array(r.body),
+          signal: AbortSignal.timeout(TIMEOUT_MS),
+        })
       } catch (e) {
         down.add(sessionId)
         d.log?.(`push ${sessionId.slice(0, 8)}: ${e instanceof Error ? e.message : String(e)}`)
