@@ -19,8 +19,9 @@ const MAX_TRIES = 3 // 同じ版のメモでモデルが続けて失敗したら
 export const MEET_LIMITS = { maxYen: 20, timeoutMs: 120_000 }
 const DOC = 'application/vnd.google-apps.document'
 
-// 題名 `<会議名> - YYYY/MM/DD HH:MM JST - Gemini によるメモ`（設計書 4.2.1）。英語の題名も同じ形
-const TITLE = /^(.*) - (\d{4})\/(\d{2})\/(\d{2}) (\d{2}):(\d{2}) ([A-Z]{2,5}) - (Gemini によるメモ|Notes by Gemini)$/
+// 題名 `<会議名> - YYYY/MM/DD HH:MM JST - Gemini によるメモ`（設計書 4.2.1）。英語の題名も同じ形。
+// 時間帯は略号の無い地域で `GMT+05:30` の形になりうるので語 1 つなら受ける（JST でなければ createdTime を使う）
+const TITLE = /^(.*) - (\d{4})\/(\d{2})\/(\d{2}) (\d{2}):(\d{2}) (\S+) - (Gemini\s?によるメモ|Notes by Gemini)$/
 export function parseTitle(name: string, createdTime: string): { meeting: string; heldAt: string } | undefined {
   const m = TITLE.exec(name.trim())
   if (!m) return undefined
@@ -34,13 +35,15 @@ export function parseTitle(name: string, createdTime: string): { meeting: string
 
 // ponytail: 見出しの語は日本語と英語の Gemini のメモで見たもの。本物の書き出しで違えば足す
 const START =
-  /^(推奨される次のステップ|次のステップ|行動項目|アクション ?アイテム|Suggested next steps|Next steps|Action items)$/i
+  /^(推奨される次のステップ|次のステップ|行動項目|アクション\s?アイテム|Suggested next steps|Next steps|Action items)$/i
 const END = /^(まとめ|概要|詳細|Summary|Details)$/i
-const BULLET = /^\s*(?:[*\-•・●◦▪]|\d+[.)．])\s*/
+const BULLET = /^\s*(?:[*\-•・●○◦▪■]|\d+[.)．])\s*/
+// チェックリストの印（書き出しで `☐` か `[ ]` になる）。残すと `[ ]` を担当と読み、後ろの `[担当]` を取りこぼす
+const CHECK = /^(?:[☐☑☒]|\[[ xX]?\])\s*/
 // 末尾の注意書き（「Gemini が作成したメモは…」「You should review Gemini's notes…」）。項目の中の「Gemini」では切らない
-const FOOTER = /^(Gemini\s?(が|は|に|の|can|may|makes)|You should review Gemini)/i
+const FOOTER = /^(Gemini\s?(が|は|に|の|で|can|may|makes)|You should review Gemini)/i
 const NOTHING =
-  /^(なし|ありません|特にありません|推奨される次のステップはありません|None|No (suggested )?next steps.*)[。.]?$/i
+  /^(なし|ありません|特にありません|.*次のステップ(は|が)(ありません|見つかりませんでした)|None|No (suggested )?next steps.*)[。.]?$/i
 const plain = (line: string) => line.replace(/^[#\s📝]+/u, '').replace(/[:：\s]+$/, '')
 
 // 行動項目の節の項目。undefined は節が無い（見つけられません）、[] は節はあるが項目が無い（行動項目なし）
@@ -53,7 +56,7 @@ export function actionItems(text: string): { items: string[]; truncated: boolean
     const p = plain(l)
     // 次の見出しか、末尾の Gemini の注意書きで節が終わる
     if (END.test(p) || START.test(p) || FOOTER.test(p)) break
-    const item = l.replace(BULLET, '').trim()
+    const item = l.replace(BULLET, '').replace(CHECK, '').trim()
     if (item && !NOTHING.test(item)) items.push(item)
   }
   return { items: items.slice(0, MAX_ITEMS), truncated: items.length > MAX_ITEMS }
@@ -321,8 +324,8 @@ export function createMeet(d: Deps) {
   return { once }
 }
 
-// Gemini のメモの項目は頭に [担当] を書く。無ければ空（画面は「担当の記載なし」）
-export const assigneeOf = (item: string) => /^\[([^\]]+)\]/.exec(item)?.[1]?.trim() ?? ''
+// Gemini のメモの項目は頭に [担当] を書く（全角の括弧も受ける）。無ければ空（画面は「担当の記載なし」）
+export const assigneeOf = (item: string) => /^[[［【]([^\]］】]+)[\]］】]/.exec(item)?.[1]?.trim() ?? ''
 
 // 読み直し（候補の中の会話・入口の下書き役。6.7 (4)）。そのメモの行動項目の節だけ
 export async function rereadNote(g: Google, candidateId: string, signal: AbortSignal) {
