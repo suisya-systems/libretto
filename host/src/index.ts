@@ -147,6 +147,7 @@ const server = createServer({
         invoke,
         control: invokeControl,
         homeNames: (work) => sandbox.homeNames(work),
+        present: (work, paths) => sandbox.present(work, paths),
       },
       signal,
     ),

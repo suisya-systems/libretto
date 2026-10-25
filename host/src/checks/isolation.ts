@@ -24,7 +24,7 @@ export const Inventory = z.object({
 export type Inventory = z.infer<typeof Inventory>
 
 export const Verdict = z.enum(['hidden', 'visible', 'unknown'])
-// isolation.json。語は書かない。extraHome は調べ直し用で画面には出さない
+// isolation.json。語は書かない。extraHome・unseenHome は調べ直し用で画面には出さない
 export const IsolationRecord = z.object({
   at: z.string(),
   level: z.enum(['strong', 'weak', 'broken']),
@@ -35,6 +35,9 @@ export const IsolationRecord = z.object({
   homeOk: z.boolean(),
   control: z.boolean(),
   extraHome: z.array(z.string()),
+  // ホームの一覧に挙がったが、同じ起こし方で見るとホームに無いか /dev/null のかぶせ物だったので数えなかった名前
+  // （8.10 (4)・#74。前の版の記録には無い）
+  unseenHome: z.array(z.string()).optional(),
 })
 export type IsolationRecord = z.infer<typeof IsolationRecord>
 
@@ -61,6 +64,7 @@ export type ProbeDeps = {
   invoke: (job: Job) => Promise<Outcome> // 作り手と同じ起こし方
   control: (job: Job) => Promise<Outcome> // checks/ を開け直した起こし方
   homeNames: (work: string) => string[] // ホームの一覧に出てよい名前（sandbox.homeNames）
+  present?: (work: string, paths: string[]) => Promise<string[]> // 作り手と同じ起こし方で見て本当にあるもの（sandbox.present）
   userHome?: string
   now?: () => Date
 }
@@ -77,6 +81,7 @@ export async function checkIsolation(d: ProbeDeps, signal: AbortSignal): Promise
     homeOk: true,
     control: false,
     extraHome: [],
+    unseenHome: [],
   }
   // broken・版が足りないときは作り手を起こさないのと同じく呼ばない
   if (c.isolation === 'broken' || !c.claudeOk) return { at: now().toISOString(), verdict: 'unknown', ...base }
@@ -119,7 +124,15 @@ export async function checkIsolation(d: ProbeDeps, signal: AbortSignal): Promise
 
   const session = main.ok
   const allowed = new Set(d.homeNames(work))
-  const extraHome = main.ok && main.json ? (main.json as Inventory).home.filter((n) => !allowed.has(n)) : []
+  const listed = main.ok && main.json ? (main.json as Inventory).home.filter((n) => !allowed.has(n)) : []
+  // 挙がった名前を同じ起こし方で確かめ、ホームに本当にあるものだけ数える。srt は作業場の .bashrc などに /dev/null を
+  // かぶせ（中身は空）、モデルはそれをホームの一覧に混ぜて答えた（#74）
+  const userHome = d.userHome ?? homedir()
+  const paths = listed.map((n) => join(userHome, n))
+  const there = new Set(d.present ? await d.present(work, paths) : paths)
+  if (signal.aborted) return undefined
+  const extraHome = listed.filter((_, i) => there.has(paths[i] ?? ''))
+  const unseenHome = listed.filter((n) => !extraHome.includes(n))
   const homeOk = extraHome.length === 0
   const control = ctlReplies.some((t) => t.includes(token))
   // 見えた証拠を先に（8.10 (4)）
@@ -130,7 +143,18 @@ export async function checkIsolation(d: ProbeDeps, signal: AbortSignal): Promise
       : session && reached && control
         ? 'hidden'
         : 'unknown'
-  return { at: now().toISOString(), level: c.isolation, verdict, session, reached, hidden, homeOk, control, extraHome }
+  return {
+    at: now().toISOString(),
+    level: c.isolation,
+    verdict,
+    session,
+    reached,
+    hidden,
+    homeOk,
+    control,
+    extraHome,
+    unseenHome,
+  }
 }
 
 // 自己点検の理由（8.9 (5)）を画面の原因に丸める（8.10 (5)）

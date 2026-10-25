@@ -223,6 +223,7 @@ if (withProbe) {
       invoke: invokeWith(main),
       control: invokeWith(control),
       homeNames: (w) => main.homeNames(w),
+      present: (w, paths) => main.present(w, paths),
     },
     new AbortController().signal,
   )
@@ -231,6 +232,7 @@ if (withProbe) {
   row('probe: reached the work folder', !!r?.reached)
   row('probe: checks token not visible', !!r?.hidden)
   row('probe: home shows only allowed entries', !!r?.homeOk, (r?.extraHome ?? []).join(' '))
+  if (r?.unseenHome?.length) console.log(`probe: listed but absent or masked (not counted): ${r.unseenHome.join(' ')}`)
   row('probe: control sees the token (detection works)', !!r?.control)
   row('probe: verdict hidden', r?.verdict === 'hidden', r?.verdict ?? '')
   ledger.close()
