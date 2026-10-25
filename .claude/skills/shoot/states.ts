@@ -191,6 +191,10 @@ const approve = async (ctx: Ctx) => {
     mode: '確認しながら',
     setFingerprint: v.entrance.setFingerprint,
   })
+  // 長い文書は最初のバージョンの前に構成案を 1 回通す（6.12 (2)）。資料待ち・中止ならそのまま
+  const next = await ctx.until((x) => x.turn === '本人')
+  if (next.state === '承認待ち' && next.approvalKind === '構成案')
+    await ctx.act({ type: 'outline.approve', outlineFingerprint: next.outlineFingerprint as string })
 }
 const toApproval = async (ctx: Ctx) => {
   await approve(ctx)
@@ -349,6 +353,21 @@ const VOICE_SAMPLES = [
 
 const clean: Row[] = [...entrance(), draft(1), verdicts(1, false), draft(2), verdicts(2, true)]
 const hang: Row = ['作り手', { fail: 'hang' }]
+// 構成案（6.12 (2)）。goodChecks の字数（2,200〜2,800 字）は長い文書なので、作り手の最初の回は構成案になる
+const OUTLINE_MD = [
+  '# 先週のブレストのまとめ',
+  '## 決まったこと',
+  '- 来期の記事づくりで決まった 3 つの方針を、先に箇条で示す',
+  '- 方針ごとに 1 段落で、具体的に何が変わるかを書く',
+  '## そう決めた理由',
+  '- 読み手の立場で読み直すことにした背景（前期の読了率）',
+  '- 公開前のダブルチェックを足した理由',
+  '## これからの進め方',
+  '- 来月から試す手順と、うまくいったかを確かめる時期',
+  '## まとめ',
+  '- 3 つの方針を 1 行ずつで振り返る',
+].join('\n\n')
+const outlined: Row = ['作り手', { text: '構成案を書きました', write: { 'outline.md': OUTLINE_MD, 'outline.done': 'done' } }]
 // mark の項目数・件数と合わせる（Approval.tsx は本文と形式の判定を足して出す）
 const verdictOf = (v: CaseView) => ({
   passed: (v.review?.passed ?? 0) + (v.formatReview?.passed ?? 0),
@@ -475,6 +494,15 @@ export const STATES: Record<string, State> = {
     path: () => '/settings',
     sameFirst390: true, // お知らせの節は 390 の 1 画面目より下にある
   },
+  // 設定: 端末の節（この端末と、別の端末を追加する。6.12 (5)）
+  'settings-devices': {
+    script: entrance(),
+    expect: (v) => v.state === '入口待ち',
+    mark: W['settings.devices.add'],
+    selector: '.device-list',
+    path: () => '/settings',
+    sameFirst390: true, // 端末の節は 390 の 1 画面目より下にある
+  },
   // 設定: Google と連携済み（6.4 (7)）
   'settings-google': {
     script: entrance(),
@@ -590,6 +618,24 @@ export const STATES: Record<string, State> = {
     },
     expect: (v) => v.state === '下書き中',
     mark: W['progress.redoLater'],
+  },
+  // 構成案: 長い文書で、最初のバージョンの前に構成案を確かめる（6.12 (3)）
+  outline: {
+    script: [...entrance(), hang],
+    drive: async (ctx) => {
+      const v = await ctx.view()
+      if (!v.entrance) throw new Error('no entrance')
+      await ctx.act({
+        type: 'entrance.approve',
+        answers: Object.fromEntries(v.entrance.undecided.items.map((u) => [u.id, u.recommended])),
+        mode: '確認しながら',
+        setFingerprint: v.entrance.setFingerprint,
+      })
+      await ctx.until((x) => x.state === '承認待ち' && x.approvalKind === '構成案')
+    },
+    expect: (v) => v.state === '承認待ち' && v.approvalKind === '構成案' && !!v.outline,
+    mark: W['outline.lead'],
+    selector: '.outline-body',
   },
   // 承認: 2 版目で全部通った
   'approval-clean': {
@@ -742,4 +788,11 @@ export const STATES: Record<string, State> = {
     expect: (v) => v.state === '停止',
     mark: W['progress.stoppedHeading'],
   },
+}
+
+// 作り手の最初の回は構成案（6.12 (2)）。作り手を呼ぶ状態の台本の、最初の作り手の行の前に差し込む
+// （台本の配列は状態どうしで共有しているので、書き換えずに作り直す）
+for (const st of Object.values(STATES)) {
+  const i = st.script.findIndex(([role]) => role === '作り手')
+  if (i >= 0) st.script = [...st.script.slice(0, i), outlined, ...st.script.slice(i)]
 }
