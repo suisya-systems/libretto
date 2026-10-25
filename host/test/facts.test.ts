@@ -562,6 +562,12 @@ describe('判定への組み込み（6.3.1 (7)(8)）', () => {
       [true, true],
       [false, true],
     ])
+    // 支持しなかった主張の字面と場所だけを添える。単位の index は抜粋のある主張の並び（6.2.10 (1)）
+    const unsupported = out.judged.facts?.claims.find((c) => c.text.includes('300 人'))
+    expect(r.failedSummaries.at(-1)).toBe(
+      `${checks[5]?.summary}\n  - 「${unsupported?.text}」（${unsupported?.where}）`,
+    )
+    expect(r.failedSummaries.join()).not.toContain('数が違います')
     expect(r.marks).toEqual([{ claimId: 'M01', text: '東京が最大の拠点だ。', where: '見出し「題」の 3 段落目' }])
     expect(r.sources).toEqual([{ ref: URL_A, title: '調査', verdict: '支持', claimIds: ['K01'] }])
     expect(r.jevNote).toBeDefined() // Jev を使っていない

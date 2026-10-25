@@ -261,6 +261,36 @@ describe('機械判定（6.2.5 (2)）', () => {
       expect((await paste(bad)).units).toEqual([false])
   })
 
+  it('コード書式の外のコマンドや設定の名前を数え、名前を添える（6.2.10 (3)）', async () => {
+    const names = (md: string) => run(code('unmarkedNames', {}, { kind: 'count', max: 0 }), md)
+    const bad = await names(
+      [
+        '# 題',
+        '',
+        '## /review の使い方',
+        '',
+        '--dry-run と -p を付け、settings.json の ANTHROPIC_API_KEY を見ます。（/stop でも止まる）',
+        '',
+        '`--ok` と `x.json` は書式付き。Node.js・設定.json・2-3 件・A/B・[説明](https://e.com/a.json) は名前ではない。',
+        '',
+        '```sh',
+        'claude --inside-fence',
+        '```',
+      ].join('\n'),
+    )
+    expect(bad.units).toEqual([false, true, true, false])
+    expect(bad.measured).toEqual({ hits: 2, gap: 6 })
+    expect(bad.told).toEqual([
+      'コード書式（`）になっていない名前: /review、--dry-run、-p、/stop、settings.json、ANTHROPIC_API_KEY',
+    ])
+    const ok = await names('`--dry-run` を付けます。')
+    expect([ok.units, ok.told]).toEqual([[false], undefined])
+    // 同じ段落の名前を直した分が gap で測れる
+    expect((await names('--a --b --c')).measured?.gap).toBe(3)
+    expect((await names('`--a` `--b` --c')).measured?.gap).toBe(1)
+    expect(DRAFTER_FNS).toContain('unmarkedNames')
+  })
+
   it('表の例は args の zod に通る', () => {
     for (const [fn, f] of Object.entries(FNS)) {
       expect(f.args.safeParse(f.example).success, fn).toBe(true)
@@ -489,6 +519,57 @@ describe('judge() の段取り（7.3）', () => {
     // モデル判定の要約は 1 行のまま、unable は返さない（6.2.9 (3)・6.2.7 (3)）
     const c05 = goodChecks.find((c) => c.id === 'C05')?.summary
     expect(r.failedSummaries).toEqual([c05])
+  })
+
+  it('モデル判定で落ちた項目には、落ちた節・段落を番号と本文の字面で添える。理由文は返さない（6.2.10 (1)）', async () => {
+    const model = (id: string, judge: Check['judge'], pass: Check['pass']): Check =>
+      ({ ...(goodChecks[1] as Check), id, judge, pass, summary: `要約 ${id}` }) as Check
+    const checks = [
+      goodChecks[0] as Check,
+      model('C02', { by: 'claude', question: 'q', materials: ['draft'], scope: 'section' }, { kind: 'all' }),
+      model(
+        'C03',
+        { by: 'jev', proposition: 'p', state: ['paragraph'], scope: 'paragraph' },
+        { kind: 'count', max: 0 },
+      ),
+      model('C04', { by: 'claude', question: 'q', materials: ['draft'], scope: 'document' }, { kind: 'all' }),
+    ]
+    const reply: JudgeReply = {
+      results: [
+        {
+          id: 'C02',
+          // 節 2 は落ち、節 4 は決められない（null は箇所に入れない）
+          units: [0, 1, 2, 3].map((index) => ({ index, yes: index === 1 ? false : index === 3 ? null : true })),
+          reason: '2 つ目の節は二つの機能をまとめています。',
+        },
+        {
+          id: 'C03',
+          // count は「はい」が問題のある単位。同じ字面の段落は番号で見分ける
+          units: [0, 1, 2, 3, 4].map((index) => ({ index, yes: index === 2 || index === 4 })),
+          reason: '段落の理由。',
+        },
+        { id: 'C04', units: [{ index: 0, yes: false }], reason: '全体の理由。' },
+      ],
+    }
+    const { invoke } = setup([{ role: '判定役・文章', nth: 1, reply: { text: JSON.stringify(reply) } }])
+    const out = await judge({ ...input, checks, input: { md } }, invoke)
+    if (!out.ok) throw new Error(out.out.detail)
+    const r = out.judged.body
+    expect(r.failedSummaries).toEqual([
+      '要約 C02\n  - 2 つ目の節「二」',
+      '要約 C03\n  - 3 段落目「段落。」（「二」の下）\n  - 5 段落目「段落。」（「四」の下）',
+      '要約 C04', // 本文全体の項目は箇所が 1 つなので添えない
+    ])
+    expect(r.failedSummaries.join()).not.toContain('機能')
+    // 段落の先頭は 20 字で切る
+    const one = {
+      ...reply,
+      results: [{ id: 'C03', units: [0, 1, 2, 3, 4].map((index) => ({ index, yes: index === 0 })), reason: 'r' }],
+    }
+    const s2 = setup([{ role: '判定役・文章', nth: 1, reply: { text: JSON.stringify(one) } }])
+    const out2 = await judge({ ...input, checks: [checks[0] as Check, checks[2] as Check], input: { md } }, s2.invoke)
+    if (!out2.ok) throw new Error(out2.out.detail)
+    expect(out2.judged.body.failedSummaries).toEqual([`要約 C03\n  - 1 段落目「${'あ'.repeat(20)}…」（「題」の下）`])
   })
 
   it('目標の数が依頼書にあれば、機械判定の要約に目標と今の値を添える（6.2.9 (2)）', async () => {

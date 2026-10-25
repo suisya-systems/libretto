@@ -18,7 +18,7 @@ import { type BriefFile, type CaseRecord, type FactsFile, VersionManifest } from
 import { z } from 'zod'
 import { MAX_ROUNDS, transition } from '../case/transition.ts'
 import { CANARY_SUMMARY, formatItems } from '../checks/host-items.ts'
-import { draftVoice, FNS, type FnInput, needsVoice, runCode } from '../checks/judgeable.ts'
+import { claimLine, draftVoice, FNS, type FnInput, needsVoice, one, runCode } from '../checks/judgeable.ts'
 import { paragraphUnits, sections } from '../checks/text.ts'
 import { docxText } from '../deliver/docx.ts'
 import { supportsClaims } from '../facts/claims.ts'
@@ -236,6 +236,7 @@ export async function judge(
   const reasons: Record<string, string> = {}
   let jevUsed = false
   let jevPartial = false
+  let claimIds: string[] = [] // 事実の支持の単位の index → 主張の id（抜粋のある主張だけ）
 
   // 1. 機械判定を全部。事実の関数の前に 1 回だけ棚卸しをする（6.3.1 (7)）
   const needsFacts = (c: Check) => c.judge.by === 'code' && !!FNS[c.judge.fn]?.facts
@@ -286,6 +287,7 @@ export async function judge(
       }
       const f = facts
       const ids = [...f.excerpts.keys()]
+      claimIds = ids
       const textOf = (id: string) => f.file.claims.find((x) => x.id === id)?.text as string
       const sup = await supportsClaims(
         ids.map((id) => ({ claim: textOf(id), excerpt: f.excerpts.get(id) as string })),
@@ -412,6 +414,12 @@ export async function judge(
 
   const ordered = checks.map((c) => results.get(c.id) as CheckResult)
   const summaryOf = new Map(checks.map((c) => [c.id, c.summary]))
+  for (const c of checks) {
+    const r = results.get(c.id) as CheckResult
+    if (r.by === 'code' || r.verdict !== 'fail') continue
+    const places = placesOf(c, r, j.input.md, facts && { ids: claimIds, file: facts.file })
+    if (places.length) told.set(c.id, places)
+  }
   return {
     ok: true,
     judged: {
@@ -419,7 +427,7 @@ export async function judge(
         results: ordered,
         pass: ordered.every((r) => r.verdict === 'pass'),
         // unable は作り手には直せないので返さない（本人にだけ見せる。6.2.7 (3)）。
-        // 機械判定の項目は要約の下に目標と今の値・本文の文を字下げして添える（6.2.9）
+        // 機械判定の項目は要約の下に目標と今の値・本文の文を、モデル判定の項目は落ちた箇所を字下げして添える（6.2.9・6.2.10）
         failedSummaries: ordered
           .filter((r) => r.verdict === 'fail')
           .map((r) => [summaryOf.get(r.id) as string, ...(told.get(r.id) ?? []).map((t) => `  - ${t}`)].join('\n')),
@@ -436,6 +444,25 @@ export async function judge(
       ...(facts && { facts: facts.file }),
     },
   }
+}
+
+// モデル判定の fail に添える箇所（6.2.10 (1)）。合格を妨げた単位（null は入れない）を本文の字面と番号で示す。理由文は返さない
+const LEAD = 20
+function placesOf(c: Check, r: CheckResult, md: string, claim?: { ids: string[]; file: FactsFile }): string[] {
+  const bad = (r.units ?? []).filter((u) => (c.pass.kind === 'count' ? u.yes === true : u.yes === false))
+  if (isClaimCheck(c)) return claim ? bad.flatMap((u) => claimLine(claim.file, claim.ids[u.index] as string)) : []
+  const scope = scopeOf(c)
+  if (scope === 'document') return []
+  const us = unitsOf(scope, md)
+  return bad.flatMap(({ index }) => {
+    const u = us[index]
+    if (!u) return []
+    // 見出しの無い本文は全体で 1 節なので、節の箇所は言わない
+    if (scope === 'section') return u.heading ? [`${index + 1} つ目の節「${one(u.heading)}」`] : []
+    const t = [...one(u.text)]
+    const lead = t.length > LEAD ? `${t.slice(0, LEAD).join('')}…` : t.join('')
+    return [`${index + 1} 段落目「${lead}」${u.heading ? `（「${one(u.heading)}」の下）` : ''}`]
+  })
 }
 
 const needsSamples = (c: Check) => c.judge.by === 'claude' && c.judge.materials.includes('voice-samples')
