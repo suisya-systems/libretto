@@ -10,6 +10,7 @@ import { Ledger } from '../src/ledger/ledger.ts'
 import { createFake, type ScriptEntry } from '../src/model/fake.ts'
 import { type CostCapNotice, createInvoke, DETAIL, type Job } from '../src/model/invoke.ts'
 import { MODEL_BY_ROLE, modelFor } from '../src/model/roles.ts'
+import { BRIEF_EXAMPLE, BriefDraft, briefViolations } from '../src/roles/entrance.ts'
 
 let ledger: Ledger
 let notices: CostCapNotice[]
@@ -399,6 +400,42 @@ describe('JSON の読み取りの形の違い（6.2.2 (3)）', () => {
     const out = await invoke(job({ role: '下書き役・確認項目', fallback: true, output: { kind: 'json', schema: Out } }))
     expect(out).toMatchObject({ ok: true, json: { title: 'x' }, family: 'claude' })
     expect(fake.calls).toHaveLength(1)
+  })
+
+  it('前後の文や ``` の位置によらず読む（GitHub #65 の 1 回目は JSON の後ろに閉じの ``` だけ）', async () => {
+    const brief = JSON.stringify(BRIEF_EXAMPLE, null, 2)
+    const texts = [
+      `${brief}\n\`\`\``,
+      `依頼書です。\n\`\`\`json\n${brief}\n\`\`\`\n仮定は確認してください。`,
+      `空欄は {} です。\n${brief}\n（注: {日付} は後で決めます）`,
+    ]
+    for (const text of texts) {
+      const { invoke, fake } = setup([{ role: R, nth: 1, reply: { text } }])
+      const out = await invoke(
+        job({ output: { kind: 'json', schema: BriefDraft, accept: (x) => briefViolations(x as BriefDraft) } }),
+      )
+      expect(out, text).toMatchObject({ ok: true, json: BRIEF_EXAMPLE })
+      expect(fake.calls).toHaveLength(1)
+    }
+  })
+
+  it('文字列の中の } は数えない。型に合う JSON が 2 つあれば選ばずに言い直す', async () => {
+    const { invoke, fake } = setup([
+      { role: R, nth: 1, reply: { text: '例: {"title":"a"}\n答え: {"title":"b"}' } },
+      { role: R, nth: 2, reply: { text: '答え: {"title":"}{"}' } },
+    ])
+    const out = await invoke(job({ output: { kind: 'json', schema: Out } }))
+    expect(out).toMatchObject({ ok: true, json: { title: '}{' } })
+    expect(fake.calls[1]?.materials.at(-1)).toMatchObject({ text: expect.stringContaining('2 つ以上') })
+  })
+
+  it('読めた候補がどれも型に合わなければ、いちばん大きい候補の違反を返す', async () => {
+    const { invoke, fake } = setup([
+      { role: R, nth: 1, reply: { text: '{"a":1} {"title":1,"long":"xxxxxxxx"}' } },
+      { role: R, nth: 2, reply: { text: 'まだ' } },
+    ])
+    await invoke(job({ output: { kind: 'json', schema: Out } }))
+    expect(fake.calls[1]?.materials.at(-1)).toMatchObject({ text: expect.stringMatching(/^title: /) })
   })
 })
 

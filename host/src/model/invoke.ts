@@ -65,6 +65,43 @@ export const withoutNulls = <T extends z.ZodType>(schema: T) =>
     return v
   }, schema)
 
+// `{` から対応する `}` の位置（文字列の中の括弧は数えない）。閉じなければ -1
+function closing(s: string, start: number): number {
+  let depth = 0
+  let inString = false
+  for (let i = start; i < s.length; i++) {
+    const c = s[i]
+    if (inString) {
+      if (c === '\\') i++
+      else if (c === '"') inString = false
+    } else if (c === '"') inString = true
+    else if (c === '{') depth++
+    else if (c === '}' && --depth === 0) return i
+  }
+  return -1
+}
+
+// 出力の中の JSON の候補（6.2.2 (3)・GitHub #65）。全体が JSON ならそれだけ。
+// そうでなければ前から `{` ごとに対応する `}` までを読み、読めたらその後ろから続ける（前置きの文・``` の位置・後ろの注記によらない）
+function jsonCandidates(text: string): unknown[] {
+  try {
+    return [JSON.parse(text)]
+  } catch {}
+  const found: unknown[] = []
+  let i = text.indexOf('{')
+  while (i !== -1) {
+    const end = closing(text, i)
+    if (end !== -1)
+      try {
+        found.push(JSON.parse(text.slice(i, end + 1)))
+        i = text.indexOf('{', end + 1)
+        continue
+      } catch {}
+    i = text.indexOf('{', i + 1)
+  }
+  return found
+}
+
 // 呼び出しの結果のファイル（9.4 (7)）。中身が書き、invoke が精算のあとに消す
 export const callFile = (dir: string, callId: string) => join(dir, `${callId}.json`)
 
@@ -182,15 +219,16 @@ export function createInvoke(deps: Deps) {
       const missing = out.expect.filter((f) => !reply.files?.includes(f))
       return { errors: missing.map((f) => `書かれていないファイル: ${f}`) }
     }
-    let value: unknown
-    try {
-      // 全体を ``` で囲んだ形も JSON として読む（言い直しの 1 回を囲みだけで使わない）
-      value = JSON.parse(reply.text.trim().replace(/^```(?:json)?\s*\n([\s\S]*)\n```$/, '$1'))
-    } catch {
-      // パーサーの文は出力の一部を含むので書かない（logs/ に他人の文が残らないように。6.4 (3)）
-      return { errors: ['JSON として読めません'] }
-    }
-    const parsed = out.schema.safeParse(value)
+    // 囲みや前後の文があっても JSON を読む（言い直しの 1 回を形の違いで使わない）
+    const found = jsonCandidates(reply.text.trim())
+    // パーサーの文は出力の一部を含むので書かない（logs/ に他人の文が残らないように。6.4 (3)）
+    if (!found.length) return { errors: ['JSON として読めません'] }
+    // 型に合う候補が 1 つならそれ。2 つ以上はどれが答えか決めずに言い直し。どれも合わなければいちばん大きい候補の違反を返す
+    const results = found.map((v) => ({ r: out.schema.safeParse(v), size: JSON.stringify(v)?.length ?? 0 }))
+    const valid = results.filter((x) => x.r.success)
+    if (valid.length > 1)
+      return { errors: ['型に合う JSON が 2 つ以上あります。答えの JSON を 1 つだけ返してください'] }
+    const parsed = (valid[0] ?? results.reduce((a, b) => (b.size > a.size ? b : a))).r
     if (!parsed.success)
       return { errors: parsed.error.issues.map((i) => `${i.path.join('.') || '(全体)'}: ${i.message}`) }
     const errors = out.accept?.(parsed.data) ?? []

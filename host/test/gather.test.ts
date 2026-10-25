@@ -219,6 +219,24 @@ describe('依頼書の「libretto が集めるもの」（6.3.3 (1)）', () => {
     expect(briefViolations(draft({}, '見出しは 4 つに分ける'))).toEqual([])
   })
 
+  it('集めない・調べないと書いた仮定は当てない（GitHub #65 の A5）。集める言い方は当てたまま', () => {
+    for (const a of [
+      'ウェブで情報を集めず、出典も付けない',
+      '公式サイトは調べない',
+      'ネットでは探しません',
+      '公開の情報は集めなくてよい',
+    ])
+      expect(briefViolations(draft({}, a)), a).toEqual([])
+    for (const a of [
+      '社内は調べず、公式の更新履歴から集める',
+      '公式の更新履歴から情報を集めないといけない',
+      '公式の情報を調べなくてはならない',
+      'ウェブで探します',
+      'ネットで調べながら書く',
+    ])
+      expect(briefViolations(draft({}, a)), a).toEqual([expect.stringContaining('gather に書き')])
+  })
+
   it('重複と直訳調は違反', () => {
     expect(briefViolations(draft({ gather: ['a', 'a'], sources: '出典付き' }))).toEqual([
       expect.stringContaining('同じもの'),
