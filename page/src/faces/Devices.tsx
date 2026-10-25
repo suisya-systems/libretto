@@ -2,7 +2,7 @@
 import { DeviceList, Pairing } from '@libretto/shared/api'
 import { useState } from 'react'
 import type { z } from 'zod'
-import { send, useLoad } from '../load.ts'
+import { useLoad } from '../load.ts'
 import { Confirm } from '../parts/Dialog.tsx'
 import { W, w } from '../wording.ts'
 
@@ -43,7 +43,11 @@ export function DeviceSection() {
   const remove = async (id: string) => {
     setBusy(true)
     setProblem(undefined)
-    if (!(await send('DELETE', `/api/devices/${encodeURIComponent(id)}`))) setProblem('removeFailed')
+    // send() は 503 を「届いた」とみなす（緊急停止用）。外すのは保存できなければ外れていないので res.ok で見る
+    const ok = await fetch(`/api/devices/${encodeURIComponent(id)}`, { method: 'DELETE' })
+      .then((r) => r.ok)
+      .catch(() => false)
+    if (!ok) setProblem('removeFailed')
     setBusy(false)
     list.reload()
   }

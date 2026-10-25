@@ -10,6 +10,7 @@ import { W, w } from '../src/wording.ts'
 
 let devices: { id: string; label: string; at: string; current: boolean }[]
 let pairingUrl: string
+let removeStatus: number
 const sent: { method: string; path: string; body?: unknown }[] = []
 beforeEach(() => {
   sent.length = 0
@@ -18,12 +19,14 @@ beforeEach(() => {
     { id: 'phone', label: '私のスマホ', at: '2026-10-21T10:00:00+09:00', current: false },
   ]
   pairingUrl = 'https://pc.example.ts.net/pair/abc'
+  removeStatus = 204
   vi.stubGlobal('fetch', async (path: string, init: RequestInit = {}) => {
     const method = init.method ?? 'GET'
     if (path === '/api/devices' && method === 'GET') return new Response(JSON.stringify({ devices }))
     sent.push({ method, path, ...(init.body && { body: JSON.parse(String(init.body)) }) })
     if (path === '/api/devices')
       return new Response(JSON.stringify({ url: pairingUrl, expiresAt: '2026-10-24T01:15:00.000Z' }))
+    if (path.startsWith('/api/devices/') && removeStatus !== 204) return new Response('{}', { status: removeStatus })
     if (path.startsWith('/api/devices/')) {
       devices = devices.filter((d) => `/api/devices/${d.id}` !== path)
       return new Response(null, { status: 204 })
@@ -82,6 +85,20 @@ describe('端末の節', () => {
     await r.click(confirm)
     expect(sent).toEqual([{ method: 'DELETE', path: '/api/devices/phone' }])
     await vi.waitFor(() => expect(r.text()).not.toContain('私のスマホ'))
+    r.done()
+  })
+  it('保存できず外せなかった（503）ときは外せなかったと出す', async () => {
+    removeStatus = 503
+    const r = await render()
+    await r.click(
+      r.el.querySelector(`button[aria-label="${w('settings.devices.removeLabel', { label: '私のスマホ' })}"]`) ??
+        undefined,
+    )
+    await r.click(
+      [...document.querySelectorAll('.dialog button')].find((b) => b.textContent === W['settings.devices.remove']),
+    )
+    await vi.waitFor(() => expect(r.text()).toContain(W['settings.devices.removeFailed']))
+    expect(r.text()).toContain('私のスマホ')
     r.done()
   })
   it('別の端末を追加する: 名前を入れて追加用のアドレスと期限を出す', async () => {
