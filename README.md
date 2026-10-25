@@ -9,7 +9,7 @@ libretto watches your Google Meet notes, Slack, and Gmail. When a task comes up,
 
 ### Auto mode (おまかせ)
 
-- With Auto mode on, libretto starts work by itself on Gmail messages and Slack posts marked with a specific label or emoji, and on action items that meeting notes assign by name as next steps.
+- With Auto mode on, libretto starts work by itself on Gmail messages and Slack posts marked with a specific label or emoji, and on action items that meeting notes assign to you by name as next steps.
 - If a task produces something other people will see, libretto always asks you for a final check first.
 
 ### Task extraction
@@ -28,7 +28,7 @@ Anthropic's [Claude Tag](https://claude.com/docs/claude-tag) and OpenAI's [dots]
 ### With libretto, you manage the workflow yourself
 
 - The steps from receiving a request to sending out the result are public, so anyone can read them (the [transition table](docs/implementation.md)).
-- What you approve and answer is kept on your machine with timestamps, and is never edited or deleted afterwards. Work that moved forward automatically in Auto mode is recorded as such.
+- Records of your approvals and of how each task progressed are kept on your machine with timestamps, and are never edited or deleted afterwards. Work that moved forward automatically in Auto mode is recorded as such.
 - You choose Auto mode or Review mode (確認しながら) for each source, such as Gmail, Slack, or meeting notes, so you decide where libretto stops to ask you.
 - The workflow and records live on your PC, and the model each role uses can be swapped out in a table (the [role-and-model table](host/src/model/roles.ts)).
 - You can fork libretto and customize it for your own work, building on these records and mechanisms.
