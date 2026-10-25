@@ -13,9 +13,11 @@ import { callsDir, initHome } from '../src/ledger/db.ts'
 import { createClaudeCli, resolveClaude } from '../src/model/claude-cli.ts'
 import { type Call, createInvoke } from '../src/model/invoke.ts'
 import { checkSandbox, createSandbox, onPath } from '../src/model/sandbox.ts'
+import { listedNames, putRow, recordName, tableRow } from './isolation-record.ts'
 
 const withModel = process.argv.includes('--model')
 const withProbe = process.argv.includes('--probe')
+let verdict: string | undefined
 const record = process.argv.includes('--record')
 const tok = () => randomBytes(12).toString('hex')
 const home = realpathSync(mkdtempSync(join(tmpdir(), 'libretto-live-')))
@@ -97,12 +99,7 @@ if (check.isolation === 'strong') {
     readFileSync(files.versions ?? '', 'utf8') === `${tokens.versions}\n`,
     line('writeVersions'),
   )
-  const listed = (k: string) =>
-    line(k)
-      .slice(k.length + 1)
-      .trim()
-      .split(/\s+/)
-      .filter(Boolean)
+  const listed = (k: string) => listedNames(line(k).slice(k.length + 1))
   row(
     'shell: home shows only allowed entries',
     listed('home').every((n) => allowed.has(n)),
@@ -234,6 +231,7 @@ if (withProbe) {
   row('probe: home shows only allowed entries', !!r?.homeOk, (r?.extraHome ?? []).join(' '))
   if (r?.unseenHome?.length) console.log(`probe: listed but absent or masked (not counted): ${r.unseenHome.join(' ')}`)
   row('probe: control sees the token (detection works)', !!r?.control)
+  verdict = r?.verdict
   row('probe: verdict hidden', r?.verdict === 'hidden', r?.verdict ?? '')
   ledger.close()
 }
@@ -244,7 +242,7 @@ console.log(`\n${rows.length - failed.length}/${rows.length} passed. LIBRETTO_HO
 // 結果の表を docs/verification/ に書く（8.10 (7)）。手で直さず、流した結果をそのまま残す
 if (record) {
   const day = new Date().toISOString().slice(0, 10)
-  const out = fileURLToPath(new URL(`../../docs/verification/isolation-${platform()}-${day}.md`, import.meta.url))
+  const out = fileURLToPath(new URL(`../../docs/verification/${recordName(platform(), day)}`, import.meta.url))
   const md = [
     `# 隔離の確認（${platform()}・${day}）`,
     '',
@@ -267,5 +265,15 @@ if (record) {
   mkdirSync(dirname(out), { recursive: true })
   writeFileSync(out, md)
   console.log(`recorded: ${out}`)
+  // 記録の表のこの OS の行も差し替える（流した人は 2 つのファイルを送るだけでよい）
+  const table = fileURLToPath(new URL('../../docs/verification/isolation.md', import.meta.url))
+  const at = { platform: platform(), day, node: process.version, claude: check.claudeVersion ?? 'unknown' }
+  const next = putRow(
+    readFileSync(table, 'utf8'),
+    platform(),
+    tableRow({ ...at, isolation: check.isolation, verdict, rows }),
+  )
+  if (next) writeFileSync(table, next)
+  console.log(next ? `updated: ${table}` : `not updated (no ${platform()} row): ${table}`)
 }
 process.exit(failed.length ? 1 : 0)
