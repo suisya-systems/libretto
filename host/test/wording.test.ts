@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { NOTICE, SAY, STEP } from '../src/case/transition.ts'
 import { TALK } from '../src/roles/conversation.ts'
+import { PAIR } from '../src/server/app.ts'
 import { SLACK_DM } from '../src/server/slack-dm.ts'
 
 const md = readFileSync(new URL('../../docs/ui-wording.md', import.meta.url), 'utf-8')
@@ -35,5 +36,8 @@ describe('ui-wording.md のホストが作る文', () => {
   it('TALK の 7 個', () => {
     expect(Object.keys(TALK)).toHaveLength(7)
     expect(table('**話し相手の代わりに会話欄に書く 1 行')).toEqual(TALK)
+  })
+  it('追加用のアドレスを開いたときの確かめの画面の 6 個', () => {
+    expect(table('**追加用のアドレスを開いたときの確かめの画面')).toEqual(PAIR)
   })
 })

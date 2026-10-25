@@ -22,7 +22,7 @@ npm run dev:host # terminal 1: host allows the Vite origin and prints a pairing 
 npm run dev      # terminal 2: http://127.0.0.1:5173
 ```
 
-Open the pairing URL from terminal 1 (`http://127.0.0.1:5173/pair/...`) once, then use `http://127.0.0.1:5173`.
+Open the pairing URL from terminal 1 (`http://127.0.0.1:5173/pair/...`) and press the button on that page once, then use `http://127.0.0.1:5173`.
 
 ## License
 

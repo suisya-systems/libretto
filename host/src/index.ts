@@ -189,7 +189,7 @@ let loopback: ReturnType<typeof serve> | undefined
 const http = serve({ fetch: server.app.fetch, port, hostname: bind }, () => {
   const { url } = server.issuePairing('最初の端末', true)
   console.log(`libretto: http://${bind}:${port}`)
-  console.log(`Open this URL once on the device to pair (valid 10 minutes): ${url}`)
+  console.log(`Open this URL on the device and press the button to pair (once, valid 10 minutes): ${url}`)
   if (['127.0.0.1', '0.0.0.0', '::'].includes(bind)) return
   loopback = serve({ fetch: server.app.fetch, port, hostname: '127.0.0.1' })
   loopback.on('error', (e: NodeJS.ErrnoException) => {

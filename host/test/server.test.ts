@@ -6,7 +6,7 @@ import { CaseView, HomeView, Settings } from '@libretto/shared/api'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { transition } from '../src/case/transition.ts'
 import { initHome } from '../src/ledger/db.ts'
-import type { Ledger } from '../src/ledger/ledger.ts'
+import { jst, type Ledger } from '../src/ledger/ledger.ts'
 import { readKey } from '../src/model/keys.ts'
 import { createRuns, Stopped } from '../src/runs.ts'
 import { COOKIE, createServer, SESSION_DAYS } from '../src/server/app.ts'
@@ -48,9 +48,10 @@ afterEach(() => {
   ledger.close()
 })
 
+const POST = { method: 'POST' }
 async function pair(headers: Record<string, string> = {}) {
   const { url } = server.issuePairing('テスト')
-  const res = await server.app.request(new URL(url).pathname, { headers })
+  const res = await server.app.request(new URL(url).pathname, { method: 'POST', headers })
   expect(res.status).toBe(303)
   const set = res.headers.get('set-cookie') ?? ''
   expect(set.startsWith(`${COOKIE}=`)).toBe(true)
@@ -85,7 +86,7 @@ const action = (type: string, rest: Record<string, unknown> = {}, caseId = 'c1')
 describe('ペアリングと Cookie（5.4・5.7 (1)）', () => {
   it('Cookie は Path=/・HttpOnly・SameSite=Lax・Max-Age=400 日。HTTP では Secure を付けない', async () => {
     const { url } = server.issuePairing('スマホ')
-    const res = await server.app.request(new URL(url).pathname)
+    const res = await server.app.request(new URL(url).pathname, { method: 'POST' })
     const set = res.headers.get('set-cookie') ?? ''
     expect(set).toMatch(/Path=\//)
     expect(set).toMatch(/HttpOnly/)
@@ -96,22 +97,29 @@ describe('ペアリングと Cookie（5.4・5.7 (1)）', () => {
   })
   it('HTTPS の後ろ（X-Forwarded-Proto: https）では Secure', async () => {
     const { url } = server.issuePairing('スマホ')
-    const res = await server.app.request(new URL(url).pathname, { headers: { 'x-forwarded-proto': 'https' } })
+    const res = await server.app.request(new URL(url).pathname, {
+      method: 'POST',
+      headers: { 'x-forwarded-proto': 'https' },
+    })
     expect(res.headers.get('set-cookie')).toMatch(/Secure/)
   })
   it('トークンは使い切りで、10 分で失効する', async () => {
     const { url } = server.issuePairing('スマホ')
     const path = new URL(url).pathname
-    expect((await server.app.request(path)).status).toBe(303)
+    expect((await server.app.request(path, POST)).status).toBe(303)
+    expect((await server.app.request(path, POST)).status).toBe(410)
     expect((await server.app.request(path)).status).toBe(410)
     const other = new URL(server.issuePairing('もう 1 台').url).pathname
     clock = new Date(clock.getTime() + 10 * 60_000)
     expect((await server.app.request(other)).status).toBe(410)
+    expect((await server.app.request(other, POST)).status).toBe(410)
   })
   it('起動時の URL は pairing.txt に書き、使ったら消す', async () => {
     server.issuePairing('最初の端末', true)
     const url = readFileSync(join(home, 'pairing.txt'), 'utf-8').trim()
     await server.app.request(new URL(url).pathname)
+    expect(existsSync(join(home, 'pairing.txt'))).toBe(true)
+    await server.app.request(new URL(url).pathname, POST)
     expect(existsSync(join(home, 'pairing.txt'))).toBe(false)
   })
   it('台帳には Cookie の値ではなく sha256 を書く', () => {
@@ -133,7 +141,7 @@ describe('ペアリングと Cookie（5.4・5.7 (1)）', () => {
   it('POST /api/devices は新しい URL を 1 回分出す', async () => {
     const res = await send('POST', '/api/devices', { label: 'スマホ' })
     const { url } = await res.json()
-    expect((await server.app.request(new URL(url).pathname)).status).toBe(303)
+    expect((await server.app.request(new URL(url).pathname, POST)).status).toBe(303)
   })
   it('GET /api/devices はつないでいる端末とこの端末の印。外した・寿命の切れた端末は出さない（6.12 (5)）', async () => {
     const phone = await pair()
@@ -149,6 +157,37 @@ describe('ペアリングと Cookie（5.4・5.7 (1)）', () => {
     clock = new Date(clock.getTime() + SESSION_DAYS * 86_400_000)
     const later = await pair()
     expect((await (await get('/api/devices', later)).json()).devices).toHaveLength(1)
+  })
+  it('先読みの GET・HEAD では使い切らない。確かめの画面で押した POST で追加する（Issue 64 の再現）', async () => {
+    const before = (await (await get('/api/devices')).json()).devices.length
+    const { url } = server.issuePairing('私のスマホ')
+    const path = new URL(url).pathname
+    // チャットのアプリのリンクのプレビューとアプリの中のブラウザが先に開く
+    const head = await server.app.request(path, { method: 'HEAD' })
+    expect(head.status).toBe(200)
+    expect(head.headers.get('set-cookie')).toBeNull()
+    const preview = await server.app.request(path)
+    expect(preview.status).toBe(200)
+    expect(preview.headers.get('set-cookie')).toBeNull()
+    expect(preview.headers.get('cache-control')).toBe('no-store')
+    const page = await preview.text()
+    expect(page).toContain('私のスマホ')
+    expect(page).toContain(`${jst(new Date(clock.getTime() + 10 * 60_000)).slice(11, 16)} まで使えます`)
+    expect(page).toContain('<form method="post">')
+    expect((await (await get('/api/devices')).json()).devices).toHaveLength(before)
+    // 人がブラウザで開き直して押す
+    expect((await server.app.request(path)).status).toBe(200)
+    const res = await server.app.request(path, POST)
+    expect(res.status).toBe(303)
+    expect(res.headers.get('set-cookie')).toMatch(new RegExp(`^${COOKIE}=`))
+    expect((await (await get('/api/devices')).json()).devices).toHaveLength(before + 1)
+  })
+  it('確かめの画面の端末の名前はエスケープする', async () => {
+    const res = await send('POST', '/api/devices', { label: '<script>x</script>' })
+    const { url } = await res.json()
+    const page = await (await server.app.request(new URL(url).pathname)).text()
+    expect(page).not.toContain('<script>')
+    expect(page).toContain('&lt;script&gt;')
   })
   it('Tailscale の HTTPS の起点があれば、ペアリングの URL はそれで組む（スマホは 127.0.0.1 を開けない）', () => {
     const s = createServer({

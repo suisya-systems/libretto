@@ -39,7 +39,7 @@ import { autoEnter, quotesOthers, writeIntake } from '../case/auto.ts'
 import { createRunner } from '../case/runner.ts'
 import { transition } from '../case/transition.ts'
 import { type IsolationRecord, readIsolation, writeIsolation } from '../checks/isolation.ts'
-import { diff, renderHtml } from '../checks/text.ts'
+import { diff, escapeHtml, renderHtml } from '../checks/text.ts'
 import type { Tools } from '../deliver/render.ts'
 import { fileVersions, pageVersions } from '../deliver/run.ts'
 import { readGathered } from '../facts/gather.ts'
@@ -93,6 +93,16 @@ export const COOKIE = 'libretto_session'
 export const SESSION_DAYS = 400
 const SESSION_MS = SESSION_DAYS * 86_400_000
 const PAIRING_MS = 10 * 60_000
+// 追加用のアドレスを開いたときの確かめの画面の文（docs/ui-wording.md）
+export const PAIR = {
+  'pairConfirm.title': 'この端末を追加しますか',
+  'pairConfirm.name': '追加する端末: {label}',
+  'pairConfirm.unnamed': '名前のない端末',
+  'pairConfirm.expires': '{at} まで使えます',
+  'pairConfirm.browser':
+    'いつも使うブラウザで開いてから押してください。チャットのアプリの中で開いたときは、アドレスをコピーしてブラウザに貼ってください。',
+  'pairConfirm.add': 'この端末を追加する',
+}
 
 const sha256 = (s: string) => createHash('sha256').update(s).digest('hex')
 const DeviceInput = z.object({ label: z.string().trim().min(1).max(60) })
@@ -384,13 +394,34 @@ export function createServer(o: ServerOptions) {
   const app = new Hono()
 
   // 1. 公開（Cookie 不要）
-  app.get('/pair/:token', (c) => {
-    const token = c.req.param('token')
+  // 開くだけ（GET・HEAD）では確かめの画面を出し、台帳にもトークンにも触れない。
+  // チャットのアプリのリンクの先読みも GET を飛ばすので、使い切るのは押したとき（POST）だけ（6.12 (7)）
+  const pairing = (c: Context) => {
+    const token = c.req.param('token') ?? ''
     const p = pairings.get(token)
-    if (!p || p.expiresAt <= now().getTime()) {
-      pairings.delete(token)
-      return c.html('<p>この URL はもう使えません。ホストを動かしている PC で新しい URL を出してください。</p>', 410)
-    }
+    if (p && p.expiresAt > now().getTime()) return { token, p }
+    pairings.delete(token)
+    return c.html('<p>この URL はもう使えません。ホストを動かしている PC で新しい URL を出してください。</p>', 410)
+  }
+  app.get('/pair/:token', (c) => {
+    const r = pairing(c)
+    if (r instanceof Response) return r
+    const at = jst(new Date(r.p.expiresAt)).slice(11, 16)
+    return c.html(
+      `<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>${PAIR['pairConfirm.title']}</title>` +
+        `<h1>${PAIR['pairConfirm.title']}</h1>` +
+        `<p>${escapeHtml(PAIR['pairConfirm.name'].replace('{label}', r.p.label || PAIR['pairConfirm.unnamed']))}</p>` +
+        `<p>${PAIR['pairConfirm.expires'].replace('{at}', at)}</p>` +
+        `<p>${PAIR['pairConfirm.browser']}</p>` +
+        `<form method="post"><button type="submit">${PAIR['pairConfirm.add']}</button></form></html>`,
+      200,
+      { 'cache-control': 'no-store' },
+    )
+  })
+  app.post('/pair/:token', (c) => {
+    const r0 = pairing(c)
+    if (r0 instanceof Response) return r0
+    const { token, p } = r0
     const value = randomBytes(32).toString('base64url')
     const r = writing(c, () => ledger.appendSession('created', sha256(value), p.label))
     if (r instanceof Response) return r

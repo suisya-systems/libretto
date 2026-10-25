@@ -590,9 +590,9 @@ describe('設定の入り切り（6.8 (6)）', () => {
       log: () => {},
     })
     const { url } = server.issuePairing('t')
-    const cookie = ((await server.app.request(new URL(url).pathname)).headers.get('set-cookie') ?? '').split(
-      ';',
-    )[0] as string
+    const cookie = (
+      (await server.app.request(new URL(url).pathname, { method: 'POST' })).headers.get('set-cookie') ?? ''
+    ).split(';')[0] as string
     const headers = { cookie, origin: 'http://127.0.0.1:7780', 'content-type': 'application/json' }
     const prefs = await (await server.app.request('/api/settings/notices', { headers })).json()
     expect(prefs).toEqual({

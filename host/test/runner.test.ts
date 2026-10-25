@@ -150,7 +150,7 @@ async function setup(entries: ScriptEntry[], wrap: (b: Backend) => Backend = han
     ...(tools && { tools }),
   })
   const { url } = server.issuePairing('テスト')
-  const res = await server.app.request(new URL(url).pathname)
+  const res = await server.app.request(new URL(url).pathname, { method: 'POST' })
   cookie = (res.headers.get('set-cookie') ?? '').split(';')[0] as string
 }
 afterEach(async () => {

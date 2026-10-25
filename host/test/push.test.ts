@@ -89,9 +89,9 @@ afterEach(() => ledger.close())
 
 async function pair() {
   const { url } = server.issuePairing('t')
-  const cookie = ((await server.app.request(new URL(url).pathname)).headers.get('set-cookie') ?? '').split(
-    ';',
-  )[0] as string
+  const cookie = (
+    (await server.app.request(new URL(url).pathname, { method: 'POST' })).headers.get('set-cookie') ?? ''
+  ).split(';')[0] as string
   return { cookie, origin: ORIGIN, 'content-type': 'application/json' }
 }
 const subscribe = (headers: Record<string, string>, sub: unknown) =>

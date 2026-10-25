@@ -46,7 +46,9 @@ async function setup(o: { user?: boolean; bot?: boolean; origins?: string[] } = 
     log: () => {},
   })
   const { url } = server.issuePairing('テスト')
-  cookie = ((await server.app.request(new URL(url).pathname)).headers.get('set-cookie') ?? '').split(';')[0] as string
+  cookie = (
+    (await server.app.request(new URL(url).pathname, { method: 'POST' })).headers.get('set-cookie') ?? ''
+  ).split(';')[0] as string
 }
 afterEach(async () => {
   ledger?.close()
