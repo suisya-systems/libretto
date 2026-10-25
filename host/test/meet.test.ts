@@ -181,6 +181,9 @@ describe('会議メモの読み取り（6.7 (2)(3)）', () => {
   it('候補 id は項目の文の空白を詰めた指紋', () => {
     expect(meetCandidateId('f1', 'a b')).toBe(meetCandidateId('f1', 'ab'))
     expect(meetCandidateId('f1', 'a')).toMatch(/^meet:f1:[0-9a-f]{12}$/)
+    // 300 字を超える項目も全文で見分ける
+    const long = 'あ'.repeat(300)
+    expect(actionItems(NOTE_TEXT([`${long}い`, `${long}う`]))?.items).toEqual([`${long}い`, `${long}う`])
   })
 })
 

@@ -54,7 +54,7 @@ export function actionItems(text: string): { items: string[]; truncated: boolean
     // 次の見出しか、末尾の Gemini の注意書きで節が終わる
     if (END.test(p) || START.test(p) || FOOTER.test(p)) break
     const item = l.replace(BULLET, '').trim()
-    if (item && !NOTHING.test(item)) items.push(item.slice(0, MAX_ITEM))
+    if (item && !NOTHING.test(item)) items.push(item)
   }
   return { items: items.slice(0, MAX_ITEMS), truncated: items.length > MAX_ITEMS }
 }
@@ -164,7 +164,8 @@ export async function readNote(g: Google, fileId: string, signal: AbortSignal) {
   return r.ok ? { ok: true as const, items: actionItems(r.json) } : r
 }
 
-const numbered = (items: readonly string[]) => items.map((x, i) => `${i + 1}. ${x}`).join('\n')
+// 候補 id は項目の全文から作り、モデルに渡すところだけ 1 項目 MAX_ITEM 字で切る（先頭が同じ長い項目を同じ id にしない）
+const numbered = (items: readonly string[]) => items.map((x, i) => `${i + 1}. ${x.slice(0, MAX_ITEM)}`).join('\n')
 
 type Deps = {
   home: string
