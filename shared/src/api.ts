@@ -371,6 +371,9 @@ export const ConnectionsView = z.object({
     lastAt: z.string().optional(),
     problem: z.enum(['rate_limited', 'network', 'api_disabled']).optional(),
     docsProblem: z.literal('api_disabled').optional(), // Google Drive API が有効でない（連携のときに先に問い合わせる。6.5）
+    meet: z.boolean(), // 会議メモ（Meet が作ったファイル）を読む権限があるか（無ければ連携し直しを促す。6.7 (1)）
+    meetLastAt: z.string().optional(),
+    meetProblem: z.enum(['rate_limited', 'network', 'api_disabled']).optional(),
   }),
   // Slack（6.6 (7)）。configured は .env.local にトークンがあるか。missingScopes は足りない権限の名前
   slack: z.object({
@@ -428,6 +431,15 @@ export const HomeView = z.object({
   autoStarted: z.array(CaseCard),
   active: z.array(CaseCard),
   defaults: EntranceDefaults,
+  // 窓の中で読んだ会議メモのうち、候補にならなかったもの（「行動項目なし」と「見つけられません」。6.7 (5)）
+  meetNotes: z.array(
+    z.object({
+      title: z.string(),
+      heldAt: z.string(),
+      link: z.string(),
+      result: z.enum(['none', 'unreadable', 'notMine']),
+    }),
+  ),
   // 取り込み（6.4 (7)）。connected でないときは候補の欄を、候補があるときだけ出す
   intake: z.object({ connected: z.boolean(), running: z.boolean(), lastAt: z.string().optional() }),
   host: HostStatus,

@@ -53,12 +53,18 @@ export function toCard(ledger: Ledger, c: CaseRecord): CaseCard {
 const doneAt = (ledger: Ledger, caseId: string) =>
   ledger.listCaseEvents(caseId).findLast((e) => e.type === 'transition' && e.to === '完了' && e.from !== '完了')?.at
 
-export function homeView(ledger: Ledger, host: HostStatus, intake: HomeView['intake']): HomeView {
+export function homeView(
+  ledger: Ledger,
+  host: HostStatus,
+  intake: HomeView['intake'],
+  meetNotes: HomeView['meetNotes'] = [],
+): HomeView {
   const open = ledger.listCases(OPEN).map((c) => toCard(ledger, c))
   return {
     yourTurn: open.filter((c) => c.turn === '本人'),
     notices: ledger.listNotices(20),
     candidates: candidateLists(ledger),
+    meetNotes,
     autoStarted: open.filter((c) => c.auto),
     active: open.filter((c) => c.turn === 'libretto'),
     defaults: DEFAULTS,

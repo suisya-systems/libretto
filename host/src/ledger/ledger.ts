@@ -58,6 +58,17 @@ export const CardContent = CandidateCard.omit({
 })
 export type CardContent = z.infer<typeof CardContent>
 export type NewCandidate = Omit<CandidateRecord, 'status' | 'caseId' | 'updatedAt'>
+// 読んだ会議メモ 1 つ（6.7 (2)(3)）。notMine は行動項目はあるが本人の担当が無い
+export type MeetNote = {
+  account: string
+  fileId: string
+  title: string
+  heldAt: string
+  link: string
+  modifiedTime: string
+  result: 'items' | 'none' | 'unreadable' | 'notMine'
+  truncated: boolean
+}
 type CandidateEventInput = {
   [K in CandidateEvent['type']]: Omit<Extract<CandidateEvent, { type: K }>, 'seq' | 'at'>
 }[CandidateEvent['type']]
@@ -548,6 +559,50 @@ export class Ledger {
     this.#db.prepare('DELETE FROM candidate_cards WHERE candidate_id = ?').run(candidateId)
   }
 
+  getMeetNote(account: string, fileId: string): MeetNote | undefined {
+    const r = this.#db.prepare('SELECT * FROM meet_notes WHERE account = ? AND file_id = ?').get(account, fileId) as
+      | Row
+      | undefined
+    return r && meetNote(r)
+  }
+
+  putMeetNote(n: MeetNote) {
+    this.#db
+      .prepare(
+        `INSERT INTO meet_notes (account, file_id, title, held_at, link, modified_time, result, truncated, read_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (account, file_id) DO UPDATE SET title = excluded.title, held_at = excluded.held_at,
+           link = excluded.link, modified_time = excluded.modified_time, result = excluded.result,
+           truncated = excluded.truncated, read_at = excluded.read_at`,
+      )
+      .run(
+        n.account,
+        n.fileId,
+        n.title,
+        n.heldAt,
+        n.link,
+        n.modifiedTime,
+        n.result,
+        n.truncated ? 1 : 0,
+        jst(this.#now()),
+      )
+  }
+
+  // 会議の日時が since より後のもの。新しい順（ホームの 1 行。6.7 (5)）
+  listMeetNotes(account: string, since: string, limit: number): MeetNote[] {
+    return (
+      this.#db
+        .prepare('SELECT * FROM meet_notes WHERE account = ? AND held_at > ? ORDER BY held_at DESC LIMIT ?')
+        .all(account, since, limit) as Row[]
+    ).map(meetNote)
+  }
+
+  isSuppressed(kind: 'sender' | 'channel', value: string): boolean {
+    return !!this.#db
+      .prepare('SELECT 1 FROM suppressions WHERE kind = ? AND value = ? AND removed_at IS NULL')
+      .get(kind, value)
+  }
+
   addSuppression(kind: 'sender' | 'channel', value: string, reason: string) {
     this.#db
       .prepare('INSERT INTO suppressions (kind, value, reason, added_at) VALUES (?, ?, ?, ?)')
@@ -878,3 +933,14 @@ export class Ledger {
     return (this.#db.prepare('SELECT * FROM costs WHERE case_id = ? ORDER BY seq').all(caseId) as Row[]).map(toCost)
   }
 }
+
+const meetNote = (r: Row): MeetNote => ({
+  account: r.account as string,
+  fileId: r.file_id as string,
+  title: r.title as string,
+  heldAt: r.held_at as string,
+  link: r.link as string,
+  modifiedTime: r.modified_time as string,
+  result: r.result as MeetNote['result'],
+  truncated: r.truncated === 1,
+})

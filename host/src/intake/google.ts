@@ -9,7 +9,9 @@ import { writeSecret } from '../model/keys.ts'
 export const GMAIL_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly'
 // libretto が作ったファイルだけを作る・書き出す・探す（6.5 (1)）。本人のほかのファイルは読めない
 export const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file'
-const SCOPES = [GMAIL_SCOPE, DRIVE_SCOPE]
+// Google Meet が作った・編集したファイルだけを読む（会議メモ。6.7 (1)）。ほかのファイルは読めない
+export const MEET_SCOPE = 'https://www.googleapis.com/auth/drive.meet.readonly'
+const SCOPES = [GMAIL_SCOPE, DRIVE_SCOPE, MEET_SCOPE]
 export const GOOGLE_ENDPOINTS = {
   auth: 'https://accounts.google.com/o/oauth2/v2/auth',
   token: 'https://oauth2.googleapis.com/token',
@@ -133,11 +135,16 @@ export function createGoogle(o: {
   return {
     configured: !!o.config,
     generation: () => generation,
-    // docs: Google ドキュメントに保存できる権限があるか（前の連携は Gmail だけ。連携し直すと付く。6.5 (2)）
-    status(): { state: 'none' | 'connected' | 'expired'; email?: string; docs: boolean } {
+    // docs: Google ドキュメントに保存できる権限があるか（前の連携は Gmail だけ。連携し直すと付く。6.5 (2)）。meet は会議メモ（6.7 (1)）
+    status(): { state: 'none' | 'connected' | 'expired'; email?: string; docs: boolean; meet: boolean } {
       const saved = o.config ? load() : undefined
-      if (!saved) return { state: 'none', docs: false }
-      return { state: expired ? 'expired' : 'connected', email: saved.email, docs: saved.scopes.includes(DRIVE_SCOPE) }
+      if (!saved) return { state: 'none', docs: false, meet: false }
+      return {
+        state: expired ? 'expired' : 'connected',
+        email: saved.email,
+        docs: saved.scopes.includes(DRIVE_SCOPE),
+        meet: saved.scopes.includes(MEET_SCOPE),
+      }
     },
 
     // POST /api/connections/google/start。origin は Origin の検査を通った要求の起点（戻った後にそこへ返す）

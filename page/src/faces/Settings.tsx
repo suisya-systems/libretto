@@ -507,6 +507,7 @@ function LinkSection({
               <h3 className="key-label">{W['settings.google.label']}</h3>
               <p className="muted small">{W['settings.google.use']}</p>
               <p className="muted small">{W['settings.google.useDocs']}</p>
+              <p className="muted small">{W['settings.google.useMeet']}</p>
             </div>
             <span className={`badge ${badge} key-status`}>{W[label]}</span>
           </div>
@@ -525,7 +526,14 @@ function LinkSection({
               {W['settings.google.docsMissing']}
             </p>
           )}
+          {/* 会議メモは Meet のファイルの許可を足して連携し直す（6.7 (1)） */}
+          {g.state === 'connected' && !g.meet && (
+            <p className="note-warn small" role="status">
+              {W['settings.google.meetMissing']}
+            </p>
+          )}
           {g.configured && <p className="muted small">{w('settings.google.signal', { label: g.label })}</p>}
+          {g.configured && <p className="muted small">{W['settings.google.meetSignal']}</p>}
           {g.state === 'connected' && g.labelFound === false && (
             <p className="note-warn small">{w('settings.google.labelMissing', { label: g.label })}</p>
           )}
@@ -537,12 +545,15 @@ function LinkSection({
           {g.state === 'connected' && g.problem && (
             <p className="note-warn small">{W[`settings.google.problem.${g.problem}`]}</p>
           )}
+          {g.state === 'connected' && g.meetProblem && (
+            <p className="note-warn small">{W[`settings.google.meetProblem.${g.meetProblem}`]}</p>
+          )}
           {g.state === 'connected' && g.lastAt && (
             <p className="muted small">{w('settings.google.lastAt', { at: when(g.lastAt) })}</p>
           )}
           {g.configured && (
             <div className="key-actions">
-              {(g.state !== 'connected' || !g.docs) && (
+              {(g.state !== 'connected' || !g.docs || !g.meet) && (
                 <>
                   <button
                     type="button"

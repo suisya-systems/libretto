@@ -31,6 +31,7 @@ const view = (over: Partial<HomeView> = {}): HomeView => ({
   autoStarted: [],
   active: [],
   defaults: { 会話: '確認しながら', gmail: '確認しながら', slack: '確認しながら', meet: '確認しながら' },
+  meetNotes: [],
   intake: { connected: true, running: false, lastAt: '2026-10-24T10:15:00.000+09:00' },
   host,
   ...over,
@@ -170,6 +171,69 @@ describe('依頼の候補（6.4 (7)）', () => {
     })
     const r = await render()
     expect(r.text()).not.toContain(W['home.candHeading'])
+    r.done()
+  })
+})
+
+describe('会議メモ（6.7 (5)）', () => {
+  const meet = (over: Partial<CandidateCard>): CandidateCard => ({
+    ...card,
+    id: 'meet:f1:aaaaaaaaaaaa',
+    source: 'meet',
+    origin: '会議',
+    confidence: '高',
+    aiInstructionFlag: false,
+    subject: 'ブレスト',
+    from: '岩間 涼',
+    link: 'https://docs.google.com/document/d/f1/edit',
+    attachmentsNeeded: [],
+    attachments: [],
+    ...over,
+  })
+  it('会議のしるしと担当、推測・低は折りたたみと理由。候補にならなかったメモを分けて出す', async () => {
+    home = view({
+      candidates: {
+        signal: [],
+        meeting: [meet({})],
+        inferred: {
+          high: [],
+          mid: [],
+          low: [
+            meet({
+              id: 'meet:f1:bbbbbbbbbbbb',
+              origin: '推測',
+              confidence: '低',
+              from: '',
+              reason: '担当がチームです',
+            }),
+          ],
+        },
+      },
+      meetNotes: [
+        {
+          title: '定例',
+          heldAt: '2026-10-24T10:00:00.000+09:00',
+          link: 'https://docs.google.com/document/d/f2/edit',
+          result: 'none',
+        },
+        {
+          title: '朝会',
+          heldAt: '2026-10-24T09:00:00.000+09:00',
+          link: 'https://docs.google.com/document/d/f3/edit',
+          result: 'unreadable',
+        },
+      ],
+    })
+    const r = await render()
+    expect(r.text()).toContain(W['cand.mark.meet.高'])
+    expect(r.text()).toContain(w('cand.meetFrom', { from: '岩間 涼', at: '10/24 10:05' }))
+    expect(r.text()).toContain(w('home.lowFold', { n: 1 }))
+    expect(r.text()).toContain(W['cand.mark.inferred.低'])
+    expect(r.text()).toContain(w('cand.meetFrom', { from: W['cand.noAssignee'], at: '10/24 10:05' }))
+    expect(r.text()).toContain(w('cand.why', { why: '担当がチームです' }))
+    expect(r.text()).toContain(w('home.meetNote.none', { title: '定例', at: '10/24 10:00' }))
+    expect(r.text()).toContain(w('home.meetNote.unreadable', { title: '朝会', at: '10/24 09:00' }))
+    expect(r.text()).toContain(W['cand.openMeet'])
     r.done()
   })
 })

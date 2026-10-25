@@ -10,6 +10,7 @@ import costRecoveries from './migrations/0003-cost-recoveries.ts'
 import conversation from './migrations/0004-conversation.ts'
 import candidateAttachments from './migrations/0005-candidate-attachments.ts'
 import candidateOthersPost from './migrations/0006-candidate-others-post.ts'
+import meetNotes from './migrations/0007-meet-notes.ts'
 
 // 添字 + 1 が user_version。足すときは末尾に 1 本足す
 export const MIGRATIONS: readonly string[] = [
@@ -19,6 +20,7 @@ export const MIGRATIONS: readonly string[] = [
   conversation,
   candidateAttachments,
   candidateOthersPost,
+  meetNotes,
 ]
 
 export function openDb(file: string, migrations: readonly string[] = MIGRATIONS): Database.Database {
