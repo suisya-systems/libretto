@@ -46,6 +46,8 @@ export const CodeFn = z.enum([
   'voiceEndings',
   'voiceSentenceLength',
   'voiceFirstPerson',
+  // コード書式の外のコマンドや設定の名前（docs/implementation.md 6.2.10 (3)）
+  'unmarkedNames',
 ])
 export type CodeFn = z.infer<typeof CodeFn>
 
@@ -83,6 +85,7 @@ export const CodeArgs = {
   voiceEndings: z.object({}),
   voiceSentenceLength: z.object({}),
   voiceFirstPerson: z.object({}),
+  unmarkedNames: z.object({}),
 } satisfies Partial<Record<CodeFn, z.ZodType>>
 
 export const JevScope = z.enum(['document', 'section', 'paragraph', 'claim'])

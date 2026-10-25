@@ -98,8 +98,8 @@ function told(subject: string, r: Range, unit: string, now: number, shown: boole
   return [`${subject}${r.max === 0 ? '置かないで' : ` ${want}にして`}ください（今は ${fmt(now)} ${unit}）`]
 }
 // 主張は本文の字面と場所だけ。改行が入っても 1 行に
-const one = (s: string) => s.replace(/\s+/g, ' ').trim()
-const claimLine = (f: FactsFile, id: string) => {
+export const one = (s: string) => s.replace(/\s+/g, ' ').trim()
+export const claimLine = (f: FactsFile, id: string) => {
   const c = f.claims.find((x) => x.id === id)
   return c ? [`「${one(c.text)}」（${one(c.where)}）`] : []
 }
@@ -125,10 +125,14 @@ parentPort.postMessage(workerData.texts.map((t) => re.test(t)))`
 export function matchInWorker(pattern: string, texts: string[], ms = PATTERN_MS): Promise<boolean[] | 'timeout'> {
   return new Promise((resolve, reject) => {
     const w = new Worker(PATTERN_WORKER, { eval: true, workerData: { pattern, texts } })
-    const t = setTimeout(() => {
-      void w.terminate()
-      resolve('timeout')
-    }, ms)
+    let t: ReturnType<typeof setTimeout> | undefined
+    // 打ち切りは Worker が動き出してから数える（起動の遅い Windows で、当てる前に打ち切らない）
+    w.once('online', () => {
+      t = setTimeout(() => {
+        void w.terminate()
+        resolve('timeout')
+      }, ms)
+    })
     w.once('message', (m: boolean[]) => {
       clearTimeout(t)
       void w.terminate()
@@ -150,6 +154,23 @@ export function patternProblem(pattern: string): string | undefined {
   if (/\\[1-9]|\\k</.test(pattern)) return '後方参照は使えません'
   if (/[+*}]\)+[+*{]/.test(pattern)) return '量指定子の入れ子（(a+)+ のような形）は使えません'
   return undefined
+}
+
+// コード書式の外にある、形で決まるコマンドや設定の名前（6.2.10 (3)）。コードブロック・コード書式・リンクの URL・裸の URL は外して見る。
+// ponytail: 語の並びのコマンド（npm install）は形で決まらないので数えない。拾い漏れが続いたら形を足す
+const NAME_SHAPES = [
+  /(?<=^|\s)--?[A-Za-z][\w-]*/gm, // -p・--dry-run
+  /(?<=^|[\s(（「『、])\/[a-z][\w-]*/gm, // /review
+  /(?<![\w./-])[\w-]+\.(?:json|ya?ml|toml|md|sh|py|tsx?|env|ini|cfg|lock)(?![\w.])/g, // settings.json（Node.js は拾わない）
+  /(?<!\w)[A-Z][A-Z0-9]*_[A-Z0-9_]+(?!\w)/g, // ANTHROPIC_API_KEY
+]
+const FENCE = /^ {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?^ {0,3}\1[^\n]*$/gm
+export function unmarkedNames(text: string): string[] {
+  const t = text
+    .replace(/(`+)(?!`)[\s\S]*?(?<!`)\1(?!`)/g, ' ') // ``a.json`` のような複数のバッククォートも
+    .replace(/\]\([^)]*\)/g, ']')
+    .replace(/https?:\/\/\S+/g, ' ')
+  return NAME_SHAPES.flatMap((re) => [...t.matchAll(re)].map((m) => m[0]))
 }
 
 export const VOICE_WIDTH = { endings: 0.15, length: [0.7, 1.3] as const }
@@ -286,6 +307,26 @@ export const FNS: Partial<Record<CodeFn, Fn<unknown>>> = {
     pass: ['all', 'ratio'],
     phase: '本文',
     run: (_, { md }) => ({ units: paragraphs(md).map((b) => markerCheck(b.lines.join('\n')).hits.length === 0) }),
+  }),
+  unmarkedNames: fn({
+    args: CodeArgs.unmarkedNames,
+    example: {},
+    unit: '段落（見出しを含む。コードブロックは除く）',
+    yes: 'コード書式（`）の外に、コマンドや設定の名前の形（-p・--dry-run のようなオプション、/review のようなコマンド、settings.json のようなファイル名、API_KEY のような大文字と _ の名前）がある',
+    pass: ['count'],
+    phase: '本文',
+    run: (_, { md }) => {
+      const found = blocks(md.replace(/\r\n?/g, '\n').replace(FENCE, '')).map((b) =>
+        unmarkedNames(b.kind === 'heading' ? b.text : b.lines.join('\n')),
+      )
+      const all = found.flat()
+      // gap は段落でなく名前の数（同じ段落の名前を直した分が測れるように。6.2.10 (3)）
+      return {
+        units: found.map((x) => x.length > 0),
+        measured: { hits: found.filter((x) => x.length).length, gap: all.length },
+        ...(all.length && { told: [`コード書式（\`）になっていない名前: ${[...new Set(all)].join('、')}`] }),
+      }
+    },
   }),
   // 語が版にあれば、判定の前に作り手と判定役が fail.system(隔離の失敗) で止める（8.10 (1)）。ここは数えるだけ
   canary: fn({
