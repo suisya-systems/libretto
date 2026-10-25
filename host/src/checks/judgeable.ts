@@ -125,10 +125,14 @@ parentPort.postMessage(workerData.texts.map((t) => re.test(t)))`
 export function matchInWorker(pattern: string, texts: string[], ms = PATTERN_MS): Promise<boolean[] | 'timeout'> {
   return new Promise((resolve, reject) => {
     const w = new Worker(PATTERN_WORKER, { eval: true, workerData: { pattern, texts } })
-    const t = setTimeout(() => {
-      void w.terminate()
-      resolve('timeout')
-    }, ms)
+    let t: ReturnType<typeof setTimeout> | undefined
+    // 打ち切りは Worker が動き出してから数える（起動の遅い Windows で、当てる前に打ち切らない）
+    w.once('online', () => {
+      t = setTimeout(() => {
+        void w.terminate()
+        resolve('timeout')
+      }, ms)
+    })
     w.once('message', (m: boolean[]) => {
       clearTimeout(t)
       void w.terminate()
