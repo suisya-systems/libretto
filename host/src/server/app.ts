@@ -14,12 +14,15 @@ import {
   CaseState,
   type ConnectionsView,
   ConversationPost,
+  DismissLow,
   DraftDiff,
   GoogleClientInput,
   type HostStatus,
+  InferenceSettings,
   type IsolationCause,
   MaterialsPost,
   type Mode,
+  SuppressionInput,
 } from '@libretto/shared/api'
 import type { Intake } from '@libretto/shared/ledger'
 import { type Context, Hono } from 'hono'
@@ -38,7 +41,7 @@ import { readThread } from '../intake/gmail.ts'
 import { createGoogle, type Google, parseClientJson } from '../intake/google.ts'
 import { MEET_WINDOW_DAYS, meetFileId, rereadNote } from '../intake/meet.ts'
 import { createPoller, RUN_KEY } from '../intake/poller.ts'
-import { createSlack, parseCandidateId, readPost, type Slack } from '../intake/slack.ts'
+import { channelList, createSlack, parseCandidateId, readPost, type Slack } from '../intake/slack.ts'
 import { caseDir } from '../ledger/db.ts'
 import { jst, type Ledger } from '../ledger/ledger.ts'
 import type { Job, Outcome } from '../model/invoke.ts'
@@ -57,7 +60,7 @@ import { createEntrance, currentSet, entranceView, writeApproval, writeAtomic } 
 import { currentMarks, OUTPUT_FILES, reviewsOf } from '../roles/judge.ts'
 import { draftNames, pastedCount, pastedName, versionDir, versionsOf } from '../roles/maker.ts'
 import { createRuns, Stopped } from '../runs.ts'
-import { saveVoiceSamples, VoiceSamplesInput, voiceSamples } from '../settings.ts'
+import { inferenceSettings, saveInference, saveVoiceSamples, VoiceSamplesInput, voiceSamples } from '../settings.ts'
 import { createHub, type SseMessage } from './sse.ts'
 import { createStop, isStorageError } from './stop.ts'
 import { caseView, DEFAULTS, homeView, toCard } from './views.ts'
@@ -173,6 +176,7 @@ export function createServer(o: ServerOptions) {
     runs,
     label: () => gmailLabel,
     emoji: () => slackEmoji,
+    inference: () => inferenceSettings(home),
     candidatesChanged,
     connectionsChanged: () => hub.emit('connections.changed', {}),
     log,
@@ -372,8 +376,22 @@ export function createServer(o: ServerOptions) {
         ...poller.meetView(),
       },
       slack: slackView(),
+      inference: {
+        classifiedToday: ledger.classifiedCount(now()),
+        dailyLimit: inferenceSettings(home).dailyLimit,
+        ...poller.inferenceView(),
+        recall: ledger.recallSince(jst(new Date(now().getTime() - 30 * 86_400_000))),
+        suppressions: ledger.listSuppressions().map(({ value: _, ...x }) => x),
+      },
     }
     return c.json(view)
+  })
+
+  // 自動検出で見るチャンネルの候補（6.9 (10)）。トークンが無い・読めなければ空
+  app.get('/api/connections/slack/channels', async (c) => {
+    if (!slack.configured()) return c.json({ channels: [] })
+    const r = await channelList(slack, c.req.raw.signal)
+    return c.json({ channels: r.ok ? r.channels.sort((a, b) => a.name.localeCompare(b.name)) : [] })
   })
 
   // Slack のトークン・Google の OAuth クライアントを入れた・入れ直した・消した: 連携の欄を取り直させ、入っていれば取り込む（6.6 (2)・6.4 (10)）
@@ -489,7 +507,46 @@ export function createServer(o: ServerOptions) {
     if (r instanceof Response) return r
     if (!r.ok) return refused(r)
     candidatesChanged()
-    return c.json({})
+    return c.json(CandidateActionResult.parse({ ...(r.askSuppress && { askSuppress: r.askSuppress }) }))
+  })
+
+  // 低をまとめて見送る（6.9 (7)）。出したままの推測・低だけを「依頼ではない」で。除外しますかは聞かない
+  app.post('/api/candidates/dismiss-low', async (c) => {
+    const body = DismissLow.safeParse(await c.req.json().catch(() => undefined))
+    if (!body.success) return c.json({ reason: 'invalid' }, 400)
+    if (stop.isStopped()) return c.json({ reason: 'stopped' }, 409)
+    const r = writing(c, () =>
+      ledger.transaction(() =>
+        body.data.ids.filter((candidateId) => {
+          const x = ledger.getCandidate(candidateId)
+          if (x?.origin !== '推測' || x.confidence !== '低' || x.status !== 'presented') return false
+          return transition(ledger, { type: 'candidate.dismiss', candidateId, reason: '依頼ではない', bulk: true }).ok
+        }),
+      ),
+    )
+    if (r instanceof Response) return r
+    candidatesChanged()
+    return c.json({ dismissed: r.length })
+  })
+
+  // 除外する・戻す（6.9 (7)）。行は消さず removed_at を埋める
+  app.post('/api/suppressions', async (c) => {
+    const body = SuppressionInput.safeParse(await c.req.json().catch(() => undefined))
+    if (!body.success) return c.json({ reason: 'invalid' }, 400)
+    const { kind, value, label } = body.data
+    const r = writing(c, () => ledger.addSuppression(kind, value, '依頼ではない', label))
+    if (r instanceof Response) return r
+    hub.emit('connections.changed', {})
+    return c.json({ id: r })
+  })
+  app.delete('/api/suppressions/:id', (c) => {
+    const id = Number(c.req.param('id'))
+    if (!Number.isInteger(id)) return c.json({ reason: 'invalid' }, 400)
+    const r = writing(c, () => ledger.removeSuppression(id))
+    if (r instanceof Response) return r
+    if (!r) return c.json({ reason: 'not_found' }, 404)
+    hub.emit('connections.changed', {})
+    return c.body(null, 204)
   })
 
   // 候補から作る案件の intake.json（6.4 (5)・6.6 (6)・6.7 (4)）。Slack の threadId は <channelId>:<ts>、会議メモはファイルの id
@@ -559,7 +616,15 @@ export function createServer(o: ServerOptions) {
           .listMeetNotes(email, since, 10)
           .flatMap(({ title, heldAt, link, result }) => (result === 'items' ? [] : [{ title, heldAt, link, result }]))
       : []
-    return c.json(homeView(ledger, { ...status }, { connected, running, ...(lastAt && { lastAt }) }, meetNotes))
+    return c.json(
+      homeView(
+        ledger,
+        { ...status },
+        { connected, running, ...(lastAt && { lastAt }) },
+        meetNotes,
+        inferenceSettings(home).showLow,
+      ),
+    )
   })
 
   // 一覧（5.2）。完了した依頼（/done）が使う。新しく変わった順
@@ -811,6 +876,19 @@ export function createServer(o: ServerOptions) {
     if (r instanceof Response) return r
     hub.emit('settings.changed', {})
     if (kind.data === 'slack') intakeChanged()
+    return c.json(r)
+  })
+
+  // 自動検出の範囲・上限・表示（6.9 (10)）
+  app.get('/api/settings/inference', (c) => c.json(inferenceSettings(home)))
+  app.put('/api/settings/inference', async (c) => {
+    const body = InferenceSettings.safeParse(await c.req.json().catch(() => undefined))
+    if (!body.success) return c.json({ reason: 'invalid' }, 400)
+    const r = writing(c, () => saveInference(home, body.data))
+    if (r instanceof Response) return r
+    hub.emit('settings.changed', {})
+    hub.emit('connections.changed', {})
+    candidatesChanged()
     return c.json(r)
   })
 

@@ -388,6 +388,17 @@ export const ConnectionsView = z.object({
     lastAt: z.string().optional(),
     problem: z.enum(['rate_limited', 'network']).optional(),
   }),
+  // 自動検出（6.9 (6)(8)(10)）。recall は直近 30 日の合図のうち、自動検出が先に見つけていた数
+  inference: z.object({
+    classifiedToday: z.number().int(),
+    dailyLimit: z.number().int(),
+    skippedToday: z.number().int().optional(),
+    lastAt: z.string().optional(),
+    recall: z.object({ hit: z.number().int(), total: z.number().int() }),
+    suppressions: z.array(
+      z.object({ id: z.number().int(), kind: z.enum(['sender', 'channel']), label: z.string(), addedAt: z.string() }),
+    ),
+  }),
 })
 export type ConnectionsView = z.infer<typeof ConnectionsView>
 
@@ -411,14 +422,23 @@ export const CandidateCard = z.object({
 })
 export type CandidateCard = z.infer<typeof CandidateCard>
 
-// POST /api/candidates/:id/actions（6.4 (5)）。「内容を修正」は候補の中の会話（ConversationPost の candidateId）、keep は推測の Issue で足す
+// POST /api/candidates/:id/actions（6.4 (5)）。「内容を修正」は候補の中の会話（ConversationPost の candidateId）。低の「やっぱり残す」（keep）は作らない（6.9 (13) D）
 export const DismissReason = z.enum(['依頼ではない', '自分の仕事ではない', 'もう済んだ', '拾わなくてよい'])
 export const CandidateAction = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('proceed') }),
   z.strictObject({ type: z.literal('dismiss'), reason: DismissReason }),
 ])
 export type CandidateAction = z.infer<typeof CandidateAction>
-export const CandidateActionResult = z.object({ caseId: z.string().optional() })
+// askSuppress は「依頼ではない」が続いて 3 回目のときだけ（6.9 (7)）
+export const AskSuppress = z.object({
+  kind: z.enum(['sender', 'channel']),
+  value: z.string(),
+  label: z.string(),
+  count: z.number().int(),
+})
+export type AskSuppress = z.infer<typeof AskSuppress>
+export const CandidateActionResult = z.object({ caseId: z.string().optional(), askSuppress: AskSuppress.optional() })
+export const DismissLow = z.object({ ids: z.array(z.string().min(1)).min(1).max(200) })
 
 export const EntranceDefaults = z.record(z.enum(['会話', 'gmail', 'slack', 'meet']), Mode)
 
@@ -445,7 +465,6 @@ export const HomeView = z.object({
   // 取り込み（6.4 (7)）。connected でないときは候補の欄を、候補があるときだけ出す
   intake: z.object({ connected: z.boolean(), running: z.boolean(), lastAt: z.string().optional() }),
   host: HostStatus,
-  askSuppress: z.object({ sender: z.string(), count: z.number().int() }).optional(),
 })
 export type HomeView = z.infer<typeof HomeView>
 
@@ -494,20 +513,23 @@ export const ApiKeyStatus = z.discriminatedUnion('set', [
 ])
 export type ApiKeyStatus = z.infer<typeof ApiKeyStatus>
 
+// 自動検出（推測）の範囲・上限・表示（6.9 (10)）。dailyLimit 0 で止まる。Slack の DM は見ない（6.9 (13) A）
+export const InferenceSettings = z.object({
+  gmailDays: z.union([z.literal(3), z.literal(7), z.literal(14)]),
+  slackChannels: z.array(z.string().regex(/^[CG][A-Z0-9]+$/)).max(20),
+  dailyLimit: z.number().int().min(0).max(1000),
+  showLow: z.boolean(),
+  useJev: z.boolean(),
+})
+export type InferenceSettings = z.infer<typeof InferenceSettings>
+
 export const Settings = z.object({
   usdJpy: z.number().positive(),
   costCapYenPerCase: z.number().positive(),
   costCapYenPerMonth: z.number().positive().nullable(), // null = 未入力（P3）
   entranceDefaults: EntranceDefaults,
   signals: z.object({ gmailLabel: z.string().min(1), slackEmoji: z.string().min(1) }),
-  inference: z.object({
-    gmailDays: z.union([z.literal(3), z.literal(7), z.literal(14)]),
-    slackChannels: z.array(z.string()),
-    slackIncludeDm: z.boolean(),
-    dailyLimit: z.number().int().min(0),
-    showLow: z.boolean(),
-    useJev: z.boolean(),
-  }),
+  inference: InferenceSettings,
   defaultDestinations: z.record(DocType, z.array(DeliveryTarget)),
   driveFolderId: z.string().optional(),
   voiceSamples: z.array(MaterialRef),
@@ -515,6 +537,14 @@ export const Settings = z.object({
   apiKeys: z.record(ApiKeyKind, ApiKeyStatus), // 読み取り専用。PUT /api/settings では無視する
 })
 export type Settings = z.infer<typeof Settings>
+
+// POST /api/suppressions（6.9 (7)）
+export const SuppressionInput = z.object({
+  kind: z.enum(['sender', 'channel']),
+  value: z.string().min(1).max(320),
+  label: z.string().min(1).max(200),
+})
+export type SuppressionInput = z.infer<typeof SuppressionInput>
 
 // SSE の event 名 → data の形（5.2）
 export const SseData = {

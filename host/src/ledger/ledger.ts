@@ -453,7 +453,8 @@ export class Ledger {
 
   // --- candidates（T1〜T4。4.6 (0)）
 
-  // candidates の行（presented）・found と presented の出来事・カードの中身を 1 回で
+  // candidates の行（presented）・found と presented の出来事・カードの中身を 1 回で。
+  // 推測が「頼んでいない」とした行（not_request）は書き換える（合図が付いた・分類し直した。6.9 (4)(8)）
   insertCandidate(c: NewCandidate, card: CardContent) {
     this.transaction(() => {
       const at = jst(this.#now())
@@ -466,7 +467,10 @@ export class Ledger {
       this.#db
         .prepare(
           `INSERT INTO candidates (candidate_id, source, origin, confidence, ai_instruction_flag, sender_key, status, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, 'presented', ?)`,
+           VALUES (?, ?, ?, ?, ?, ?, 'presented', ?)
+           ON CONFLICT (candidate_id) DO UPDATE SET origin = excluded.origin, confidence = excluded.confidence,
+             ai_instruction_flag = excluded.ai_instruction_flag, sender_key = excluded.sender_key, status = 'presented',
+             updated_at = excluded.updated_at WHERE candidates.status = 'not_request'`,
         )
         .run(candidateId, source, origin, confidence ?? null, aiInstructionFlag ? 1 : 0, senderKey, at)
       this.#appendCandidateEvent(
@@ -599,27 +603,131 @@ export class Ledger {
     ).map(meetNote)
   }
 
+  // 推測が「頼んでいない」とした（前さばきを含む）。差出人・件名は残さない（6.9 (4)）。itemId があれば classified 行も
+  insertNotRequest(
+    candidateId: string,
+    source: CandidateRecord['source'],
+    detail: { historyId?: string; prefiltered?: boolean },
+    itemId?: string,
+  ) {
+    this.transaction(() => {
+      const at = jst(this.#now())
+      this.#db
+        .prepare(
+          `INSERT INTO candidates (candidate_id, source, origin, ai_instruction_flag, sender_key, status, updated_at)
+           VALUES (?, ?, '推測', 0, '', 'not_request', ?)
+           ON CONFLICT (candidate_id) DO UPDATE SET updated_at = excluded.updated_at WHERE candidates.status = 'not_request'`,
+        )
+        .run(candidateId, source, at)
+      this.#appendCandidateEvent({ type: 'not_request', candidateId, source, ...clean(detail) }, at)
+      if (itemId) this.recordClassified(itemId)
+    })
+  }
+
+  // 最後の not_request の historyId（Gmail。返信が来たかを見る）
+  notRequestHistory(candidateId: string): string | undefined {
+    const r = this.#db
+      .prepare(
+        `SELECT json_extract(detail, '$.historyId') AS h FROM candidate_events
+         WHERE candidate_id = ? AND type = 'not_request' ORDER BY seq DESC LIMIT 1`,
+      )
+      .get(candidateId) as { h: string | null } | undefined
+    return r?.h ?? undefined
+  }
+
+  // 推測がこの候補を一度でも見たか（候補にした・頼んでいないとした。今の状態は問わない。6.9 (8)）
+  inferredBefore(candidateId: string): boolean {
+    return !!this.#db
+      .prepare(
+        `SELECT 1 FROM candidate_events WHERE candidate_id = ?
+           AND (type = 'not_request' OR (type = 'found' AND json_extract(detail, '$.origin') = '推測')) LIMIT 1`,
+      )
+      .get(candidateId)
+  }
+
+  hasRecallSample(candidateId: string): boolean {
+    return !!this.#db
+      .prepare(`SELECT 1 FROM candidate_events WHERE candidate_id = ? AND type = 'recall_sample' LIMIT 1`)
+      .get(candidateId)
+  }
+
+  // 自己測定（6.9 (8)）。since 以降の標本の数と、先に見つけていた数
+  recallSince(since: string): { hit: number; total: number } {
+    const r = this.#db
+      .prepare(
+        `SELECT COUNT(*) AS total, COALESCE(SUM(json_extract(detail, '$.inferredBefore')), 0) AS hit
+         FROM candidate_events WHERE type = 'recall_sample' AND at >= ?`,
+      )
+      .get(since) as { total: number; hit: number }
+    return { hit: r.hit, total: r.total }
+  }
+
+  // 見落とした標本（measure の recall。候補 id と、残っていれば件名）
+  recallMisses(since: string): { candidateId: string; subject?: string }[] {
+    return (
+      this.#db
+        .prepare(
+          `SELECT e.candidate_id AS id, k.subject AS subject FROM candidate_events e
+           LEFT JOIN candidate_cards k ON k.candidate_id = e.candidate_id
+           WHERE e.type = 'recall_sample' AND e.at >= ? AND json_extract(e.detail, '$.inferredBefore') = 0 ORDER BY e.seq`,
+        )
+        .all(since) as { id: string; subject: string | null }[]
+    ).map((r) => ({ candidateId: r.id, ...(r.subject !== null && { subject: r.subject }) }))
+  }
+
   isSuppressed(kind: 'sender' | 'channel', value: string): boolean {
     return !!this.#db
       .prepare('SELECT 1 FROM suppressions WHERE kind = ? AND value = ? AND removed_at IS NULL')
       .get(kind, value)
   }
 
-  addSuppression(kind: 'sender' | 'channel', value: string, reason: string) {
-    this.#db
-      .prepare('INSERT INTO suppressions (kind, value, reason, added_at) VALUES (?, ?, ?, ?)')
-      .run(kind, value, reason, jst(this.#now()))
+  // 同じものが除外されていれば足さずにその id を返す
+  addSuppression(kind: 'sender' | 'channel', value: string, reason: string, label: string): number {
+    return this.transaction(() => {
+      const had = this.#db
+        .prepare('SELECT id FROM suppressions WHERE kind = ? AND value = ? AND removed_at IS NULL')
+        .get(kind, value) as { id: number } | undefined
+      if (had) return had.id
+      return Number(
+        this.#db
+          .prepare('INSERT INTO suppressions (kind, value, reason, added_at, label) VALUES (?, ?, ?, ?, ?)')
+          .run(kind, value, reason, jst(this.#now()), label).lastInsertRowid,
+      )
+    })
   }
 
-  // 同じ差出人の候補を、その理由で見送った数（T3 の ask_suppress。ホームもこの数を出す）
-  countDismissed(senderKey: string, reason: string): number {
-    const r = this.#db
+  // 戻す。行は消さず removed_at を埋める（9.2）。戻すものが無ければ false
+  removeSuppression(id: number): boolean {
+    return (
+      this.#db
+        .prepare('UPDATE suppressions SET removed_at = ? WHERE id = ? AND removed_at IS NULL')
+        .run(jst(this.#now()), id).changes > 0
+    )
+  }
+
+  listSuppressions(): { id: number; kind: 'sender' | 'channel'; value: string; label: string; addedAt: string }[] {
+    return (
+      this.#db.prepare('SELECT * FROM suppressions WHERE removed_at IS NULL ORDER BY id').all() as {
+        id: number
+        kind: 'sender' | 'channel'
+        value: string
+        label: string | null
+        added_at: string
+      }[]
+    ).map((r) => ({ id: r.id, kind: r.kind, value: r.value, label: r.label ?? r.value, addedAt: r.added_at }))
+  }
+
+  // 同じ差出人・チャンネルの推測の候補の結果（見送り・進めた）を新しい順に見て、先頭から続く「依頼ではない」の数（6.9 (7)）
+  notRequestStreak(senderKey: string): number {
+    const rows = this.#db
       .prepare(
-        `SELECT COUNT(*) AS n FROM candidate_events e JOIN candidates c ON c.candidate_id = e.candidate_id
-         WHERE e.type = 'dismissed' AND c.sender_key = ? AND json_extract(e.detail, '$.reason') = ?`,
+        `SELECT e.type AS type, json_extract(e.detail, '$.reason') AS reason FROM candidate_events e
+         JOIN candidates c ON c.candidate_id = e.candidate_id
+         WHERE c.sender_key = ? AND c.origin = '推測' AND e.type IN ('dismissed', 'proceeded') ORDER BY e.seq DESC`,
       )
-      .get(senderKey, reason) as { n: number }
-    return r.n
+      .all(senderKey) as { type: string; reason: string | null }[]
+    const n = rows.findIndex((r) => r.type !== 'dismissed' || r.reason !== '依頼ではない')
+    return n === -1 ? rows.length : n
   }
 
   #appendCandidateEvent(ev: CandidateEventInput, at: string) {

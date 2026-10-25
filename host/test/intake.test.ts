@@ -476,7 +476,8 @@ describe('拾い上げ（6.4 (3)(4)）', () => {
   it('応答の本文の途中で切れたら、届かなかったとしてその回を飛ばす', async () => {
     await setup()
     g.add(thread('t1'))
-    g.state.fail = { status: 200, body: '{"threads": [', times: 1, path: /\/threads$/ }
+    // 回の頭の自動検出の一覧（6.9 (1)）と、ラベルの一覧の両方で切れる
+    g.state.fail = { status: 200, body: '{"threads": [', times: 2, path: /\/threads$/ }
     await server.poller.run()
     expect(ledger.getCandidate('gmail:t1')).toBeUndefined()
     expect((await connections()).google.problem).toBe('network')
@@ -485,7 +486,7 @@ describe('拾い上げ（6.4 (3)(4)）', () => {
   it('混雑（429）はその回を飛ばし、連携の欄に出す。次の回で拾う', async () => {
     await setup()
     g.add(thread('t1'))
-    g.state.fail = { status: 429, times: 1, path: /\/threads$/ }
+    g.state.fail = { status: 429, times: 2, path: /\/threads$/ } // 自動検出の一覧とラベルの一覧（6.9 (1)）
     await server.poller.run()
     expect(ledger.getCandidate('gmail:t1')).toBeUndefined()
     expect((await connections()).google.problem).toBe('rate_limited')
@@ -576,7 +577,9 @@ describe('拾い上げ（6.4 (3)(4)）', () => {
       'found',
       'presented',
       'promoted_to_signal',
+      'recall_sample', // 推測が先に見つけていた（6.9 (8)）
     ])
+    expect(ledger.listCandidateEvents('gmail:t1').at(-1)).toMatchObject({ inferredBefore: true })
     expect((await home_()).candidates.signal.map((c) => c.id)).toEqual(['gmail:t1'])
     expect(cardCalls()).toHaveLength(0)
   })

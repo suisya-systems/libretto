@@ -58,12 +58,13 @@ export function homeView(
   host: HostStatus,
   intake: HomeView['intake'],
   meetNotes: HomeView['meetNotes'] = [],
+  showLow = true,
 ): HomeView {
   const open = ledger.listCases(OPEN).map((c) => toCard(ledger, c))
   return {
     yourTurn: open.filter((c) => c.turn === '本人'),
     notices: ledger.listNotices(20),
-    candidates: candidateLists(ledger),
+    candidates: candidateLists(ledger, showLow),
     meetNotes,
     autoStarted: open.filter((c) => c.auto),
     active: open.filter((c) => c.turn === 'libretto'),
@@ -73,8 +74,8 @@ export function homeView(
   }
 }
 
-// 出したままの候補を由来と可能性で分ける。どの欄も新しい順（6.4 (7)）
-function candidateLists(ledger: Ledger): HomeView['candidates'] {
+// 出したままの候補を由来と可能性で分ける。どの欄も新しい順（6.4 (7)）。showLow が false なら低を出さない（6.9 (10)）
+function candidateLists(ledger: Ledger, showLow: boolean): HomeView['candidates'] {
   const lists: HomeView['candidates'] = { signal: [], meeting: [], inferred: { high: [], mid: [], low: [] } }
   const BY = { 高: 'high', 中: 'mid', 低: 'low' } as const
   for (const { candidate: c, card } of ledger.listPresentedCandidates()) {
@@ -90,6 +91,7 @@ function candidateLists(ledger: Ledger): HomeView['candidates'] {
     else if (c.origin === '会議') lists.meeting.push(v)
     else lists.inferred[BY[c.confidence ?? '低']].push(v)
   }
+  if (!showLow) lists.inferred.low = []
   return lists
 }
 

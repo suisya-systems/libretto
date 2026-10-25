@@ -3,7 +3,8 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { bandReport, bandUnits, codexRow, codexVerdict } from '../scripts/measure.ts'
+import { bandReport, bandUnits, codexRow, codexVerdict, recallReport } from '../scripts/measure.ts'
+import { initHome } from '../src/ledger/db.ts'
 import { goodChecks } from './fixtures/entrance.ts'
 
 const home = () => mkdtempSync(join(tmpdir(), 'libretto-measure-'))
@@ -77,5 +78,26 @@ describe('measure', () => {
     expect(r.decided).toBe(1) // null は数えない
     expect(r.agree).toBe(1) // 0.5 は 0.5 の側が「いいえ」で、Claude も false
     expect(r.edges.map((u) => u.noul)).toEqual([0.7])
+  })
+})
+
+describe('measure recall（受け入れ (4)。6.9 (9)）', () => {
+  it('直近 30 日の標本の割合と、見落とした候補（Gmail はスレッドを開くリンク）', () => {
+    let clock = new Date('2026-09-01T00:00:00Z')
+    const ledger = initHome(home(), () => clock)
+    const sample = (id: string, inferredBefore: boolean) => {
+      ledger.insertNotRequest(id, 'gmail', {})
+      ledger.appendCandidateEvent({ type: 'recall_sample', candidateId: id, signalAt: '2026-09-01', inferredBefore })
+    }
+    sample('gmail:old', false) // 30 日より前
+    clock = new Date('2026-10-20T00:00:00Z')
+    sample('gmail:a', true)
+    sample('gmail:b', true)
+    sample('gmail:c', false)
+    const r = recallReport(ledger, new Date('2026-10-25T00:00:00Z'))
+    expect(r).toMatchObject({ hit: 2, total: 3 })
+    expect(r.rate).toBeCloseTo(2 / 3)
+    expect(r.misses).toEqual([{ candidateId: 'gmail:c', link: 'https://mail.google.com/mail/#all/c' }])
+    ledger.close()
   })
 })

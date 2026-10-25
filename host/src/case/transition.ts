@@ -3,7 +3,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { Answer, CaseAction, CaseState, DeliveryTarget, Mode, Origin } from '@libretto/shared/api'
+import type { Answer, AskSuppress, CaseAction, CaseState, DeliveryTarget, Mode, Origin } from '@libretto/shared/api'
 import type { Escalate, Mark } from '@libretto/shared/checks'
 import type {
   ApprovalRecord,
@@ -101,9 +101,10 @@ export type CaseInput = Person | HostEvent
 type DismissReason = '依頼ではない' | '自分の仕事ではない' | 'もう済んだ' | '拾わなくてよい'
 // 候補の操作は eventId を持たない。二重送信は candidates.status のガードで弾く（5.3.1・4.6 (0)）
 export type CandidateInput =
-  | { type: 'candidate.presented'; candidate: NewCandidate; card: CardContent }
+  // recall: 推測の範囲の中で合図が付いた候補の自己測定（6.9 (8)）
+  | { type: 'candidate.presented'; candidate: NewCandidate; card: CardContent; recall?: { signalAt: string } }
   | { type: 'candidate.proceed'; candidateId: string; caseId: string; mode: Mode }
-  | { type: 'candidate.dismiss'; candidateId: string; reason: DismissReason }
+  | { type: 'candidate.dismiss'; candidateId: string; reason: DismissReason; bulk?: boolean }
   | {
       type: 'candidate.auto_enter'
       candidateId: string
@@ -128,7 +129,7 @@ export type Result =
       case?: CaseRecord
       newCaseId?: string
       stopped?: string[]
-      askSuppress?: { senderKey: string; count: number }
+      askSuppress?: AskSuppress
     }
   | { ok: false; reason: 'stale' | 'invalid_transition'; case?: CaseRecord }
   // conflict: 同じ eventId が別の案件・別のイベントにある（5.3.1 の 400）
@@ -628,9 +629,20 @@ export function currentSend(ledger: Ledger, caseId: string) {
 
 function candidate(ledger: Ledger, ev: CandidateInput): Result {
   if (ev.type === 'candidate.presented') {
-    // 重複は拒否ではなく、記録もしない（拾い上げは同じ候補を何度も見る）
-    if (ledger.getCandidate(ev.candidate.candidateId)) return { ok: false, reason: 'invalid_transition' }
+    // 重複は拒否ではなく、記録もしない（拾い上げは同じ候補を何度も見る）。推測が「頼んでいない」とした行は、
+    // 合図が付いたか分類し直したときに出し直す（6.9 (4)(8)）
+    const { candidateId } = ev.candidate
+    const had = ledger.getCandidate(candidateId)
+    if (had && had.status !== 'not_request') return { ok: false, reason: 'invalid_transition' }
     ledger.insertCandidate(ev.candidate, ev.card)
+    // 行が無い・頼んでいないとした: どちらも推測は先に見つけていない（見つけていたものの標本は昇格のときに書く）
+    if (ev.recall && !ledger.hasRecallSample(candidateId))
+      ledger.appendCandidateEvent({
+        type: 'recall_sample',
+        candidateId,
+        signalAt: ev.recall.signalAt,
+        inferredBefore: false,
+      })
     return { ok: true, replayed: false }
   }
   let cand = ledger.getCandidate(ev.candidateId)
@@ -651,13 +663,21 @@ function candidate(ledger: Ledger, ev: CandidateInput): Result {
 
   if (ev.type === 'candidate.dismiss') {
     const { candidateId, senderKey, source } = cand
+    const card = ledger.getCandidateCard(candidateId)
     ledger.appendCandidateEvent({ type: 'dismissed', candidateId, reason: ev.reason }, { status: 'dismissed' })
     ledger.deleteCandidateCard(candidateId)
     ledger.deleteMessages(candidateId) // 候補の中の会話（6.4 (5)）
-    if (ev.reason === '拾わなくてよい')
-      ledger.addSuppression(source === 'slack' ? 'channel' : 'sender', senderKey, ev.reason)
-    const count = ev.reason === '依頼ではない' ? ledger.countDismissed(senderKey, ev.reason) : 0
-    return { ok: true, replayed: false, ...(count >= 3 && { askSuppress: { senderKey, count } }) }
+    const kind = source === 'slack' ? 'channel' : 'sender'
+    const label = labelOf(cand, card)
+    if (ev.reason === '拾わなくてよい') ledger.addSuppression(kind, senderKey, ev.reason, label)
+    // 推測の「依頼ではない」が続いて 3 回目のときだけ聞く。4 回目からは聞かない（6.9 (7)）
+    const ask =
+      cand.origin === '推測' &&
+      ev.reason === '依頼ではない' &&
+      !ev.bulk &&
+      !ledger.isSuppressed(kind, senderKey) &&
+      ledger.notRequestStreak(senderKey) === 3
+    return { ok: true, replayed: false, ...(ask && { askSuppress: { kind, value: senderKey, label, count: 3 } }) }
   }
 
   const auto = ev.type === 'candidate.auto_enter'
@@ -696,6 +716,10 @@ function candidate(ledger: Ledger, ev: CandidateInput): Result {
   if (auto) ledger.appendConversation(ev.caseId, SAY.autoStarted)
   return { ok: true, replayed: false, case: created }
 }
+
+// 除外の一覧に出す名前。Slack はチャンネル名（カードの見出し）、会議メモは会議名、Gmail はアドレス（6.9 (7)）
+const labelOf = (c: CandidateRecord, card: CardContent | undefined) =>
+  (c.source === 'gmail' ? c.senderKey : card?.subject) || c.senderKey
 
 function originOf(c: CandidateRecord, card: CardContent): Origin {
   if (c.origin === '合図') return { kind: '合図', source: c.source }

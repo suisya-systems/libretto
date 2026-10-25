@@ -14,6 +14,7 @@ export const SLACK_SCOPES = [
   'im:read',
   'mpim:read',
   'users:read',
+  'search:read', // 自動検出の本人宛てメンション（6.9 (5)）
 ]
 export const SLACK_API = 'https://slack.com/api'
 const CALL_MS = 15_000
@@ -117,6 +118,8 @@ export function createSlack(o: { token: () => string | undefined; api?: string; 
 type File = { name?: string; title?: string }
 export type RawMessage = {
   type?: string
+  subtype?: string
+  bot_id?: string
   user?: string
   username?: string
   bot_profile?: { name?: string }
@@ -137,16 +140,88 @@ export type Post = {
   from: string // 投稿者の名前
   senderKey: string // チャンネルの id（見送りの学習は Slack をチャンネルで外す。6.6 (4)）
   othersPost: boolean
+  auto: boolean // 仕組みが出した投稿（bot・人の投稿でない subtype。自動検出の前さばき。6.9 (2)）
   receivedAt: string
   link: string
   body: string // 保存しない
   attachments: string[]
 }
 
+// 人が書いた投稿の subtype。ほかの subtype（参加・退出・トピックの変更・bot など）は仕組みが出したもの（6.9 (2)）
+const HUMAN_SUBTYPES = new Set(['thread_broadcast', 'file_share', 'me_message'])
+
 export const slackCandidateId = (channel: string, ts: string) => `slack:${channel}:${ts}`
 export const parseCandidateId = (id: string) => {
   const m = /^slack:([^:]+):(.+)$/.exec(id)
   return m && { channel: m[1] as string, ts: m[2] as string }
+}
+
+// --- 自動検出の窓（6.9 (5)）。どれも 10 ページで打ち切る
+
+const PAGES = 10
+type Found = { channel: string; ts: string }
+
+// 本人宛てメンション。DM・グループ DM は外す（6.9 (13) A）
+export async function mentions(s: Slack, me: Me, after: string, signal: AbortSignal) {
+  const found: Found[] = []
+  for (let page = 1; page <= PAGES; page++) {
+    const r = await s.call<{
+      messages?: {
+        matches?: { ts: string; channel?: { id?: string; is_im?: boolean; is_mpim?: boolean } }[]
+        paging?: { pages?: number }
+      }
+    }>(
+      'search.messages',
+      { query: `<@${me.userId}> after:${after}`, sort: 'timestamp', count: '100', page: String(page) },
+      signal,
+    )
+    if (!r.ok) return r
+    for (const m of r.json.messages?.matches ?? []) {
+      const id = m.channel?.id
+      if (id && !m.channel?.is_im && !m.channel?.is_mpim && !id.startsWith('D')) found.push({ channel: id, ts: m.ts })
+    }
+    if (page >= (r.json.messages?.paging?.pages ?? 1)) break
+  }
+  return { ok: true as const, found }
+}
+
+// 選んだチャンネルの oldest 以降の投稿（スレッドの親まで。返信は readPost が読む）
+export async function history(s: Slack, channel: string, oldest: string, signal: AbortSignal) {
+  const messages: RawMessage[] = []
+  let cursor: string | undefined
+  for (let i = 0; i < PAGES; i++) {
+    const r = await s.call<{ messages?: RawMessage[]; response_metadata?: { next_cursor?: string } }>(
+      'conversations.history',
+      { channel, oldest, limit: '200', ...(cursor && { cursor }) },
+      signal,
+    )
+    if (!r.ok) return r
+    messages.push(...(r.json.messages ?? []))
+    cursor = r.json.response_metadata?.next_cursor || undefined
+    if (!cursor) break
+  }
+  return { ok: true as const, messages }
+}
+
+// 設定の面のチャンネルの候補（公開と非公開、アーカイブを除く）
+export async function channelList(s: Slack, signal: AbortSignal) {
+  const channels: { id: string; name: string }[] = []
+  let cursor: string | undefined
+  for (let i = 0; i < 5; i++) {
+    const r = await s.call<{
+      channels?: { id: string; name?: string }[]
+      response_metadata?: { next_cursor?: string }
+    }>(
+      'conversations.list',
+      { types: 'public_channel,private_channel', exclude_archived: 'true', limit: '200', ...(cursor && { cursor }) },
+      signal,
+    )
+    if (!r.ok) return r
+    for (const c of r.json.channels ?? []) channels.push({ id: c.id, name: c.name ?? c.id })
+    cursor = r.json.response_metadata?.next_cursor || undefined
+    if (!cursor) break
+  }
+  return { ok: true as const, channels }
 }
 
 // 本人が付けたリアクションの 1 ページ。新しい順とは限らない（6.6 (4)）
@@ -266,6 +341,7 @@ export async function readPost(
       from: m ? who(m) : 'Slack のメンバー',
       senderKey: channel,
       othersPost: m?.user !== me.userId,
+      auto: !!m && (!!m.bot_id || !!m.bot_profile || (!!m.subtype && !HUMAN_SUBTYPES.has(m.subtype))),
       receivedAt: jst(new Date(Number(ts) * 1000)),
       // permalink が無ければ組む（無いとカードが台帳の型に通らない。6.6 (4)）
       link: m?.permalink ?? `${base}archives/${channel}/p${ts.replace('.', '')}`,

@@ -1,5 +1,5 @@
-// ホームの「依頼の候補」の欄（画面案 1 の合図カード。docs/implementation.md 6.4 (5)(7)・6.6 (5)(7)・6.7 (5)）。進める・見送る・内容を修正（候補の中の会話）
-import type { CandidateCard, DeliveryTarget, HomeView } from '@libretto/shared/api'
+// ホームの「依頼の候補」の欄（画面案 1 の合図カード。docs/implementation.md 6.4 (5)(7)・6.6 (5)(7)・6.7 (5)・6.9 (7)(10)）。進める・見送る・内容を修正（候補の中の会話）
+import type { AskSuppress, CandidateCard, DeliveryTarget, HomeView } from '@libretto/shared/api'
 import { useState } from 'react'
 import { useLocation } from 'wouter'
 import { send } from '../load.ts'
@@ -15,15 +15,15 @@ const reasonsOf = (c: CandidateCard): readonly Reason[] =>
   c.origin === '推測' ? [...REASONS, '拾わなくてよい'] : REASONS
 // しるしと「開く」の文（由来と取り込み元で決まる）
 const markOf = (c: CandidateCard): WKey =>
-  c.source === 'meet'
-    ? c.origin === '推測'
-      ? 'cand.mark.inferred.低'
-      : c.confidence === '高'
+  c.origin === '推測'
+    ? `cand.mark.inferred.${c.confidence ?? '低'}`
+    : c.source === 'meet'
+      ? c.confidence === '高'
         ? 'cand.mark.meet.高'
         : 'cand.mark.meet.中'
-    : c.source === 'slack'
-      ? 'cand.mark.slack'
-      : 'cand.mark.gmail'
+      : c.source === 'slack'
+        ? 'cand.mark.slack'
+        : 'cand.mark.gmail'
 const OPEN: Record<CandidateCard['source'], WKey> = {
   gmail: 'cand.open',
   slack: 'cand.openSlack',
@@ -37,7 +37,21 @@ const when = (at: string) => {
   return `${d.getMonth() + 1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
-type Sent = { ok: true; caseId?: string } | { ok: false; moved: boolean }
+// JSON を送って、届いたか（503 は届いている。load.ts の send と同じ）
+async function post(path: string, body: unknown): Promise<boolean> {
+  try {
+    const res = await fetch(path, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'application/json' },
+      body: JSON.stringify(body),
+    })
+    return res.ok || res.status === 503
+  } catch {
+    return false
+  }
+}
+
+type Sent = { ok: true; caseId?: string; askSuppress?: AskSuppress } | { ok: false; moved: boolean }
 async function act(id: string, body: { type: 'proceed' } | { type: 'dismiss'; reason: Reason }): Promise<Sent> {
   try {
     const res = await fetch(`/api/candidates/${encodeURIComponent(id)}/actions`, {
@@ -45,14 +59,15 @@ async function act(id: string, body: { type: 'proceed' } | { type: 'dismiss'; re
       headers: { 'content-type': 'application/json', accept: 'application/json' },
       body: JSON.stringify(body),
     })
-    if (res.ok) return { ok: true, ...((await res.json()) as { caseId?: string }) }
+    if (res.ok) return { ok: true, ...((await res.json()) as { caseId?: string; askSuppress?: AskSuppress }) }
     return { ok: false, moved: res.status === 409 || res.status === 404 }
   } catch {
     return { ok: false, moved: false }
   }
 }
 
-function Card({ c, stopped, reload }: { c: CandidateCard; stopped: boolean; reload: () => void }) {
+type CardProps = { c: CandidateCard; stopped: boolean; reload: () => void; onAsk: (a: AskSuppress) => void }
+function Card({ c, stopped, reload, onAsk }: CardProps) {
   const [, go] = useLocation()
   const [busy, setBusy] = useState(false)
   const [reason, setReason] = useState<Reason | ''>('')
@@ -65,6 +80,7 @@ function Card({ c, stopped, reload }: { c: CandidateCard; stopped: boolean; relo
     const r = await act(c.id, body)
     setBusy(false)
     if (r.ok && r.caseId) return go(`/cases/${r.caseId}`)
+    if (r.ok && r.askSuppress) onAsk(r.askSuppress)
     if (!r.ok) setNotice(r.moved ? 'action.moved' : 'band.sendFailed')
     reload()
   }
@@ -150,8 +166,51 @@ function Card({ c, stopped, reload }: { c: CandidateCard; stopped: boolean; relo
 }
 
 // 連携しているか、候補が 1 件以上あるときだけ出す（6.4 (7)）。並びは合図 → 会議 → 推測・高 → 中、低は折りたたむ（設計書 4.2.2）
+// 「依頼ではない」が続いて 3 回目のときだけ、除外するかを 1 回聞く（6.9 (7)）
+function AskBand({ a, done }: { a: AskSuppress; done: () => void }) {
+  const [busy, setBusy] = useState(false)
+  const [state, setState] = useState<'ask' | 'done' | 'failed'>('ask')
+  if (state === 'done')
+    return (
+      <p className="muted small" role="status">
+        {w('home.askSuppressDone', { label: a.label })}
+      </p>
+    )
+  return (
+    <div className="card pad stack">
+      <p className="small">{w('home.askSuppress', { label: a.label })}</p>
+      <div className="row-gap">
+        <button
+          type="button"
+          className="btn btn-primary btn-sm"
+          disabled={busy}
+          aria-busy={busy || undefined}
+          onClick={async () => {
+            setBusy(true)
+            const ok = await post('/api/suppressions', { kind: a.kind, value: a.value, label: a.label })
+            setBusy(false)
+            setState(ok ? 'done' : 'failed')
+          }}
+        >
+          {W['home.askSuppressYes']}
+        </button>
+        <button type="button" className="btn btn-quiet btn-sm" disabled={busy} onClick={done}>
+          {W['home.askSuppressNo']}
+        </button>
+      </div>
+      {state === 'failed' && (
+        <p className="note-alert small" role="alert">
+          {W['band.sendFailed']}
+        </p>
+      )}
+    </div>
+  )
+}
+
 export function Candidates({ v, stopped, reload }: { v: HomeView; stopped: boolean; reload: () => void }) {
   const [refreshing, setRefreshing] = useState(false)
+  const [ask, setAsk] = useState<AskSuppress>()
+  const [bulk, setBulk] = useState(false)
   const { signal, meeting, inferred } = v.candidates
   const shown = [...signal, ...meeting, ...inferred.high, ...inferred.mid]
   const low = inferred.low
@@ -186,19 +245,36 @@ export function Candidates({ v, stopped, reload }: { v: HomeView; stopped: boole
           </div>
         )}
       </div>
+      {ask && <AskBand key={`${ask.kind}:${ask.value}`} a={ask} done={() => setAsk(undefined)} />}
       {shown.length > 0 && (
         <ul className="cand-list">
           {shown.map((c) => (
-            <Card key={c.id} c={c} stopped={stopped} reload={reload} />
+            <Card key={c.id} c={c} stopped={stopped} reload={reload} onAsk={setAsk} />
           ))}
         </ul>
       )}
       {low.length > 0 && (
         <details>
           <summary>{w('home.lowFold', { n: low.length })}</summary>
+          <Confirm
+            trigger={W['home.lowDismiss']}
+            title={W['home.lowDismissTitle']}
+            body={w('home.lowDismissBody', { n: low.length })}
+            confirm={W['home.lowDismiss']}
+            cancel={W['cand.cancel']}
+            disabled={stopped}
+            busy={bulk}
+            triggerClass="btn btn-quiet btn-sm"
+            onConfirm={async () => {
+              setBulk(true)
+              await post('/api/candidates/dismiss-low', { ids: low.map((c) => c.id) })
+              setBulk(false)
+              reload()
+            }}
+          />
           <ul className="cand-list">
             {low.map((c) => (
-              <Card key={c.id} c={c} stopped={stopped} reload={reload} />
+              <Card key={c.id} c={c} stopped={stopped} reload={reload} onAsk={setAsk} />
             ))}
           </ul>
         </details>

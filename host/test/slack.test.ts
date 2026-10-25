@@ -248,7 +248,12 @@ describe('拾い上げ（6.6 (4)(5)）', () => {
     s.state.items = [reacted('C1', { ts: ts(1), user: 'U0ALICE', text: 'x' })]
     await server.poller.run()
     expect(ledger.getCandidate(id)?.origin).toBe('合図')
-    expect(ledger.listCandidateEvents(id).map((e) => e.type)).toEqual(['found', 'presented', 'promoted_to_signal'])
+    expect(ledger.listCandidateEvents(id).map((e) => e.type)).toEqual([
+      'found',
+      'presented',
+      'promoted_to_signal',
+      'recall_sample', // 推測が先に見つけていた（6.9 (8)）
+    ])
     expect(cardCalls()).toHaveLength(0)
   })
 
