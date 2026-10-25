@@ -417,6 +417,7 @@ describe('API キー（5.2・5.7 (7)(9)）', () => {
     expect(Settings.shape.apiKeys.parse(JSON.parse(text))).toEqual({
       openai: { kind: 'openai', set: true, last4: '5678', savedAt: expect.any(String) },
       jev: { kind: 'jev', set: false },
+      slack: { kind: 'slack', set: false },
     })
     expect(text).not.toContain(KEY)
     expect((await server.app.request('/api/settings/keys')).status).toBe(401)

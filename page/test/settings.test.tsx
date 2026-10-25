@@ -34,7 +34,8 @@ beforeEach(() => {
   samples = []
   voiceStatus = 200
   vi.stubGlobal('fetch', async (path: string, init: RequestInit = {}) => {
-    if (path === '/api/settings/keys') return new Response(JSON.stringify({ openai: keys, jev }))
+    if (path === '/api/settings/keys')
+      return new Response(JSON.stringify({ openai: keys, jev, slack: { kind: 'slack', set: false } }))
     if (path === '/api/connections') return new Response(JSON.stringify(conn))
     if (path === '/api/settings/voice-samples') {
       if (init.method === 'PUT') {
@@ -59,7 +60,7 @@ beforeEach(() => {
       sent.push({ method: init.method, path })
       return respond(init.method)
     }
-    if (/^\/api\/settings\/keys\/(openai|jev)$/.test(path) && init.method) {
+    if (/^\/api\/settings\/keys\/(openai|jev|slack)$/.test(path) && init.method) {
       sent.push({ method: init.method, path, ...(init.body && { body: JSON.parse(String(init.body)) }) })
       return respond(init.method)
     }
@@ -73,16 +74,20 @@ async function render() {
   document.body.append(el)
   const root = createRoot(el)
   await act(async () => root.render(<Settings />))
-  const button = (label: string) =>
-    [...el.querySelectorAll('button')].find((b) => b.textContent?.trim() === label) as HTMLButtonElement | undefined
-  const input = () => el.querySelector('.key-form input') as HTMLInputElement | null
+  // API キーの節を先に探す（連携の節の Slack の行にも同じ形の欄がある）。scope を渡せばその中だけ
+  const button = (label: string, scope = '[aria-labelledby="h-keys"]') =>
+    [...el.querySelectorAll(`${scope} button`), ...el.querySelectorAll('button')].find(
+      (b) => b.textContent?.trim() === label,
+    ) as HTMLButtonElement | undefined
+  const input = (scope = '[aria-labelledby="h-keys"]') =>
+    el.querySelector(`${scope} .key-form input`) as HTMLInputElement | null
   return {
     el,
     text: () => el.textContent ?? '',
     button,
     input,
-    type: async (v: string) => {
-      const i = input() as HTMLInputElement
+    type: async (v: string, scope?: string) => {
+      const i = input(scope) as HTMLInputElement
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(i, v)
       await act(async () => i.dispatchEvent(new Event('input', { bubbles: true })))
     },
@@ -346,6 +351,45 @@ describe('連携の節（Google。6.4 (7)）', () => {
     const r = await render()
     expect(row(r.el).textContent).toContain(W['settings.google.result.connected'])
     expect(window.location.search).toBe('')
+    r.done()
+  })
+})
+
+describe('Slack の行（6.6 (2)(7)）', () => {
+  const LINK = '[aria-labelledby="h-link"]'
+  it('未設定: 作り方の注記と伏せた入力欄。貼ったトークンを slack に保存し、形の誤りは Slack の文で出す', async () => {
+    const r = await render()
+    expect(r.text()).toContain(W['settings.slack.unsetNote'])
+    expect(r.input(LINK)?.type).toBe('password')
+    expect(r.input(LINK)?.placeholder).toBe(W['settings.slack.input'])
+    await r.type('xoxb-bot-token', LINK)
+    respond = () => new Response('{"reason":"invalid"}', { status: 400 })
+    await r.click(r.button(W['settings.key.save'], LINK))
+    expect(sent).toEqual([{ method: 'PUT', path: '/api/settings/keys/slack', body: { value: 'xoxb-bot-token' } }])
+    expect(r.el.querySelector(`${LINK} [role="alert"]`)?.textContent).toBe(W['settings.slack.invalid'])
+    r.done()
+  })
+
+  it('足りない権限は名前で、使えないトークンは直し方を出す', async () => {
+    conn = {
+      ...conn,
+      slack: {
+        configured: true,
+        state: 'connected',
+        team: 'ACME',
+        user: 'honnin',
+        emoji: 'memo',
+        missingScopes: ['users:read'],
+      },
+    }
+    let r = await render()
+    expect(r.text()).toContain(w('settings.slack.as', { team: 'ACME', user: 'honnin' }))
+    expect(r.text()).toContain('users:read')
+    expect(r.text()).toContain('User Token Scopes')
+    r.done()
+    conn = { ...conn, slack: { configured: true, state: 'expired', emoji: 'memo', missingScopes: [] } }
+    r = await render()
+    expect(r.text()).toContain(W['settings.slack.expiredNote'])
     r.done()
   })
 })

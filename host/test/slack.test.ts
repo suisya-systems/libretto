@@ -1,5 +1,5 @@
 // Slack の合図（docs/implementation.md 6.6）。偽の Slack と fake の台本で HTTP を叩く
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ConnectionsView, HomeView } from '@libretto/shared/api'
@@ -10,9 +10,9 @@ import { createGoogle } from '../src/intake/google.ts'
 import { createSlack, plain, SLACK_SCOPES } from '../src/intake/slack.ts'
 import { caseDir, initHome } from '../src/ledger/db.ts'
 import type { Ledger } from '../src/ledger/ledger.ts'
-import { allowedEnv } from '../src/model/claude-cli.ts'
 import { createFake, type ScriptEntry } from '../src/model/fake.ts'
 import { type Backend, type Call, createInvoke, type Reply } from '../src/model/invoke.ts'
+import { readKey, setKey } from '../src/model/keys.ts'
 import { denyRules, srtSettings } from '../src/model/sandbox.ts'
 import { COOKIE, createServer } from '../src/server/app.ts'
 import { ME, reacted, startFakeSlack } from './fakes/slack.ts'
@@ -33,10 +33,12 @@ let cardReply: (call: Call) => Reply
 const draft = (over: Partial<CardDraft> = {}) => ({ ...CARD_EXAMPLE, attachmentsNeeded: [], ...over })
 const say = (v: unknown): Reply => ({ text: JSON.stringify(v), costYen: 0 })
 
-async function setup(o: { script?: ScriptEntry[]; token?: string | undefined } = {}) {
+async function setup(o: { script?: ScriptEntry[]; token?: boolean } = {}) {
   home = mkdtempSync(join(tmpdir(), 'libretto-slack-'))
   const clock = new Date('2026-10-25T03:00:00Z')
   ledger = initHome(home, () => clock)
+  // トークンは設定の画面で入れたもの（api-keys.json。6.6 (2)）
+  if (o.token !== false) setKey(home, 'slack', 'xoxp-good')
   s = await startFakeSlack()
   s.state.channels.set('C1', { name: 'general' })
   s.state.users.set('U0ALICE', '佐藤 アリス')
@@ -67,7 +69,7 @@ async function setup(o: { script?: ScriptEntry[]; token?: string | undefined } =
     invoke,
     // Google は設定なし（Slack だけで取り込む）
     google: createGoogle({ home, redirectUri: `${ORIGIN}/oauth/google/callback` }),
-    slack: createSlack({ token: 'token' in o ? o.token : 'xoxp-good', api: s.api }),
+    slack: createSlack({ token: () => readKey(home, 'slack'), api: s.api }),
     now: () => clock,
     log: () => {},
     runsWaitMs: 50,
@@ -264,7 +266,7 @@ describe('拾い上げ（6.6 (4)(5)）', () => {
 
 describe('連携の欄（6.6 (2)(7)）', () => {
   it('トークンが無ければ「設定がありません」で、取り込まない', async () => {
-    await setup({ token: undefined })
+    await setup({ token: false })
     expect((await connections()).slack).toEqual({ configured: false, state: 'none', emoji: 'memo', missingScopes: [] })
     await server.poller.run()
     expect(s.seen).toEqual([])
@@ -287,6 +289,32 @@ describe('連携の欄（6.6 (2)(7)）', () => {
     expect(JSON.stringify(v)).not.toContain('xoxp-good')
     expect(JSON.stringify(v)).not.toContain(ME)
     expect(s.seen.every((x) => x.auth === 'Bearer xoxp-good')).toBe(true)
+  })
+
+  it('トークンは設定の画面で入れる: xoxp- だけを受け、値は応答に出さず 0600 で保存。消せば取り込まない', async () => {
+    await setup({ token: false })
+    expect((await send('PUT', '/api/settings/keys/slack', { value: 'xoxb-bot-token-1234' })).status).toBe(400)
+    expect(readKey(home, 'slack')).toBeUndefined()
+    const res = await send('PUT', '/api/settings/keys/slack', { value: 'xoxp-good' })
+    expect(res.status).toBe(200)
+    const body = await res.text()
+    expect(body).not.toContain('xoxp-good')
+    expect(JSON.parse(body)).toMatchObject({ kind: 'slack', set: true, last4: 'good' })
+    expect(statSync(join(home, 'api-keys.json')).mode & 0o777).toBe(0o600)
+    expect(JSON.stringify(await (await get('/api/settings/keys')).json())).not.toContain('xoxp-good')
+    await server.poller.run()
+    expect((await connections()).slack).toMatchObject({ configured: true, state: 'connected', team: 'ACME' })
+    // 入れ直したら、前のトークンの「使えない」を持ち越さない
+    s.state.token = 'xoxp-new-token'
+    await server.poller.run()
+    expect((await connections()).slack.state).toBe('expired')
+    await send('PUT', '/api/settings/keys/slack', { value: 'xoxp-new-token' })
+    expect((await connections()).slack.state).toBe('connected')
+    expect((await send('DELETE', '/api/settings/keys/slack')).status).toBe(200)
+    expect((await connections()).slack).toMatchObject({ configured: false, state: 'none' })
+    const before = s.seen.length
+    await server.poller.run()
+    expect(s.seen).toHaveLength(before)
   })
 
   it('見出しが無ければ、口の missing_scope で覚えた権限を出す', async () => {
@@ -401,9 +429,8 @@ describe('候補の操作（6.6 (6)）', () => {
   })
 })
 
-describe('トークンを作り手に渡さない（6.6 (2)）', () => {
-  it('環境変数の許可一覧に入らず、.env.local は srt と CLI の両方で読めない', () => {
-    expect(allowedEnv({ PATH: '/bin', LIBRETTO_SLACK_USER_TOKEN: 'xoxp-x' }, 'linux')).toEqual({ PATH: '/bin' })
+describe('.env.local を作り手に読ませない（6.6 (2)）', () => {
+  it('.env.local は srt と CLI の両方で読めない', () => {
     const env = '/opt/libretto/.env.local'
     expect(denyRules('/home/u/libretto', '/home/u/.claude', [env])).toContain(`Read(/${env})`)
     const st = srtSettings({

@@ -8,7 +8,6 @@ import { causeOf, checkIsolation, probeDir } from './checks/isolation.ts'
 import { purgeClosed } from './facts/purge.ts'
 import { createGoogle, googleConfig } from './intake/google.ts'
 import { POLL_MS } from './intake/poller.ts'
-import { createSlack, slackToken } from './intake/slack.ts'
 import { callsDir, caseDir, initHome, monthCapFromEnv, resolveHome } from './ledger/db.ts'
 import { createClaudeCli, resolveClaude } from './model/claude-cli.ts'
 import { createInvoke, type Job } from './model/invoke.ts'
@@ -51,7 +50,7 @@ if (sandboxCheck.reason?.startsWith('missing:') || sandboxCheck.reason === 'user
   )
 if (!sandboxCheck.claudeOk)
   console.error(`libretto: Claude Code ${MIN_CLAUDE} or later is required. Claude is not called.`)
-// コードの置き場の .env.local（Google の秘密と Slack のトークン）を作り手に読ませない。ホームの外に置かれても（6.6 (2)）
+// コードの置き場の .env.local（Google の秘密）を作り手に読ませない。ホームの外に置かれても（6.6 (2)）
 const envFile = fileURLToPath(new URL('../../.env.local', import.meta.url))
 const secrets = existsSync(envFile) ? [envFile] : []
 const sandbox = createSandbox({ home, claude, check: () => sandboxCheck, secrets })
@@ -106,7 +105,6 @@ const server = createServer({
   invoke,
   origins,
   google,
-  slack: createSlack({ token: slackToken(), log: (line) => console.error(line) }),
   staticDir: fileURLToPath(new URL('../../page/dist', import.meta.url)),
   isolation: sandboxCheck.isolation,
   ...(cause && { cause }),

@@ -684,21 +684,22 @@ libretto の画面に出す言葉の正本。設計書（[`docs/design.md`](./de
 
 **設定の面の連携（Slack。実装設計書 6.6 (2)(7)）**
 
-`settings.slack.missing` の {scopes} は足りない権限の名前（`reactions:read` など）をそのまま並べる。オーナーが Slack アプリの設定画面で探す名前なので、言い換えない。連携する・解除のボタンは無い（トークンは `.env.local` に置く。実装設計書 6.6 (2)）。
+Slack の行は API キーの行と同じ形（貼り付け・「入れ直す」・「削除」、保存後は「設定済み（末尾 1a2b）」。`settings.key.*` を使う）で、トークンは画面に二度と出さない（オーナー判断 2026-10-25）。下の文は Slack の行だけのもの。`settings.slack.missing` の {scopes} は足りない権限の名前（`reactions:read` など）をそのまま並べる。オーナーが Slack アプリの設定画面で探す名前なので、言い換えない。
 
 | キー | 文 |
 |---|---|
 | `settings.slack.label` | Slack |
 | `settings.slack.use` | あなたがリアクション :memo: を付けた投稿と、そのスレッドを読みます。添付のファイルは読みません。投稿やリアクションはしません |
+| `settings.slack.unsetNote` | Slack から取り込むには、Slack アプリを作り、その「User OAuth Token」（xoxp- で始まるもの）をここに貼り付けてください。 |
+| `settings.slack.input` | トークンを貼り付け |
+| `settings.slack.saved` | 保存しました。Slack からの取り込みを始めます。 |
+| `settings.slack.invalid` | Slack アプリの「User OAuth Token」（xoxp- で始まるもの）を貼り付けてください。「Bot User OAuth Token」（xoxb- で始まるもの）では取り込めません。 |
+| `settings.slack.deleteTitle` | Slack のトークンを削除しますか |
+| `settings.slack.deleteBody` | Slack からの取り込みを止めます。出ている依頼の候補はそのまま残ります。 |
 | `settings.slack.signal` | 取り込みの目印はリアクション :{emoji}: です。このリアクションを付けた投稿が依頼の候補に出ます。 |
-| `settings.slack.connected` | 連携済み |
 | `settings.slack.as` | {team} の {user} で連携しています |
-| `settings.slack.expired` | 連携し直してください |
-| `settings.slack.expiredNote` | Slack のトークンが使えなくなりました。Slack アプリの設定画面でアプリをワークスペースに入れ直し、出たトークンを PC の `.env.local` に入れ直して、libretto を再起動してください。 |
-| `settings.slack.unconfigured` | 設定がありません |
-| `settings.slack.unconfiguredNote` | Slack と連携する設定がまだありません。Slack アプリのトークンを PC の `.env.local` に入れて、libretto を再起動してください。 |
-| `settings.slack.missing` | Slack アプリに権限 {scopes} がありません。Slack アプリの設定画面の「OAuth & Permissions」で「User Token Scopes」に足し、アプリをワークスペースに入れ直してください。トークンが変わったら `.env.local` を書き換えて、libretto を再起動してください。 |
-| `settings.slack.stopNote` | 取り込みを止めるときは、`.env.local` から Slack のトークンの行を消して、libretto を再起動してください。 |
+| `settings.slack.expiredNote` | Slack がこのトークンを受け付けませんでした（取り消されたか、期限が切れました）。Slack アプリの設定画面でアプリをワークスペースに入れ直し、出た「User OAuth Token」を「入れ直す」から貼り付けてください。 |
+| `settings.slack.missing` | Slack アプリに権限 {scopes} がありません。Slack アプリの設定画面の「OAuth & Permissions」で「User Token Scopes」に足し、アプリをワークスペースに入れ直してください。トークンが変わったら「入れ直す」から貼り付けてください。 |
 | `settings.slack.problem.rate_limited` | Slack が混み合っていたので、取り込みを次の回に回しました。 |
 | `settings.slack.problem.network` | Slack につながりませんでした。15 分後にもう一度見ます。 |
 | `settings.slack.lastAt` | {at} に取り込み |

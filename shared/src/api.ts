@@ -471,7 +471,8 @@ export const ConversationAccepted = z.object({ seq: z.number().int(), replayed: 
 export const ConversationRejected = z.object({ reason: z.enum(['busy', 'stopped', 'stale']) })
 
 // 識別子の値（'openai' など）は「出さない語」の検査の対象外（11.2）
-export const ApiKeyKind = z.enum(['openai', 'jev'])
+// slack は Slack アプリのユーザートークン（オーナー判断 2026-10-25。6.6 (2)）
+export const ApiKeyKind = z.enum(['openai', 'jev', 'slack'])
 export const ApiKeyStatus = z.discriminatedUnion('set', [
   z.object({ kind: ApiKeyKind, set: z.literal(false) }),
   z.object({ kind: ApiKeyKind, set: z.literal(true), last4: z.string().length(4), savedAt: z.string() }),

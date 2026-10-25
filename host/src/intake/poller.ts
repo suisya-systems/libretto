@@ -182,13 +182,13 @@ export function createPoller(d: Deps) {
   // Gmail の後に Slack。片方の失敗はもう片方を止めない（6.6 (4)）
   async function once(signal: AbortSignal) {
     if (d.google.status().state === 'connected') await gmailOnce(signal)
-    if (d.slack?.configured && !signal.aborted) await slackOnce(d.slack, signal)
+    if (d.slack?.configured() && !signal.aborted) await slackOnce(d.slack, signal)
   }
 
   // 走っていれば同じ回に乗る。どちらもつながっていない・止まっている間は何もしない
   function run(): Promise<void> {
     if (running) return running
-    if (d.google.status().state !== 'connected' && !d.slack?.configured) return Promise.resolve()
+    if (d.google.status().state !== 'connected' && !d.slack?.configured()) return Promise.resolve()
     let ac: AbortController
     try {
       ac = d.runs.open(RUN_KEY)

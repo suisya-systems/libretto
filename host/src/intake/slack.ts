@@ -1,4 +1,4 @@
-// Slack の合図（docs/implementation.md 6.6）。呼び出しは fetch で直接。トークンは .env.local とメモリだけで、外へ返さない。
+// Slack の合図（docs/implementation.md 6.6）。呼び出しは fetch で直接。トークンは api-keys.json（keys.ts）から呼ぶたびに読み、外へ返さない。
 // ファイルは名前だけ（files.* と url_private は呼ばない）。本文はメモリで渡して捨てる
 import { jst } from '../ledger/ledger.ts'
 
@@ -20,32 +20,42 @@ const CALL_MS = 15_000
 const MAX_BODY = 20_000
 const AUTH = new Set(['invalid_auth', 'not_authed', 'token_revoked', 'token_expired', 'account_inactive'])
 
-// .env.local の 1 つ（6.6 (2)）
-export const slackToken = (env: NodeJS.ProcessEnv = process.env) => env.LIBRETTO_SLACK_USER_TOKEN?.trim() || undefined
-
 export type SlackFail = { ok: false; why: 'not_connected' | 'auth_expired' | 'rate_limited' | 'network' | 'rejected' }
 export type Me = { userId: string; team: string; user: string; url: string }
 export type Slack = ReturnType<typeof createSlack>
 
-export function createSlack(o: { token?: string | undefined; api?: string; log?: (line: string) => void }) {
+// token は設定の画面で入れたもの（keys.ts の readKey）。入れ直したら、前のトークンで覚えた本人・期限切れ・足りない権限を捨てる
+export function createSlack(o: { token: () => string | undefined; api?: string; log?: (line: string) => void }) {
   const api = o.api ?? SLACK_API
   const log = o.log ?? (() => {})
   let me: Me | undefined
   let expired = false
   let missing = new Set<string>()
+  let seen: string | undefined
+  const current = () => {
+    const t = o.token()
+    if (t !== seen) {
+      seen = t
+      me = undefined
+      expired = false
+      missing = new Set()
+    }
+    return t
+  }
 
   async function call<T>(
     method: string,
     params: Record<string, string>,
     signal: AbortSignal,
   ): Promise<{ ok: true; json: T; headers: Headers } | SlackFail> {
-    if (!o.token) return { ok: false, why: 'not_connected' }
+    const token = current()
+    if (!token) return { ok: false, why: 'not_connected' }
     let res: Response
     let body: Record<string, unknown>
     try {
       res = await fetch(`${api}/${method}`, {
         method: 'POST',
-        headers: { authorization: `Bearer ${o.token}`, 'content-type': 'application/x-www-form-urlencoded' },
+        headers: { authorization: `Bearer ${token}`, 'content-type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams(params),
         signal: AbortSignal.any([signal, AbortSignal.timeout(CALL_MS)]),
       })
@@ -60,6 +70,8 @@ export function createSlack(o: { token?: string | undefined; api?: string; log?:
       if (signal.aborted) throw e
       return { ok: false, why: 'network' }
     }
+    // 呼んでいる間に入れ直されていれば、前のトークンの結果を使わず、今の状態も書き換えない
+    if (current() !== token) return { ok: false, why: 'not_connected' }
     if (body.ok === true) return { ok: true, json: body as T, headers: res.headers }
     const error = String(body.error ?? '')
     log(`slack ${method}: ${error}`)
@@ -74,10 +86,11 @@ export function createSlack(o: { token?: string | undefined; api?: string; log?:
   }
 
   return {
-    configured: !!o.token,
+    configured: () => !!current(),
     status() {
+      const token = current()
       return {
-        state: !o.token ? ('none' as const) : expired ? ('expired' as const) : ('connected' as const),
+        state: !token ? ('none' as const) : expired ? ('expired' as const) : ('connected' as const),
         ...(me && { team: me.team, user: me.user, userId: me.userId }),
         missingScopes: SLACK_SCOPES.filter((s) => missing.has(s)),
       }

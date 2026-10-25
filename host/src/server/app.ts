@@ -36,11 +36,11 @@ import { CLOSED, purge } from '../facts/purge.ts'
 import { readThread } from '../intake/gmail.ts'
 import { createGoogle, type Google } from '../intake/google.ts'
 import { createPoller, RUN_KEY } from '../intake/poller.ts'
-import { parseCandidateId, readPost, type Slack } from '../intake/slack.ts'
+import { createSlack, parseCandidateId, readPost, type Slack } from '../intake/slack.ts'
 import { caseDir } from '../ledger/db.ts'
 import type { Ledger } from '../ledger/ledger.ts'
 import type { Job, Outcome } from '../model/invoke.ts'
-import { deleteKey, keyStatus, setKey } from '../model/keys.ts'
+import { deleteKey, keyStatus, readKey, setKey } from '../model/keys.ts'
 import type { Isolation } from '../model/sandbox.ts'
 import { createConversation } from '../roles/conversation.ts'
 import { createEntrance, currentSet, entranceView, writeApproval, writeAtomic } from '../roles/entrance.ts'
@@ -78,7 +78,7 @@ export type ServerOptions = {
   fetch?: Fetch // 出典の取り寄せ（テストは偽物。6.3.1 (5)）
   google?: Google // Google の連携（6.4 (2)）。無ければ設定の無い連携
   gmailLabel?: string // 取り込みの目印（設定の Issue までは既定の libretto）
-  slack?: Slack // Slack の連携（6.6 (2)）。無ければトークンの無い連携
+  slack?: Slack // Slack の連携（6.6 (2)）。無ければ設定の画面で入れたトークンで
   slackEmoji?: string // 取り込みの目印（設定の Issue までは既定の memo）
 }
 
@@ -127,14 +127,14 @@ export function createServer(o: ServerOptions) {
 
   const google = o.google ?? createGoogle({ home, redirectUri: 'http://127.0.0.1/oauth/google/callback', log })
   const gmailLabel = o.gmailLabel ?? 'libretto'
-  const slack = o.slack
+  const slack = o.slack ?? createSlack({ token: () => readKey(home, 'slack'), log })
   const slackEmoji = o.slackEmoji ?? 'memo'
   // 取り込み元の本文を読み直す。今の連携の本人が取り込んだときと同じときだけ（6.4 (5)(6)・6.6 (6)）
   const reread = async (candidateId: string, account: string | undefined, signal: AbortSignal) => {
     if (!account) return undefined
     const at = parseCandidateId(candidateId)
     if (at) {
-      if (!slack?.configured) return undefined
+      if (!slack.configured()) return undefined
       const who = await slack.whoami(signal)
       if (!who.ok || who.me.userId !== account) return undefined
       const r = await readPost(slack, who.me, at.channel, at.ts, undefined, signal)
@@ -354,10 +354,17 @@ export function createServer(o: ServerOptions) {
     return c.json(view)
   })
 
+  // Slack のトークンを入れた・入れ直した・消した: 連携の欄を取り直させ、入っていれば取り込む（6.6 (2)）
+  function slackChanged() {
+    hub.emit('connections.changed', {})
+    candidatesChanged()
+    if (!stop.isStopped()) void poller.run()
+  }
+
   // Slack の行（6.6 (7)）。user_id は返さない
   function slackView(): ConnectionsView['slack'] {
-    const { userId: _, ...s } = slack?.status() ?? { state: 'none' as const, missingScopes: [] }
-    return { configured: !!slack?.configured, ...s, emoji: slackEmoji, ...poller.slackView() }
+    const { userId: _, ...s } = slack.status()
+    return { configured: slack.configured(), ...s, emoji: slackEmoji, ...poller.slackView() }
   }
 
   // 連携する（6.4 (2)）。画面は返した URL へ移る
@@ -476,7 +483,7 @@ export function createServer(o: ServerOptions) {
     if (!stop.isStopped()) poller.maybe() // 画面を開いたとき（4.5）
     const { running, lastAt: gmailAt } = poller.view()
     // どちらかがつながっていれば候補の欄を出す。取り込みの時刻は新しいほう（6.6 (7)）
-    const connected = google.status().state === 'connected' || slack?.status().state === 'connected'
+    const connected = google.status().state === 'connected' || slack.status().state === 'connected'
     const slackAt = poller.slackView().lastAt
     const lastAt = [gmailAt, slackAt]
       .filter((x) => x !== undefined)
@@ -715,17 +722,23 @@ export function createServer(o: ServerOptions) {
     const body = ApiKeyInput.safeParse(await c.req.json().catch(() => undefined))
     // 値を含む issues は返さない
     if (!body.success) return c.json({ reason: 'invalid' }, 400)
+    // Slack はユーザートークンだけ（ボットトークンでは本人のリアクションを読めない。6.6 (2)）
+    if (kind.data === 'slack' && !body.data.value.startsWith('xoxp-')) return c.json({ reason: 'invalid' }, 400)
     const r = writing(c, () => setKey(home, kind.data, body.data.value, now()))
     if (r instanceof Response) return r
     hub.emit('settings.changed', {})
+    if (kind.data === 'slack') slackChanged()
     return c.json(r)
   })
-  app.delete('/api/settings/keys/:kind', (c) => {
+  app.delete('/api/settings/keys/:kind', async (c) => {
     const kind = ApiKeyKind.safeParse(c.req.param('kind'))
     if (!kind.success) return c.json({ reason: 'not_found' }, 404)
+    // Slack は動いている取り込みを止めてから消す（消した後に前のトークンで候補を出さない）
+    if (kind.data === 'slack') await runs.abort(RUN_KEY)
     const r = writing(c, () => deleteKey(home, kind.data))
     if (r instanceof Response) return r
     hub.emit('settings.changed', {})
+    if (kind.data === 'slack') slackChanged()
     return c.json(r)
   })
 
