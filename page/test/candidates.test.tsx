@@ -176,6 +176,12 @@ describe('依頼の候補（6.4 (7)）', () => {
 })
 
 describe('会議メモ（6.7 (5)）', () => {
+  // 画面は端末の時間帯で日時を出す（CI は UTC）。期待値も同じ時間帯で作る
+  const local = (at: string) => {
+    const d = new Date(at)
+    const pad = (n: number) => String(n).padStart(2, '0')
+    return `${d.getMonth() + 1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+  }
   const meet = (over: Partial<CandidateCard>): CandidateCard => ({
     ...card,
     id: 'meet:f1:aaaaaaaaaaaa',
@@ -226,13 +232,17 @@ describe('会議メモ（6.7 (5)）', () => {
     })
     const r = await render()
     expect(r.text()).toContain(W['cand.mark.meet.高'])
-    expect(r.text()).toContain(w('cand.meetFrom', { from: '岩間 涼', at: '10/24 10:05' }))
+    expect(r.text()).toContain(w('cand.meetFrom', { from: '岩間 涼', at: local('2026-10-24T10:05:00.000+09:00') }))
     expect(r.text()).toContain(w('home.lowFold', { n: 1 }))
     expect(r.text()).toContain(W['cand.mark.inferred.低'])
-    expect(r.text()).toContain(w('cand.meetFrom', { from: W['cand.noAssignee'], at: '10/24 10:05' }))
+    expect(r.text()).toContain(
+      w('cand.meetFrom', { from: W['cand.noAssignee'], at: local('2026-10-24T10:05:00.000+09:00') }),
+    )
     expect(r.text()).toContain(w('cand.why', { why: '担当がチームです' }))
-    expect(r.text()).toContain(w('home.meetNote.none', { title: '定例', at: '10/24 10:00' }))
-    expect(r.text()).toContain(w('home.meetNote.unreadable', { title: '朝会', at: '10/24 09:00' }))
+    expect(r.text()).toContain(w('home.meetNote.none', { title: '定例', at: local('2026-10-24T10:00:00.000+09:00') }))
+    expect(r.text()).toContain(
+      w('home.meetNote.unreadable', { title: '朝会', at: local('2026-10-24T09:00:00.000+09:00') }),
+    )
     expect(r.text()).toContain(W['cand.openMeet'])
     r.done()
   })
