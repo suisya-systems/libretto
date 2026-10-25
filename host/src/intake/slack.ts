@@ -20,8 +20,15 @@ export const SLACK_API = 'https://slack.com/api'
 const CALL_MS = 15_000
 const MAX_BODY = 20_000
 const AUTH = new Set(['invalid_auth', 'not_authed', 'token_revoked', 'token_expired', 'account_inactive'])
+// Slack の側の一時的な失敗（次に送り直す・次の回に回す）
+const BUSY = new Set(['internal_error', 'fatal_error', 'service_unavailable', 'request_timeout'])
 
-export type SlackFail = { ok: false; why: 'not_connected' | 'auth_expired' | 'rate_limited' | 'network' | 'rejected' }
+// error は rejected のときの Slack のエラー名（missing_scope など）
+export type SlackFail = {
+  ok: false
+  why: 'not_connected' | 'auth_expired' | 'rate_limited' | 'network' | 'rejected'
+  error?: string
+}
 export type Me = { userId: string; team: string; user: string; url: string }
 export type Slack = ReturnType<typeof createSlack>
 
@@ -80,10 +87,11 @@ export function createSlack(o: { token: () => string | undefined; api?: string; 
       expired = true
       return { ok: false, why: 'auth_expired' }
     }
-    if (error === 'ratelimited') return { ok: false, why: 'rate_limited' }
+    if (error === 'ratelimited' || error === 'rate_limited') return { ok: false, why: 'rate_limited' }
+    if (BUSY.has(error)) return { ok: false, why: 'network' }
     if (error === 'missing_scope' && typeof body.needed === 'string')
       for (const s of body.needed.split(',')) missing.add(s.trim())
-    return { ok: false, why: 'rejected' }
+    return { ok: false, why: 'rejected', error }
   }
 
   return {

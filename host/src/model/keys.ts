@@ -14,6 +14,7 @@ const File = z.object({
   openai: Entry.optional(),
   jev: Entry.optional(),
   slack: Entry.optional(),
+  slackBot: Entry.optional(),
   googleClient: GoogleClient.optional(),
 })
 type File = z.infer<typeof File>

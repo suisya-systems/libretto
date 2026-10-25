@@ -1,5 +1,6 @@
-// 偽の Slack（docs/implementation.md 11.1・6.6 (8)・6.9 (11)）。口（auth.test・reactions.list・conversations.replies・
-// conversations.info・users.info と、自動検出の search.messages・conversations.history・conversations.list）をプロセス内の HTTP で受け、受けた要求を記録する。テストは「files.* を呼んでいない」をこの記録で確かめる
+// 偽の Slack（docs/implementation.md 11.1・6.6 (8)・6.9 (11)・6.8 (12)）。口（auth.test・reactions.list・conversations.replies・
+// conversations.info・users.info と、自動検出の search.messages・conversations.history・conversations.list、お知らせの chat.postMessage）を
+// プロセス内の HTTP で受け、受けた要求を記録する。テストは「files.* を呼んでいない」をこの記録で確かめる
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { type RawMessage, type ReactionItem, SLACK_SCOPES } from '../../src/intake/slack.ts'
@@ -12,6 +13,9 @@ export async function startFakeSlack() {
   const seen: SlackSeen[] = []
   const state = {
     token: 'xoxp-good',
+    botToken: 'xoxb-good', // お知らせのボット。auth.test と chat.postMessage だけ受ける
+    botScopes: ['chat:write'] as string[],
+    posts: [] as { channel: string; text: string }[], // chat.postMessage で届いたもの
     userId: ME, // auth.test が返す本人
     scopes: SLACK_SCOPES as string[] | undefined, // undefined なら x-oauth-scopes の見出しを返さない
     items: [] as ReactionItem[],
@@ -40,6 +44,18 @@ export async function startFakeSlack() {
       return res.end()
     }
     if (f?.error) return json({ ok: false, error: f.error, ...(f.needed && { needed: f.needed }) })
+    if (req.headers.authorization === `Bearer ${state.botToken}`) {
+      if (method === 'auth.test')
+        return json(
+          { ok: true, url: 'https://acme.slack.com/', team: 'ACME', user: 'libretto', user_id: 'U0BOT', bot_id: 'B1' },
+          { 'x-oauth-scopes': state.botScopes.join(',') },
+        )
+      if (method !== 'chat.postMessage') return json({ ok: false, error: 'not_allowed_token_type' })
+      if (!state.botScopes.includes('chat:write'))
+        return json({ ok: false, error: 'missing_scope', needed: 'chat:write' })
+      state.posts.push({ channel: params.channel ?? '', text: params.text ?? '' })
+      return json({ ok: true, channel: 'D1', ts: '1.0' })
+    }
     if (req.headers.authorization !== `Bearer ${state.token}`) return json({ ok: false, error: 'invalid_auth' })
 
     if (method === 'auth.test')

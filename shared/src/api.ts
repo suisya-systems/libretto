@@ -423,6 +423,8 @@ export const ConnectionsView = z.object({
     lastAt: z.string().optional(),
     problem: z.enum(['rate_limited', 'network']).optional(),
   }),
+  // Slack の DM のお知らせ（6.8 (7)(8)）。unchecked はまだ確かめられていない（Slack に届かなかった）
+  slackDm: z.object({ state: z.enum(['none', 'unchecked', 'on', 'noUser', 'missingScope', 'rejected']) }),
   // ファイルを作る道具（起動時の事前点検。6.10 (5)）。LibreOffice（soffice）と poppler（pdftoppm）
   tools: z.object({ soffice: z.boolean(), pdftoppm: z.boolean() }),
   // 自動検出（6.9 (6)(8)(10)）。recall は直近 30 日の合図のうち、自動検出が先に見つけていた数
@@ -542,8 +544,8 @@ export const ConversationAccepted = z.object({ seq: z.number().int(), replayed: 
 export const ConversationRejected = z.object({ reason: z.enum(['busy', 'stopped', 'stale']) })
 
 // 識別子の値（'openai' など）は「出さない語」の検査の対象外（11.2）
-// slack は Slack アプリのユーザートークン（オーナー判断 2026-10-25。6.6 (2)）
-export const ApiKeyKind = z.enum(['openai', 'jev', 'slack'])
+// slack は Slack アプリのユーザートークン（オーナー判断 2026-10-25。6.6 (2)）、slackBot はお知らせの DM を送るボットトークン（6.8 (8)）
+export const ApiKeyKind = z.enum(['openai', 'jev', 'slack', 'slackBot'])
 export const ApiKeyStatus = z.discriminatedUnion('set', [
   z.object({ kind: ApiKeyKind, set: z.literal(false) }),
   z.object({ kind: ApiKeyKind, set: z.literal(true), last4: z.string().length(4), savedAt: z.string() }),

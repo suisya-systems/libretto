@@ -74,6 +74,7 @@ import {
   voiceSamples,
 } from '../settings.ts'
 import { createNotices, type Sender } from './notices.ts'
+import { createSlackDm, SLACK_DM_HOLD_MS } from './slack-dm.ts'
 import { createHub, type SseMessage } from './sse.ts'
 import { createStop, isStorageError } from './stop.ts'
 import { caseView, DEFAULTS, homeView, toCard } from './views.ts'
@@ -106,8 +107,9 @@ export type ServerOptions = {
   gmailLabel?: string // 取り込みの目印（設定の Issue までは既定の libretto）
   slack?: Slack // Slack の連携（6.6 (2)）。無ければ設定の画面で入れたトークンで
   slackEmoji?: string // 取り込みの目印（設定の Issue までは既定の memo）
+  slackBot?: Slack // お知らせの Slack の DM（6.8 (8)）。無ければ設定の画面で入れたボットトークンで
   tools?: Tools // 起動時の事前点検で見つけた LibreOffice と poppler（6.10 (5)）
-  senders?: Record<string, Sender> // お知らせの画面の外の送り手（6.8 (5)。Web Push・Slack の DM は後の Issue）
+  senders?: Record<string, Sender> // お知らせの画面の外の送り手（6.8 (5)）。Slack の DM は slackBot から作る
 }
 
 export function createServer(o: ServerOptions) {
@@ -116,9 +118,19 @@ export function createServer(o: ServerOptions) {
   const { home, ledger } = o
   const status: HostStatus = { stopped: false, storageOk: true, signIn: false, isolation: o.isolation ?? 'strong' }
   const hub = createHub()
-  // お知らせ（6.8）。出来事ごとの入り切りは書くときに settings から。画面の外の送り先は後の Issue（今は画面の通知 B だけ）
-  ledger.noticeRoute = { on: (kind) => kind !== 'info' && noticePrefs(home)[kind], targets: () => [] }
-  const notices = createNotices({ ledger, hub, ...(o.senders && { senders: o.senders }), now, log })
+  // お知らせ（6.8）。出来事ごとの入り切りは書くときに settings から。画面の外の送り先は、ボットトークンがあれば Slack の DM
+  ledger.noticeRoute = {
+    on: (kind) => kind !== 'info' && noticePrefs(home)[kind],
+    targets: () => (readKey(home, 'slackBot') ? ['slack'] : []),
+  }
+  const notices = createNotices({
+    ledger,
+    hub,
+    senders: { slack: (target, ns) => slackDm.send(target, ns), ...o.senders },
+    holdMs: { slack: SLACK_DM_HOLD_MS },
+    now,
+    log,
+  })
   const changed = () => hub.emit('host.changed', { ...status })
   const storage = (written: boolean) => {
     const ok = written && !stop.unsaved()
@@ -161,6 +173,14 @@ export function createServer(o: ServerOptions) {
   const gmailLabel = o.gmailLabel ?? 'libretto'
   const slack = o.slack ?? createSlack({ token: () => readKey(home, 'slack'), log })
   const slackEmoji = o.slackEmoji ?? 'memo'
+  // 押して開くリンクは Tailscale の HTTPS の起点で組む（6.8 (3)）
+  const slackDm = createSlackDm({
+    bot: o.slackBot ?? createSlack({ token: () => readKey(home, 'slackBot'), log }),
+    user: slack,
+    origin: o.origins.find((x) => x.startsWith('https://')),
+    changed: () => hub.emit('connections.changed', {}),
+  })
+  void slackDm.check()
   // 取り込み元の本文を読み直す。今の連携の本人が取り込んだときと同じときだけ（6.4 (5)(6)・6.6 (6)・6.7 (4)）
   const reread = async (candidateId: string, account: string | undefined, signal: AbortSignal) => {
     if (!account) return undefined
@@ -404,6 +424,7 @@ export function createServer(o: ServerOptions) {
         ...poller.meetView(),
       },
       slack: slackView(),
+      slackDm: { state: slackDm.state() },
       tools: { soffice: !!tools.soffice, pdftoppm: !!tools.pdftoppm },
       inference: {
         classifiedToday: ledger.classifiedCount(now()),
@@ -889,12 +910,15 @@ export function createServer(o: ServerOptions) {
     if (!body.success) return c.json({ reason: 'invalid' }, 400)
     // Slack はユーザートークンだけ（ボットトークンでは本人のリアクションを読めない。6.6 (2)）
     if (kind.data === 'slack' && !body.data.value.startsWith('xoxp-')) return c.json({ reason: 'invalid' }, 400)
+    // お知らせの DM はボットトークンだけ（ユーザートークンで本人に書くと本人の投稿になり、鳴らない。6.8 (2)）
+    if (kind.data === 'slackBot' && !body.data.value.startsWith('xoxb-')) return c.json({ reason: 'invalid' }, 400)
     // 入れ直す前に動いている取り込みを止める（前のトークンで読んだ投稿を、入れ直した後に候補にしない）
     if (kind.data === 'slack') await runs.abort(RUN_KEY)
     const r = writing(c, () => setKey(home, kind.data, body.data.value, now()))
     if (r instanceof Response) return r
     hub.emit('settings.changed', {})
     if (kind.data === 'slack') intakeChanged()
+    if (kind.data === 'slack' || kind.data === 'slackBot') void slackDm.check()
     return c.json(r)
   })
   app.delete('/api/settings/keys/:kind', async (c) => {
@@ -906,6 +930,7 @@ export function createServer(o: ServerOptions) {
     if (r instanceof Response) return r
     hub.emit('settings.changed', {})
     if (kind.data === 'slack') intakeChanged()
+    if (kind.data === 'slack' || kind.data === 'slackBot') void slackDm.check()
     return c.json(r)
   })
 
