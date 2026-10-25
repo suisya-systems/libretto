@@ -300,7 +300,8 @@ describe('連携の欄（6.6 (2)(7)）', () => {
     const body = await res.text()
     expect(body).not.toContain('xoxp-good')
     expect(JSON.parse(body)).toMatchObject({ kind: 'slack', set: true, last4: 'good' })
-    expect(statSync(join(home, 'api-keys.json')).mode & 0o777).toBe(0o600)
+    // Windows はファイルの権限の数字を持たない（server.test.ts の API キーと同じ）
+    if (process.platform !== 'win32') expect(statSync(join(home, 'api-keys.json')).mode & 0o777).toBe(0o600)
     expect(JSON.stringify(await (await get('/api/settings/keys')).json())).not.toContain('xoxp-good')
     await server.poller.run()
     expect((await connections()).slack).toMatchObject({ configured: true, state: 'connected', team: 'ACME' })
@@ -347,18 +348,12 @@ describe('トークンの入れ直し（6.6 (2)）', () => {
   it('取り込みの最中に入れ直したら、その回は止まり、前のトークンで読んだ投稿を候補にしない', async () => {
     await setup()
     s.state.items = [reacted('C1', { ts: ts(1), user: ME, text: 'x' })]
-    let release: () => void = () => {}
-    cardReply = () => {
-      const r = new Promise<void>((done) => {
-        release = done
-      })
-      return r.then(() => say(draft())) as never
-    }
+    // 要約の返事は、入れ直しがその回を止めてから届く（時間を決め打ちしない）
+    cardReply = (call) =>
+      new Promise<Reply>((done) => call.signal.addEventListener('abort', () => done(say(draft())))) as never
     const running = server.poller.run()
     for (let i = 0; i < 100 && cardCalls().length === 0; i++) await new Promise((r) => setTimeout(r, 10))
     const put = send('PUT', '/api/settings/keys/slack', { value: 'xoxp-new-token' })
-    await new Promise((r) => setTimeout(r, 20)) // 入れ直しが取り込みを止めるまで
-    release()
     expect((await put).status).toBe(200)
     await running
     expect(ledger.getCandidate(`slack:C1:${ts(1)}`)).toBeUndefined()
