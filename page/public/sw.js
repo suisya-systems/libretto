@@ -50,7 +50,9 @@ self.addEventListener('push', (e) => {
   e.waitUntil(queue)
 })
 
-// 開いているタブがあればそこで面を開き、無ければ新しく開く
+// 開いているタブがあればそこで面を開き、無ければ新しく開く。開いているタブは前に出してから読み込み直させる
+// （裏で止まっていたページは postMessage を取りこぼし、古い面のまま出ることがある。implementation.md 5.8 (7)）。
+// navigate が使えない・このワーカーの管理外のページだけ、ページに移らせる
 self.addEventListener('notificationclick', (e) => {
   e.notification.close()
   const path = e.notification.data?.path || '/'
@@ -58,8 +60,10 @@ self.addEventListener('notificationclick', (e) => {
     windows().then((ws) => {
       const w = ws[0]
       if (!w) return self.clients.openWindow(path)
-      w.postMessage({ type: 'open', path })
-      return w.focus()
+      return w
+        .focus()
+        .then((f) => (f ?? w).navigate(path))
+        .catch(() => w.postMessage({ type: 'open', path }))
     }),
   )
 })

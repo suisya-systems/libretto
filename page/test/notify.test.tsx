@@ -25,7 +25,8 @@ const notice = (id: number, caseId = 'c1'): Notice => ({
 
 // --- public/sw.js を偽の self で動かす
 type Shown = { title: string; tag: string; body: string; data: { id: number; caseId?: string }; closed?: boolean }
-function worker(windows: { visibilityState: string; focused: boolean; url?: string; sent?: unknown[] }[] = []) {
+type Win = { visibilityState: string; focused: boolean; url?: string; sent?: unknown[]; log?: string[]; nav?: boolean }
+function worker(windows: Win[] = []) {
   const handlers: Record<string, (e: unknown) => void> = {}
   const shown: Shown[] = []
   const opened: string[] = []
@@ -43,7 +44,15 @@ function worker(windows: { visibilityState: string; focused: boolean; url?: stri
           postMessage: (m: unknown) => {
             w.sent = [...(w.sent ?? []), m]
           },
-          focus: async () => {},
+          focus: async () => {
+            w.log?.push('focus')
+          },
+          // 管理下のページだけが持つ想定で、nav のときだけ置く
+          ...(w.nav && {
+            navigate: async (path: string) => {
+              w.log?.push(`navigate ${path}`)
+            },
+          }),
         })),
       openWindow: async (path: string) => {
         opened.push(path)
@@ -143,6 +152,14 @@ describe('サービスワーカーの出し方', () => {
     const none = worker()
     await none.click({ path: '/' })
     expect(none.opened).toEqual(['/'])
+  })
+
+  // 2 回目の通知を押すと、裏で止まっていたページが古い面のまま出た（GitHub #66）
+  it('開いているタブは前に出してから、その面を読み込み直させる', async () => {
+    const tab: Win = { visibilityState: 'hidden', focused: false, sent: [], log: [], nav: true }
+    await worker([tab]).click({ path: '/cases/c1' })
+    expect(tab.log).toEqual(['focus', 'navigate /cases/c1'])
+    expect(tab.sent).toEqual([])
   })
 })
 

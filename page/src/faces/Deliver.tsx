@@ -4,6 +4,7 @@ import { type CaseView, DEST_TARGET, type DeliveryTarget, destChoiceOf } from '@
 import { useEffect, useState } from 'react'
 import { Link } from 'wouter'
 import { useCaseAction } from '../action.ts'
+import { useResync } from '../load.ts'
 import { W, w } from '../wording.ts'
 import { CaseHeader, History, Leftovers, Versions } from './Progress.tsx'
 
@@ -23,7 +24,9 @@ const day = (at: string) =>
 function usePaste(caseId: string, n: number, want: boolean) {
   const [text, setText] = useState<string>()
   const [failed, setFailed] = useState(false)
+  const resync = useResync()
   useEffect(() => {
+    void resync // SSE がつながり直したら取り直す（5.8 (7)）
     if (!want) return
     const ac = new AbortController()
     setFailed(false)
@@ -35,7 +38,7 @@ function usePaste(caseId: string, n: number, want: boolean) {
       .then(setText)
       .catch(() => !ac.signal.aborted && setFailed(true))
     return () => ac.abort()
-  }, [caseId, n, want])
+  }, [caseId, n, want, resync])
   return { text, failed }
 }
 
