@@ -25,10 +25,10 @@ Slack などに AI の同僚を置いて仕事を任せる製品に、Anthropic 
 
 ### Librettoはワークフローを自分で管理できる
 
-- 依頼が届いてから送り出すまでの段取りは公開されていて、誰でも読めます（遷移表）
+- 依頼が届いてから送り出すまでの段取りは公開されていて、誰でも読めます（[遷移表](docs/implementation.md)）
 - ユーザーが承認したことや答えたことは日時付きで手元に残り、あとから書き換えも削除もされません。おまかせで自動に進んだものも、そうと分かる形で残ります
 - Gmail・Slack・議事録などの取り込み元ごとに「おまかせ」か「確認しながら」を選べるので、どこで手を止めてユーザーに確認するかを自分で決められます
-- 段取りと記録はユーザーの PC に置かれ、役割ごとに使うモデルは表で差し替えられる作りです（役割とモデルの表）
+- 段取りと記録はユーザーの PC に置かれ、役割ごとに使うモデルは表で差し替えられる作りです（[役割とモデルの表](host/src/model/roles.ts)）
 - これらの記録や仕組みを元にフォークして自分たちの業務に最適化したカスタマイズを自身で行うことが可能です
 
 Claude Tag と dots の記述は、2026-10-26 時点の公式の説明（[Claude Tag のドキュメント](https://claude.com/docs/claude-tag)・[セキュリティとデータの扱い](https://claude.com/docs/claude-tag/concepts/security-and-data.md)、[Introducing dots](https://openai.com/index/introducing-dots/)・[dots のヘルプ](https://help.openai.com/en/articles/20001530-getting-started-with-your-dot)）によります。
