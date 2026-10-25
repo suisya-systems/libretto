@@ -162,6 +162,8 @@ export function createPoller(d: Deps) {
       if (flagged === 'stopped') return
       const drafted = await draftCard(deps, { ...p, slack: true })
       if (!drafted.ok && drafted.stopped) return
+      // 要約を待つ間にトークンを入れ直された・消された（その回は止めてある）: 前のトークンで読んだ投稿を出さない
+      if (signal.aborted) return
       transition(d.ledger, {
         type: 'candidate.presented',
         candidate: {

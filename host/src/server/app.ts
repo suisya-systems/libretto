@@ -724,6 +724,8 @@ export function createServer(o: ServerOptions) {
     if (!body.success) return c.json({ reason: 'invalid' }, 400)
     // Slack はユーザートークンだけ（ボットトークンでは本人のリアクションを読めない。6.6 (2)）
     if (kind.data === 'slack' && !body.data.value.startsWith('xoxp-')) return c.json({ reason: 'invalid' }, 400)
+    // 入れ直す前に動いている取り込みを止める（前のトークンで読んだ投稿を、入れ直した後に候補にしない）
+    if (kind.data === 'slack') await runs.abort(RUN_KEY)
     const r = writing(c, () => setKey(home, kind.data, body.data.value, now()))
     if (r instanceof Response) return r
     hub.emit('settings.changed', {})

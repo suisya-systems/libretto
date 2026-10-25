@@ -343,6 +343,28 @@ describe('連携の欄（6.6 (2)(7)）', () => {
   })
 })
 
+describe('トークンの入れ直し（6.6 (2)）', () => {
+  it('取り込みの最中に入れ直したら、その回は止まり、前のトークンで読んだ投稿を候補にしない', async () => {
+    await setup()
+    s.state.items = [reacted('C1', { ts: ts(1), user: ME, text: 'x' })]
+    let release: () => void = () => {}
+    cardReply = () => {
+      const r = new Promise<void>((done) => {
+        release = done
+      })
+      return r.then(() => say(draft())) as never
+    }
+    const running = server.poller.run()
+    for (let i = 0; i < 100 && cardCalls().length === 0; i++) await new Promise((r) => setTimeout(r, 10))
+    const put = send('PUT', '/api/settings/keys/slack', { value: 'xoxp-new-token' })
+    await new Promise((r) => setTimeout(r, 20)) // 入れ直しが取り込みを止めるまで
+    release()
+    expect((await put).status).toBe(200)
+    await running
+    expect(ledger.getCandidate(`slack:C1:${ts(1)}`)).toBeUndefined()
+  })
+})
+
 describe('候補の操作（6.6 (6)）', () => {
   it('進める: intake.json は Slack の由来。入口の依頼書の下書き役にだけ本文を読み直して渡す', async () => {
     await setup({
