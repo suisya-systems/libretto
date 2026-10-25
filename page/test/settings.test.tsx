@@ -368,7 +368,7 @@ describe('動作環境の確認（8.10 (6)）', () => {
     expect(r.text()).toContain(W['settings.env.ok'])
     expect(cmds(r.el)).toEqual([
       'tailscale serve --bg 7790',
-      'LIBRETTO_ORIGIN=http://127.0.0.1:7790,https://<PC の名前>.<tailnet の名前>.ts.net npm start',
+      'LIBRETTO_PORT=7790 LIBRETTO_ORIGIN=http://127.0.0.1:7790,https://<PC の名前>.<tailnet の名前>.ts.net npm start',
     ])
     expect(link(r.el, W['settings.phone.step2Link'])).toBe('https://login.tailscale.com/admin/dns')
     r.done()

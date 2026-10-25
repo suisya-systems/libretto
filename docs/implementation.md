@@ -3120,7 +3120,7 @@ Gmail と Slack の文から「文書づくりを頼まれていそうだ」と 
   2. ログインし直し待ち（`HostStatus.signIn`）で、`claude auth status` がログインしていないと言わなければ、帯の「続ける」と同じく待っていた案件を起こし直す（まだ切れていればまた待ちに戻る）。
   3. Slack の DM の確かめ（`slackDm.check()`）と、拾い上げの 1 回（`poller.recheck()`）。Slack の権限と Gmail・Drive の API はこの回で確かめ直される。
   4. 隔離の点検（8.10 (4)。haiku 2 回）。
-- 同時に 1 本（走っている間の `POST` は同じ 1 本に乗る。`ConnectionsView.env.checking`）。終われば `env.checkedAt` を更新して SSE `connections.changed`。
+- 同時に 1 本（走っている間の `POST` は同じ 1 本に乗る。`ConnectionsView.env.checking`）。2〜4 が終わるまで待つ（差分レビュー: 待たずに「確かめた」にすると、直す前の権限や API の結果のまま済みに見える。隔離の点検と拾い上げの回を待つので 1〜2 分かかることがある）。終われば `env.checkedAt` を更新して SSE `connections.changed`。
 - **止めている間（STOP）も受ける**。1 だけして、2〜4（案件を起こす・拾い上げ・モデルを呼ぶ点検）はしない。理由: 道具を入れたかどうかは止めていても確かめたい。8.10 (4) の `409` をやめた。
 - `poller.recheck()`: 走っている回があれば終わるのを待ち、Drive の「確かめた」印を捨ててから新しい回を始める。理由（設計レビュー）: ふだんの回は Drive API の確かめを連携の世代ごとに 1 回にしているので、そのままでは有効にし直したこと（逆に無効にしたこと）が分からない。走っている回に乗ると、直す前に始まった回の結果を返してしまう。
 - Gmail API は、ラベルの一覧が読めた時点で「有効でない」を下ろす。理由（設計レビュー）: 前はラベルが見つからない回では下ろさず、有効にしても「有効でない」が残った。
@@ -3145,7 +3145,7 @@ Gmail と Slack の文から「文書づくりを頼まれていそうだ」と 
   - 入れたのに「入っていません」のままなら起動し直す、の 1 文を AI と道具の行に添える。理由（設計レビュー）: 新しく入れた場所が PATH に足されたときは、動いているホストの PATH に届かない。
 - Slack: 足りない権限の名前（`missingScopes`。ボットは `chat:write`）と、「OAuth & Permissions」のどの欄に足すかと、Slack アプリの設定画面（`https://api.slack.com/apps`）へのリンク。
 - Google: 有効でない API の名前と、Google Cloud のコンソールの API のページ（`https://console.cloud.google.com/apis/library/gmail.googleapis.com` / `drive.googleapis.com`）へのリンク。開いた先で連携に使っているプロジェクトを選ぶことを添える。
-- Tailscale: `requirements.md` の 5 手順をそのまま画面の番号付きの手順にする（開閉式）。`tailscale serve --bg <ポート>` と起動の 1 行は、動いているホストのポートで組む（設計レビュー: 7780 に決め打ちすると `LIBRETTO_PORT` を変えた環境で別のところへ渡す）。起動の 1 行は `<PC の名前>` を置き換えて使う。**この手順だけは起動し直しが残る**（`LIBRETTO_ORIGIN` は起動の設定）。
+- Tailscale: `requirements.md` の 5 手順をそのまま画面の番号付きの手順にする（開閉式）。`tailscale serve --bg <ポート>` と起動の 1 行は、動いているホストのポートで組む（設計レビュー: 7780 に決め打ちすると `LIBRETTO_PORT` を変えた環境で別のところへ渡す）。起動の 1 行は `<PC の名前>` を置き換えて使い、`LIBRETTO_PORT` も今のポートで入れる（差分レビュー: 入れないと既定の 7780 で起き、案内した転送先と食い違う）。**この手順だけは起動し直しが残る**（`LIBRETTO_ORIGIN` は起動の設定）。
 - 文言は `ui-wording.md` に先に足した。製品の名前は画面に出さず「AI」と言う。コマンドの中の `claude` だけは、貼って動かなければ意味がないので名前を変えない（出さない語の検査の例外 3 つ。`page/test/wording.test.ts`）。
 
 **(4) オーナーに確かめること（おすすめで実装した。窓口経由で仰ぐ）**

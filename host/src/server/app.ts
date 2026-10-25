@@ -710,13 +710,20 @@ export function createServer(o: ServerOptions) {
     if (stop.isStopped()) return
     // ログインし直し待ちは、ログインが確かめられなければ起こし直す（まだ切れていればまた待ちに戻る）
     if (status.signIn && claude.signedIn !== false) runner.retrySignIn()
-    void slackDm.check()
-    poller.recheck().catch((e) => log(`env check intake: ${e instanceof Error ? e.stack : String(e)}`))
+    // 終わるまで「確かめています」のまま（直す前の結果で済みにしない）。失敗は 1 つずつ log に
+    const logged = (what: string) => (e: unknown) =>
+      log(`env check ${what}: ${e instanceof Error ? e.stack : String(e)}`)
+    let probe: Promise<void> | undefined
     try {
-      void checkIsolation()
+      probe = checkIsolation()
     } catch (e) {
       if (!(e instanceof Stopped)) throw e
     }
+    await Promise.all([
+      slackDm.check().catch(logged('slack')),
+      poller.recheck().catch(logged('intake')),
+      probe?.catch(logged('isolation')),
+    ])
   }
 
   app.post('/api/checks/run', (c) => {

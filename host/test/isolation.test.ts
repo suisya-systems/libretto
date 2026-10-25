@@ -194,8 +194,10 @@ describe('POST /api/checks/run と GET /api/connections', () => {
     expect((await post('/api/checks/run')).status).toBe(202)
     expect(started).toBe(1)
     expect((await view()).isolation.running).toBe(true)
+    expect((await view()).env.checking).toBe(true) // 確かめ直しは点検が終わるまで続く（6.13 (1)）
     release()
-    await vi.waitFor(async () => expect((await view()).isolation.running).toBe(false))
+    await vi.waitFor(async () => expect((await view()).env.checking).toBe(false))
+    expect((await view()).isolation.running).toBe(false)
     expect((await view()).isolation.last).toEqual({ at: record.at, verdict: 'hidden' })
     expect(JSON.parse(readFileSync(isolationFile(home), 'utf-8'))).toEqual(record)
   })

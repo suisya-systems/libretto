@@ -674,7 +674,7 @@ Slack の DM は、2 分のあいだに出たお知らせの 1 行を改行で�
 | `settings.env.ok` | 必要なものはそろっています |
 | `settings.env.checkedAt` | {at} に確かめました |
 | `settings.env.recheck` | もう一度確かめる |
-| `settings.env.rechecking` | 確かめています |
+| `settings.env.rechecking` | 確かめています。1〜2 分かかります |
 | `settings.env.where` | コマンドは、libretto を動かしている PC のターミナルに貼り付けて Enter で実行します。パスワードを聞かれたら、PC にログインするときのパスワードを入れます。 |
 | `settings.env.copy` | コピー |
 | `settings.env.copied` | コピーしました |
@@ -748,7 +748,7 @@ Slack の DM は、2 分のあいだに出たお知らせの 1 行を改行で�
 | `settings.cmd.isolation.tools` | sudo apt install bubblewrap socat ripgrep |
 | `settings.cmd.isolation.userns` | sudo sysctl kernel.apparmor_restrict_unprivileged_userns=0 |
 | `settings.cmd.phone.serve` | tailscale serve --bg {port} |
-| `settings.cmd.phone.start` | LIBRETTO_ORIGIN=http://127.0.0.1:{port},https://<PC の名前>.<tailnet の名前>.ts.net npm start |
+| `settings.cmd.phone.start` | LIBRETTO_PORT={port} LIBRETTO_ORIGIN=http://127.0.0.1:{port},https://<PC の名前>.<tailnet の名前>.ts.net npm start |
 
 **ホームの依頼の候補（ラベルを付けたメールと、リアクションを付けた Slack の投稿のカード。実装設計書 6.4 (7)・6.6 (7)）**
 

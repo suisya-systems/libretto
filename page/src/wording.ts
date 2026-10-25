@@ -447,7 +447,7 @@ export const W = {
   'settings.env.ok': '必要なものはそろっています',
   'settings.env.checkedAt': '{at} に確かめました',
   'settings.env.recheck': 'もう一度確かめる',
-  'settings.env.rechecking': '確かめています',
+  'settings.env.rechecking': '確かめています。1〜2 分かかります',
   'settings.env.where':
     'コマンドは、libretto を動かしている PC のターミナルに貼り付けて Enter で実行します。パスワードを聞かれたら、PC にログインするときのパスワードを入れます。',
   'settings.env.copy': 'コピー',
@@ -542,7 +542,7 @@ export const W = {
   'settings.cmd.isolation.userns': 'sudo sysctl kernel.apparmor_restrict_unprivileged_userns=0',
   'settings.cmd.phone.serve': 'tailscale serve --bg {port}',
   'settings.cmd.phone.start':
-    'LIBRETTO_ORIGIN=http://127.0.0.1:{port},https://<PC の名前>.<tailnet の名前>.ts.net npm start',
+    'LIBRETTO_PORT={port} LIBRETTO_ORIGIN=http://127.0.0.1:{port},https://<PC の名前>.<tailnet の名前>.ts.net npm start',
   'home.candHeading': '依頼の候補',
   'home.candRefresh': '今すぐ取り込む',
   'home.candRefreshing': '取り込んでいます',
