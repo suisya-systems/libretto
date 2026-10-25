@@ -96,6 +96,12 @@ describe('サービスワーカーの出し方', () => {
     expect(sw.open()).toEqual([first])
   })
 
+  it('同時に届いた同じ案件の知らせも、新しい 1 つだけが残る', async () => {
+    const sw = worker()
+    await Promise.all([sw.show(notice(1)), sw.show(notice(2))])
+    expect(sw.open().map((x) => x.tag)).toEqual(['2'])
+  })
+
   it('この端末のどれかのタブで見ていれば出さない', async () => {
     const sw = worker([
       { visibilityState: 'hidden', focused: false },

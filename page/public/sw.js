@@ -20,8 +20,12 @@ async function show(n) {
   })
 }
 
+// 1 つずつ出す（同時に届いた同じ案件の知らせが、互いに前の通知を見ないまま 2 つ並ばないように）
+let queue = Promise.resolve()
 self.addEventListener('message', (e) => {
-  if (e.data?.type === 'notice') e.waitUntil(show(e.data.notice))
+  if (e.data?.type !== 'notice') return
+  queue = queue.then(() => show(e.data.notice)).catch(() => {})
+  e.waitUntil(queue)
 })
 
 // 開いているタブがあればそこで面を開き、無ければ新しく開く
