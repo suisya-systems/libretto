@@ -622,6 +622,10 @@ export const W = {
     'このブラウザでは libretto の通知が許可されていません。ブラウザのサイトの設定で通知を「許可」にしてから、もう一度押してください',
   'settings.notices.insecure':
     'この開き方では通知を使えません。https:// で始まるアドレス（Tailscale の HTTPS）で開き直してください',
+  'settings.notices.homescreen':
+    'iPhone では、ホーム画面に追加した libretto から開くと通知を受け取れます。Safari の共有ボタンから「ホーム画面に追加」を選び、追加したアイコンから開いてください',
+  'settings.notices.unreachable':
+    '画面を閉じているときの通知を送れませんでした。libretto を動かしている PC がインターネットにつながっているか確かめてください。画面を開いているあいだの通知は出ます',
   'settings.notices.kinds': '通知する出来事',
   'settings.notices.kindsNote': '切っても、お知らせ欄には残ります。',
   'settings.notices.kind.your_turn': '確認待ちになった',
@@ -641,6 +645,26 @@ export const W = {
   'settings.notices.quietOff': '止めない',
   'settings.notices.saved': '保存しました。',
   'settings.notices.failed': '保存できませんでした。もう一度お試しください。',
+  'settings.slackDm.label': 'Slack',
+  'settings.slackDm.use':
+    'Slack の libretto アプリから、あなたにダイレクトメッセージで通知します。通知する出来事は下の選択と同じです。依頼の題が Slack に残ります',
+  'settings.slackDm.unsetNote':
+    'Slack に通知するには、Slack アプリにボットを足して出た Bot User OAuth Token（xoxb- で始まるもの）を貼ってください',
+  'settings.slackDm.input': 'Bot User OAuth Token を貼り付け',
+  'settings.slackDm.saved': '保存しました。',
+  'settings.slackDm.invalid':
+    'Bot User OAuth Token（xoxb- で始まるもの）を貼ってください。User OAuth Token（xoxp-）は取り込みの欄に入れるものです',
+  'settings.slackDm.deleteTitle': 'Slack に通知するトークンを削除しますか',
+  'settings.slackDm.deleteBody': 'Slack への通知を止めます。お知らせ欄とこの端末の通知はそのままです。',
+  'settings.slackDm.on': 'Slack に通知します',
+  'settings.slackDm.noUser':
+    'Slack で通知する相手が分かりません。上の連携の Slack の欄に User OAuth Token（xoxp- で始まるもの）を貼ってください。そのトークンのあなたに届きます',
+  'settings.slackDm.missingScope':
+    'Slack に通知を送る権限（chat:write）がありません。Slack アプリの設定でボットの権限に chat:write を足し、入れ直してから、出たトークンを貼り直してください',
+  'settings.slackDm.rejected':
+    'Slack がこのトークンを受け付けませんでした。Slack アプリを入れ直し、出た Bot User OAuth Token を貼り直してください',
+  'settings.slackDm.openNote':
+    'Slack の通知から libretto を開くには、その端末が Tailscale につながっている必要があります',
 } as const
 
 export type WKey = keyof typeof W

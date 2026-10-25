@@ -1,6 +1,6 @@
 // お知らせの送り出し（docs/implementation.md 6.8 (2)(4)(5)）。コミットの後に呼ぶ。
 // 新しいお知らせを SSE の notice で出し（画面がブラウザの通知 B を出す）、画面の外の送り先の pending を送る。
-// 送り先（Web Push・Slack の DM）は後の Issue が senders に足す。届いたことを書く前に落ちれば送り直すので、届くのは 1 回以上
+// 送り先は Web Push（push.ts）。Slack の DM は後の Issue が senders に足す。届いたことを書く前に落ちれば送り直すので、届くのは 1 回以上
 import type { Notice, QuietHours } from '@libretto/shared/api'
 import { type QuietCounts, quietEndText } from '../case/transition.ts'
 import type { Ledger } from '../ledger/ledger.ts'
@@ -14,7 +14,7 @@ const MIN = 60_000
 const RETRY_MS = [1 * MIN, 5 * MIN, 30 * MIN] // 4 回目で dropped
 const KEEP_MS = 24 * 60 * MIN
 
-// 通知を止める時間帯か（6.8 (4)(12)）。[from, to) を、時間帯 timeZone（既定はホストの OS）の時・分で比べる
+// 通知を止める時間帯か（6.8 (4)(14)）。[from, to) を、時間帯 timeZone（既定はホストの OS）の時・分で比べる
 export function quietAt(at: Date, q: QuietHours | null, timeZone?: string): boolean {
   if (!q) return false
   const t = new Intl.DateTimeFormat('en-GB', { timeZone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(
@@ -27,6 +27,7 @@ export function createNotices(d: {
   ledger: Ledger
   hub: Hub
   senders?: Record<string, Sender> // 送り先の頭（push / slack）→ 送り手
+  holdMs?: Record<string, number> // 送り先の頭 → まとめるあいだ（Slack の DM は 2 分）
   now?: () => Date
   quiet?: () => QuietHours | null // 通知を止める時間帯（settings.json）
   timeZone?: string // テストで渡す。既定はホストの OS
@@ -46,7 +47,7 @@ export function createNotices(d: {
     return d.ledger.getCase(n.caseId)?.revision !== d.ledger.noticeRevision(n.id)
   }
 
-  // 明けの 1 通（6.8 (12)）。止めていたあいだに出さなかった知らせを、案件ごとに最後の 1 行で数える。確認待ちはまだ確認待ちのものだけ、
+  // 明けの 1 通（6.8 (14)）。止めていたあいだに出さなかった知らせを、案件ごとに最後の 1 行で数える。確認待ちはまだ確認待ちのものだけ、
   // 候補はまだ出したままのものだけ。0 件なら書かない。event_id の quiet:<seq> で同じ分を二度数えない
   function summarize() {
     const held = d.ledger.heldNotices()
@@ -70,13 +71,25 @@ export function createNotices(d: {
     const at = now()
     const groups = new Map<string, (Notice & { tries: number })[]>()
     for (const { target, held, ...n } of d.ledger.dueDeliveries(at)) {
-      if (held || at.getTime() - Date.parse(n.at) > KEEP_MS || stale(n))
+      if (held || at.getTime() - Date.parse(n.at) > KEEP_MS)
         d.ledger.setDelivery(n.id, target, { status: 'dropped', tries: n.tries })
       else groups.set(target, [...(groups.get(target) ?? []), n])
     }
-    for (const [target, rows] of groups) {
+    for (const [target, due] of groups) {
       if (quietNow()) return // 送っているうちに時間帯に入ったら、残りは明けに
-      const send = senders[target.split(':')[0] as string]
+      const head = target.split(':')[0] as string
+      // まとめて送る送り先（Slack の DM の 2 分。6.8 (4)）: 初めて送る分は、いちばん古いものから holdMs たつまで残す。送り直しは時刻どおり
+      const fresh = due.find((n) => n.tries === 0)
+      const hold = d.holdMs?.[head] ?? 0
+      const ready = fresh && now().getTime() - Date.parse(fresh.at) < hold ? due.filter((n) => n.tries > 0) : due
+      // 確かめ直しは送る直前に（前の送り先を待つあいだに本人が答えうる）
+      const rows = ready.filter((n) => {
+        if (!stale(n)) return true
+        d.ledger.setDelivery(n.id, target, { status: 'dropped', tries: n.tries })
+        return false
+      })
+      if (!rows.length) continue
+      const send = senders[head]
       let r: Awaited<ReturnType<Sender>> = 'gone'
       if (send)
         try {

@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { NOTICE, SAY, STEP } from '../src/case/transition.ts'
 import { TALK } from '../src/roles/conversation.ts'
+import { SLACK_DM } from '../src/server/slack-dm.ts'
 
 const md = readFileSync(new URL('../../docs/ui-wording.md', import.meta.url), 'utf-8')
 // 見出し heading の直後の表の「| `key` | 文 |」の行
@@ -27,6 +28,9 @@ describe('ui-wording.md のホストが作る文', () => {
     const rows = [...body.matchAll(/^\| [^|]+ \| `([^`]+)` \| ([^|]+) \| [^|]+ \|$/gm)]
     expect(Object.keys(NOTICE)).toHaveLength(14)
     expect(Object.fromEntries(rows.map((m) => [m[1], m[2]]))).toEqual(NOTICE)
+  })
+  it('Slack の DM に足す 3 個', () => {
+    expect(table('**Slack の DM に足す文')).toEqual(SLACK_DM)
   })
   it('TALK の 7 個', () => {
     expect(Object.keys(TALK)).toHaveLength(7)

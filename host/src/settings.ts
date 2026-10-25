@@ -1,4 +1,4 @@
-// settings.json（docs/implementation.md 9.2）。今は「あなたの文体の見本」（6.3.2 (10)）と自動検出（6.9 (10)）と、お知らせの出来事ごとの入り切り（6.8 (6)）と通知を止める時間帯（6.8 (12)）。
+// settings.json（docs/implementation.md 9.2）。今は「あなたの文体の見本」（6.3.2 (10)）と自動検出（6.9 (10)）と、お知らせの出来事ごとの入り切り（6.8 (6)）と通知を止める時間帯（6.8 (14)）。
 // 置き換えで書き、前の版を settings.prev.json に残す。読めない・欄が無いときは既定
 import { randomBytes } from 'node:crypto'
 import { copyFileSync, existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'

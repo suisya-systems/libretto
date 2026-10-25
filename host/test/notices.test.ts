@@ -423,7 +423,7 @@ describe('送り出し（6.8 (2)(5)）', () => {
     expect(calls).toEqual([['push:s1', [1]]])
   })
 
-  describe('通知を止める時間帯（6.8 (12)）', () => {
+  describe('通知を止める時間帯（6.8 (14)）', () => {
     // 時計は 12:00（JST）。11:00〜13:00 を止める。時間帯は引数で渡す（CI の UTC に依らない）
     const quiet = { from: '11:00', to: '13:00' }
     const opened = () => {
@@ -616,7 +616,7 @@ describe('設定の入り切り（6.8 (6)）', () => {
     host('materials.ready')
     expect(lastNotice()).toMatchObject({ kind: 'started', outside: true })
 
-    // 通知を止める時間帯（6.8 (12)）。既定は止めない。始まりと終わりが同じは入れられない
+    // 通知を止める時間帯（6.8 (14)）。既定は止めない。始まりと終わりが同じは入れられない
     expect(await (await server.app.request('/api/settings/quiet-hours', { headers })).json()).toEqual({
       quietHours: null,
     })

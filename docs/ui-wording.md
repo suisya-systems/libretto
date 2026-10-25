@@ -139,9 +139,19 @@ libretto の画面に出す言葉の正本。設計書（[`docs/design.md`](./de
 | 自動で開始 | `autoStarted` | 『{題}』を自動で開始しました。止めたいときは取り消せます | `/cases/<id>` |
 | 候補 | `candidates` | 依頼の候補が {n} 件届きました。進めるか見送るかを選べます | `/` |
 | 下書きに取りかかった | `started` | 『{題}』の下書きを書き始めました | `/cases/<id>` |
-| 通知を止める時間帯の明け（実装設計書 6.8 (4)(12)） | `quietEnd` | 通知を止めていたあいだに、{内訳}がありました | `/` |
+| 通知を止める時間帯の明け（実装設計書 6.8 (4)(14)） | `quietEnd` | 通知を止めていたあいだに、{内訳}がありました | `/` |
 
 `{理由}` は会話欄の `SAY` の文をそのまま使う（例: 「『週報』は、費用の上限に達したので中止しました。新しい依頼として出し直せます」）。`{内訳}` は「確認待ち {n} 件」「中止 {n} 件」「完了 {n} 件」「自動で開始 {n} 件」「下書きに取りかかった {n} 件」「依頼の候補 {n} 件」をこの順に「・」でつないだもので、0 件の項目は省く（例: 「通知を止めていたあいだに、確認待ち 2 件・依頼の候補 3 件がありました」）。
+
+**Slack の DM に足す文（`host/src/server/slack-dm.ts` の `SLACK_DM`。実装設計書 6.8 (3)(12)）**
+
+Slack の DM は、2 分のあいだに出たお知らせの 1 行を改行で並べた 1 通。`open` は各行の後ろのリンクの文字で、Tailscale の HTTPS のアドレスがあるときだけ付ける。無いときはリンクを付けず、最後に `openApp` を 1 行足す。21 行目からは並べず `more` の 1 行にする（`{n}` は並べなかった数）。
+
+| キー | 文 |
+|---|---|
+| `open` | 開く |
+| `openApp` | libretto の画面を開いてください |
+| `more` | ほか {n} 件は libretto のお知らせ欄で見られます |
 
 **話し相手の代わりに会話欄に書く 1 行（`host/src/roles/conversation.ts` の `TALK`。実装設計書 6.2.1 (7)）**
 
@@ -818,7 +828,7 @@ Slack の行は API キーの行と同じ形（貼り付け・「入れ直す」
 
 **設定の面のお知らせ（実装設計書 6.8 (6)(7)）**
 
-この端末の状態は 3 つ（`on`・`off`・`unavailable`）。`off` のときは「この端末に通知する」を出し、押したときだけブラウザの許可の画面を出す。ブラウザで拒んであれば `denied`、`http://` の Tailscale のアドレスなど通知を使えない開き方なら `insecure` を添える。出来事の名前は実装設計書 6.8 (1) の表の言葉。画面を閉じていても届く通知は後の Issue なので、今は `openOnly` をいつも出す。通知を止める時間帯（6.8 (12)）は、入れていれば `quietNow`、無ければ `quietNone` を出し、`quietOff` は入れているときだけ出す。
+この端末の状態は 3 つ（`on`・`off`・`unavailable`）。`off` のときは「この端末に通知する」を出し、押したときだけブラウザの許可の画面を出す。ブラウザで拒んであれば `denied`、`http://` の Tailscale のアドレスなど通知を使えない開き方なら `insecure`、iPhone・iPad でホーム画面から開いていなければ `homescreen` を添える。画面を閉じたあとの通知に対応していないブラウザと、許可してもホストが登録を受け取れていない端末には `openOnly` を出す。前に送ったときに配信元へ届かなかった端末には `unreachable` を出す。出来事の名前は実装設計書 6.8 (1) の表の言葉。通知を止める時間帯（6.8 (14)）は、入れていれば `quietNow`、無ければ `quietNone` を出し、`quietOff` は入れているときだけ出す。
 
 | キー | 文 |
 |---|---|
@@ -832,6 +842,8 @@ Slack の行は API キーの行と同じ形（貼り付け・「入れ直す」
 | `settings.notices.enable` | この端末に通知する |
 | `settings.notices.denied` | このブラウザでは libretto の通知が許可されていません。ブラウザのサイトの設定で通知を「許可」にしてから、もう一度押してください |
 | `settings.notices.insecure` | この開き方では通知を使えません。https:// で始まるアドレス（Tailscale の HTTPS）で開き直してください |
+| `settings.notices.homescreen` | iPhone では、ホーム画面に追加した libretto から開くと通知を受け取れます。Safari の共有ボタンから「ホーム画面に追加」を選び、追加したアイコンから開いてください |
+| `settings.notices.unreachable` | 画面を閉じているときの通知を送れませんでした。libretto を動かしている PC がインターネットにつながっているか確かめてください。画面を開いているあいだの通知は出ます |
 | `settings.notices.kinds` | 通知する出来事 |
 | `settings.notices.kindsNote` | 切っても、お知らせ欄には残ります。 |
 | `settings.notices.kind.your_turn` | 確認待ちになった |
@@ -850,3 +862,23 @@ Slack の行は API キーの行と同じ形（貼り付け・「入れ直す」
 | `settings.notices.quietOff` | 止めない |
 | `settings.notices.saved` | 保存しました。 |
 | `settings.notices.failed` | 保存できませんでした。もう一度お試しください。 |
+
+**設定の面のお知らせの Slack（実装設計書 6.8 (7)(8)(12)）**
+
+お知らせの節の中の Slack の行。API キーの行と同じ形（貼り付け・「入れ直す」・「削除」、保存後は「設定済み（末尾 1a2b）」）で、トークンは画面に二度と出さない。保存すると Slack で確かめ、結果で `on`・`noUser`・`missingScope`・`rejected` のどれかを出す（Slack に届かなかったときは何も出さない）。`chat:write` は Slack アプリの設定画面で探す名前なので、言い換えない。
+
+| キー | 文 |
+|---|---|
+| `settings.slackDm.label` | Slack |
+| `settings.slackDm.use` | Slack の libretto アプリから、あなたにダイレクトメッセージで通知します。通知する出来事は下の選択と同じです。依頼の題が Slack に残ります |
+| `settings.slackDm.unsetNote` | Slack に通知するには、Slack アプリにボットを足して出た Bot User OAuth Token（xoxb- で始まるもの）を貼ってください |
+| `settings.slackDm.input` | Bot User OAuth Token を貼り付け |
+| `settings.slackDm.saved` | 保存しました。 |
+| `settings.slackDm.invalid` | Bot User OAuth Token（xoxb- で始まるもの）を貼ってください。User OAuth Token（xoxp-）は取り込みの欄に入れるものです |
+| `settings.slackDm.deleteTitle` | Slack に通知するトークンを削除しますか |
+| `settings.slackDm.deleteBody` | Slack への通知を止めます。お知らせ欄とこの端末の通知はそのままです。 |
+| `settings.slackDm.on` | Slack に通知します |
+| `settings.slackDm.noUser` | Slack で通知する相手が分かりません。上の連携の Slack の欄に User OAuth Token（xoxp- で始まるもの）を貼ってください。そのトークンのあなたに届きます |
+| `settings.slackDm.missingScope` | Slack に通知を送る権限（chat:write）がありません。Slack アプリの設定でボットの権限に chat:write を足し、入れ直してから、出たトークンを貼り直してください |
+| `settings.slackDm.rejected` | Slack がこのトークンを受け付けませんでした。Slack アプリを入れ直し、出た Bot User OAuth Token を貼り直してください |
+| `settings.slackDm.openNote` | Slack の通知から libretto を開くには、その端末が Tailscale につながっている必要があります |

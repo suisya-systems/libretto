@@ -1,11 +1,12 @@
 // 設定の面（画面 7）。連携の節（Google と Slack。docs/implementation.md 6.4 (7)・6.6 (7)）、API キーの節（6.1.3 (6)。値は画面のどこにも出さない。設計書 D17）と
-// 自動検出の節（6.9 (10)）と動作環境の確認の節（8.10 (6)）、お知らせの節（6.8 (6)。通知を止める時間帯は 6.8 (12)）
+// 自動検出の節（6.9 (10)）と動作環境の確認の節（8.10 (6)）、お知らせの節（6.8 (6)。通知を止める時間帯は 6.8 (14)）
 import {
   type ApiKeyStatus,
   ConnectionsView,
   InferenceSettings,
   MaterialRef,
   NoticePrefs,
+  PushStatus,
   type QuietHours,
   QuietHoursInput,
   Settings as SettingsSchema,
@@ -13,7 +14,7 @@ import {
 import { type ReactNode, useEffect, useId, useState } from 'react'
 import { z } from 'zod'
 import { send, useLoad } from '../load.ts'
-import { type DeviceState, deviceState, enable } from '../notify.ts'
+import { type DeviceState, deviceState, enable, pushable, syncPush } from '../notify.ts'
 import { Confirm } from '../parts/Dialog.tsx'
 import { W, type WKey, w } from '../wording.ts'
 import { ProblemView } from './Pending.tsx'
@@ -76,6 +77,16 @@ const TEXT: Record<Kind, Texts> = {
     input: 'settings.slack.input',
     saved: 'settings.slack.saved',
     invalid: 'settings.slack.invalid',
+  },
+  slackBot: {
+    label: 'settings.slackDm.label',
+    use: 'settings.slackDm.use',
+    unsetNote: 'settings.slackDm.unsetNote',
+    deleteBody: 'settings.slackDm.deleteBody',
+    deleteTitle: 'settings.slackDm.deleteTitle',
+    input: 'settings.slackDm.input',
+    saved: 'settings.slackDm.saved',
+    invalid: 'settings.slackDm.invalid',
   },
 }
 
@@ -940,20 +951,51 @@ const DEVICE: Record<DeviceState, [string, WKey]> = {
   off: ['b-off', 'settings.notices.off'],
   denied: ['b-off', 'settings.notices.off'],
   insecure: ['b-alert', 'settings.notices.unavailable'],
+  homescreen: ['b-alert', 'settings.notices.unavailable'],
   unavailable: ['b-alert', 'settings.notices.unavailable'],
 }
 const KINDS = NoticePrefs.keyof().options
+type SlackDm = ConnectionsView['slackDm']['state']
+const DM_NOTE: Partial<Record<SlackDm, [string, WKey]>> = {
+  on: ['muted', 'settings.slackDm.on'],
+  noUser: ['note-warn', 'settings.slackDm.noUser'],
+  missingScope: ['note-warn', 'settings.slackDm.missingScope'],
+  rejected: ['note-alert', 'settings.slackDm.rejected'],
+}
+
+// Slack の DM の行（6.8 (8)(12)）。ボットトークンは API キーと同じく貼り付けて入れる。下に Slack で確かめた結果
+function SlackDmRow({ status, dm, reload }: { status: ApiKeyStatus; dm: SlackDm; reload: () => void }) {
+  const note = DM_NOTE[dm]
+  return (
+    <KeyRow status={status} reload={reload}>
+      {note && <p className={`${note[0]} small`}>{W[note[1]]}</p>}
+      {status.set && <p className="muted small">{W['settings.slackDm.openNote']}</p>}
+    </KeyRow>
+  )
+}
 
 function NoticeSection({
   prefs: loaded,
   reload,
+  slackBot,
+  dm,
+  reloadDm,
   children,
 }: {
   prefs: NoticePrefs
   reload: () => void
+  slackBot?: ApiKeyStatus | undefined
+  dm?: SlackDm | undefined
+  reloadDm: () => void
   children?: ReactNode
 }) {
   const [device, setDevice] = useState(deviceState)
+  const push = useLoad('/api/devices/push', PushStatus)
+  // 画面を閉じていても届くのは、対応しているブラウザで、許可してホストが登録を持っているとき
+  // 開いたときの登録（SSE の open でも送る）が済んでから読み直す
+  const { reload: reloadPush } = push
+  useEffect(() => void syncPush().then(reloadPush), [reloadPush])
+  const openOnly = !pushable() || (device === 'on' && push.data?.subscribed === false)
   // 保存の応答を待たずに続けて押しても、前の入り切りから送る
   const [prefs, setPrefs] = useState(loaded)
   useEffect(() => setPrefs(loaded), [loaded])
@@ -989,20 +1031,34 @@ function NoticeSection({
           <div className="key-head">
             <div className="grow">
               <h3 className="key-label">{W['settings.notices.device']}</h3>
-              <p className="muted small">{W['settings.notices.openOnly']}</p>
+              {openOnly && <p className="muted small">{W['settings.notices.openOnly']}</p>}
             </div>
             <span className={`badge ${badge} key-status`}>{W[label]}</span>
           </div>
           {device === 'denied' && <p className="note-warn small">{W['settings.notices.denied']}</p>}
           {device === 'insecure' && <p className="note-warn small">{W['settings.notices.insecure']}</p>}
+          {device === 'homescreen' && <p className="note-warn small">{W['settings.notices.homescreen']}</p>}
+          {device === 'on' && push.data?.unreachable && (
+            <p className="note-warn small">{W['settings.notices.unreachable']}</p>
+          )}
           {(device === 'off' || device === 'denied') && (
             <div className="key-actions">
-              <button type="button" className="btn btn-primary btn-sm" onClick={() => void enable().then(setDevice)}>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={() =>
+                  void enable().then((s) => {
+                    setDevice(s)
+                    push.reload()
+                  })
+                }
+              >
                 {W['settings.notices.enable']}
               </button>
             </div>
           )}
         </li>
+        {slackBot && dm && <SlackDmRow status={slackBot} dm={dm} reload={reloadDm} />}
       </ul>
       <fieldset className="revise">
         <legend className="strong small">{W['settings.notices.kinds']}</legend>
@@ -1027,7 +1083,7 @@ function NoticeSection({
   )
 }
 
-// 通知を止める時間帯（6.8 (12)）。既定は止めない。始まりと終わりが同じ時刻は保存できない
+// 通知を止める時間帯（6.8 (14)）。既定は止めない。始まりと終わりが同じ時刻は保存できない
 function QuietSection({ value, reload }: { value: QuietHours | null; reload: () => void }) {
   const [from, setFrom] = useState(value?.from ?? '')
   const [to, setTo] = useState(value?.to ?? '')
@@ -1143,7 +1199,16 @@ export function Settings() {
         />
       )}
       {notices.data && (
-        <NoticeSection prefs={notices.data} reload={notices.reload}>
+        <NoticeSection
+          prefs={notices.data}
+          reload={notices.reload}
+          slackBot={keys.data?.slackBot}
+          dm={env.data?.slackDm.state}
+          reloadDm={() => {
+            env.reload()
+            keys.reload()
+          }}
+        >
           {quiet.data && <QuietSection value={quiet.data.quietHours} reload={quiet.reload} />}
         </NoticeSection>
       )}

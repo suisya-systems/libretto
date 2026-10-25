@@ -383,7 +383,17 @@ export const NoticePrefs = z.object({
   started: z.boolean(),
 })
 export type NoticePrefs = z.infer<typeof NoticePrefs>
-// 通知を止める時間帯（6.8 (4)(12)）。[from, to) をホストの OS の時刻で。from > to は日をまたぐ。GET / PUT /api/settings/quiet-hours
+// 画面を閉じていても届く通知（6.8 (6)(13)）。PUT /api/devices/push は PushSubscription.toJSON() の形。配信元は https だけ
+export const PushSubscriptionInput = z.object({
+  endpoint: z.url({ protocol: /^https$/ }).max(2048),
+  keys: z.object({ p256dh: z.string().min(1).max(200), auth: z.string().min(1).max(200) }),
+})
+// GET /api/devices/push。subscribed はこの端末の登録をホストが持っているか、unreachable は前に送ったとき配信元に届かなかったか
+export const PushStatus = z.object({ publicKey: z.string(), subscribed: z.boolean(), unreachable: z.boolean() })
+export type PushStatus = z.infer<typeof PushStatus>
+// n はタブの中の通し番号（遅れて届いた前の POST で上書きしない）
+export const Presence = z.object({ tab: z.string().min(1).max(64), n: z.number().int(), visible: z.boolean() })
+// 通知を止める時間帯（6.8 (4)(14)）。[from, to) をホストの OS の時刻で。from > to は日をまたぐ。GET / PUT /api/settings/quiet-hours
 const HhMm = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/)
 export const QuietHours = z.object({ from: HhMm, to: HhMm }).refine((q) => q.from !== q.to)
 export type QuietHours = z.infer<typeof QuietHours>
@@ -438,6 +448,8 @@ export const ConnectionsView = z.object({
     lastAt: z.string().optional(),
     problem: z.enum(['rate_limited', 'network']).optional(),
   }),
+  // Slack の DM のお知らせ（6.8 (7)(8)）。unchecked はまだ確かめられていない（Slack に届かなかった）
+  slackDm: z.object({ state: z.enum(['none', 'unchecked', 'on', 'noUser', 'missingScope', 'rejected']) }),
   // ファイルを作る道具（起動時の事前点検。6.10 (5)）。LibreOffice（soffice）と poppler（pdftoppm）
   tools: z.object({ soffice: z.boolean(), pdftoppm: z.boolean() }),
   // 自動検出（6.9 (6)(8)(10)）。recall は直近 30 日の合図のうち、自動検出が先に見つけていた数
@@ -557,8 +569,8 @@ export const ConversationAccepted = z.object({ seq: z.number().int(), replayed: 
 export const ConversationRejected = z.object({ reason: z.enum(['busy', 'stopped', 'stale']) })
 
 // 識別子の値（'openai' など）は「出さない語」の検査の対象外（11.2）
-// slack は Slack アプリのユーザートークン（オーナー判断 2026-10-25。6.6 (2)）
-export const ApiKeyKind = z.enum(['openai', 'jev', 'slack'])
+// slack は Slack アプリのユーザートークン（オーナー判断 2026-10-25。6.6 (2)）、slackBot はお知らせの DM を送るボットトークン（6.8 (8)）
+export const ApiKeyKind = z.enum(['openai', 'jev', 'slack', 'slackBot'])
 export const ApiKeyStatus = z.discriminatedUnion('set', [
   z.object({ kind: ApiKeyKind, set: z.literal(false) }),
   z.object({ kind: ApiKeyKind, set: z.literal(true), last4: z.string().length(4), savedAt: z.string() }),

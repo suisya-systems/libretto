@@ -13,7 +13,8 @@ import candidateOthersPost from './migrations/0006-candidate-others-post.ts'
 import meetNotes from './migrations/0007-meet-notes.ts'
 import suppressionLabel from './migrations/0008-suppression-label.ts'
 import notices from './migrations/0009-notices.ts'
-import noticeHeld from './migrations/0010-notice-held.ts'
+import pushSubscriptions from './migrations/0010-push-subscriptions.ts'
+import noticeHeld from './migrations/0011-notice-held.ts'
 
 // 添字 + 1 が user_version。足すときは末尾に 1 本足す
 export const MIGRATIONS: readonly string[] = [
@@ -26,6 +27,7 @@ export const MIGRATIONS: readonly string[] = [
   meetNotes,
   suppressionLabel,
   notices,
+  pushSubscriptions,
   noticeHeld,
 ]
 

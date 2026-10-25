@@ -2705,6 +2705,7 @@ GitHub #29 は、本物のモデルで依頼を流したオーナーの所感（
 | Slack: `xoxb-` で始まらない値 | Bot User OAuth Token（xoxb- で始まるもの）を貼ってください。User OAuth Token（xoxp-）は取り込みの欄に入れるものです |
 | Slack: `missing_scope` | Slack に通知を送る権限（chat:write）がありません。Slack アプリの設定でボットの権限に chat:write を足し、入れ直してから、出たトークンを貼り直してください |
 | Slack: `invalid_auth` など | Slack がこのトークンを受け付けませんでした。Slack アプリを入れ直し、出た Bot User OAuth Token を貼り直してください |
+| Slack: 送り先の本人が分からない（取り込みのユーザートークンが無い・受け付けられない。GitHub #52 で足した） | Slack で通知する相手が分かりません。上の連携の Slack の欄に User OAuth Token（xoxp- で始まるもの）を貼ってください。そのトークンのあなたに届きます |
 
 **(8) 準備（オーナーと本人）**
 
@@ -2756,13 +2757,41 @@ GitHub #29 は、本物のモデルで依頼を流したオーナーの所感（
 - **`POST /api/devices/presence` は (9) の 2 で足す**。読むのはホストが Web Push を送るかを決めるときだけで、この Issue には送り先が無い。
 - **設定の「お知らせ」の節**: この端末の状態（「この端末に通知します」/「許可されていません」/「この開き方では使えません」）と「この端末に通知する」（押したときだけ許可を求める）、ブラウザで拒んだとき・`http://` の開き方のときの (7) の文、出来事ごとの入り切り。画面を閉じていても届く通知はまだ無いので、(7) の「このブラウザでは、画面を開いているあいだだけ通知します」を常に出す。iPhone の「ホーム画面に追加」の文は、マニフェストを置く (9) の 2 で出す（今は追加しても通知を受け取れないため）。
 
-**(12) 実装の決め事（GitHub #53。(9) の 4）**
+**(12) 実装の決め事（GitHub #52。(9) の 3、Slack の DM）**
+
+(9) の 3 を作るときに決めたこと。設計レビューに 1 回かけ、出た指摘を反映した。
+
+- **ボットトークンは `ApiKeyKind` の `slackBot`**（`api-keys.json`・`0600`・値は二度と出さない。6.6 (2) のユーザートークンと同じ扱い）。`PUT /api/settings/keys/slackBot` は `xoxb-` で始まらなければ `400`。設定の「お知らせ」の節に、API キーの行と同じ形の Slack の行を置く。出来事ごとの入り切りはブラウザと同じ「通知する出来事」を使い、Slack だけの入り切りは置かない。理由: 送り先ごとに入り切りを分けると、設定の欄と `settings.json` が送り先の数だけ増える。Slack を止めたいときはトークンを消せばよい。
+- **送り先は取り込みのユーザートークンの本人**（`auth.test` の `user_id`）。送るたびに確かめる。ユーザートークンが無い・受け付けられないときは送らずに落とし、設定に (7) の「相手が分からない」を出す。理由: ボットトークンの `auth.test` が返すのはボット自身で、本人を知る手段がユーザートークンしかない。
+- **送り手は `host/src/server/slack-dm.ts`**。Slack の呼び出しは取り込みと同じ `createSlack().call` を使う（失敗の分け方・429・入れ直しの途中を共有する）。`chat.postMessage` に `channel=<user_id>`・`unfurl_links=false`・`unfurl_media=false` を渡す。結果の分け方: 届いた → `sent`。429・`5xx`・届かない・Slack の一時的な失敗（`internal_error`・`fatal_error`・`service_unavailable`・`request_timeout`）・トークンを入れ直している途中 → 送り直し（(5) の 1・5・30 分）。トークンを受け付けない・`missing_scope`・その他の拒否 → 落とし、設定に (7) の文を出す（トークンは消さない）。
+- **確かめ**: ボットトークンかユーザートークンを入れた・消したとき、と起動のときに、ボットトークンで `auth.test` を呼ぶ。応答の `x-oauth-scopes` に `chat:write` が無ければ権限が足りない、の文を出す。Slack に届かなければ何も出さない（次に送ったときの結果で決まる）。後から始めた確かめ・送った結果が前の結果を上書きする。状態は `GET /api/connections` の `slackDm.state`（`none` / `unchecked` / `on` / `noUser` / `missingScope` / `rejected`）。
+- **2 分のまとめは送り出しの仕事が持つ**（`createNotices` の `holdMs`。送り先の頭 → ミリ秒）。初めて送る分は、そのうちいちばん古いお知らせから 2 分たつまで `pending` のまま残し、たったら全部を 1 通にする。送り直しの分は待たずに時刻どおり送る。1 分ごとの見回りが拾うので、届くのは最初の知らせから 2〜3 分後。表とマイグレーションは変えない。理由（設計レビュー）: 送り直しの行まで 2 分の窓に合わせると、(5) の送り直しの時刻がずれる。
+- **確認待ちの確かめ直しは、送り先ごとに送る直前に掛ける**（前の送り先を待つあいだ・2 分のあいだに本人が答えた確認待ちは送らない）。
+- **文**: 1 通は (3) の 1 行を改行で並べたもの。題の `& < >` は Slack の書式の記号にならないよう逃がす。`LIBRETTO_ORIGIN` の中に `https://` で始まる起点があれば、各行の後ろに `Notice.path` をその起点で組んだリンク（「開く」）を付ける。無ければリンクを付けず、最後に「libretto の画面を開いてください」を足す。21 行目からは並べず「ほか {n} 件は libretto のお知らせ欄で見られます」の 1 行にする。理由（設計レビュー）: 落ちたホストの送り残しが溜まっても、1 通が Slack の長さの上限に届かない。文は `ui-wording.md` の「Slack の DM に足す文」。
+
+**(13) 実装の決め事（GitHub #51。(9) の 2）**
+
+(9) の 2 を作るときに決めたこと。設計レビューに 1 回かけ、出た指摘を反映した。
+
+- **送り先は登録のある端末**。`ledger.noticeRoute.targets()` が `push_subscriptions` の端末を `push:<sessionId>` で返し、送り手は `host/src/server/push.ts`（`senders.push`）。暗号化（`aes128gcm`）と VAPID の署名は `web-push` の `generateRequestDetails` で組み、送るのは `fetch`。理由: `sendNotification` は `https` モジュール固定で、テストの偽の配信元（プロセス内の HTTP サーバー）に向けられない。`TTL` は送り残しを捨てる 24 時間（(5)）と同じ。
+- **VAPID の鍵**は、公開鍵を初めて求められたとき（設定の画面・開いたときの登録）に作り、`<LIBRETTO_HOME>/push-keys.json`（`0600`。API キーと同じ書き方）に持つ。連絡先（`subject`）は libretto の公開のリポジトリの URL。理由: 本人のメールアドレスを配信元に渡さずに済み、Safari の配信元が受け付けない `https://localhost`・`127.0.0.1` を避けられる。
+- **登録**は端末に 1 つ（`push_subscriptions` の `session_id` が主キー）で、`endpoint` も 1 つの端末にだけ結ぶ（`UNIQUE`）。同じブラウザでペアリングし直して登録したら、前の端末の登録と送り残しを消す。理由（設計レビュー）: ペアリングし直しても前の端末は外れないので、そのままだと新しい端末を外しても前の端末の登録から届き続ける。
+- **API**: `GET /api/devices/push`（公開鍵・この端末の登録をホストが持っているか・前に送ったとき配信元に届かなかったか）、`PUT /api/devices/push`（`PushSubscription.toJSON()` の形。配信元は `https://` だけ）、`POST /api/devices/presence { tab, n, visible }`。端末は Cookie のセッションで決める。`DELETE /api/devices/:sessionId` は登録と送り残しも消す。
+- **画面の登録の手順は 1 つ**（`syncPush`）。許可したとき（「この端末に通知する」）と、SSE がつながるたび・設定の面を開いたときに、ブラウザの登録を取り（無ければ作り）、ホストへ置き換えで渡す。ホストの公開鍵が変わっていれば作り直す。理由（設計レビュー）: 開くたびだけにすると、初めて許可して閉じた端末が登録されない。`pushsubscriptionchange` は扱わず、次に開いたときに拾う。
+- **見ている**: タブはページを開くたびの印（`tab`）を持ち、SSE の URL（`/api/events?tab=`）と `POST /api/devices/presence` に付ける。ホストは SSE がつながっている間だけそのタブを数え、切れたら消す（つなぎ直しの後に前のつなぎの切れが届いても新しいほうは消さない）。つながっていないタブの POST と、タブの中の通し番号 `n` が前より古い POST（遅れて届いた前の変化）は捨てる。ページは SSE がつながるたびと `visibilitychange`・`focus`・`blur` で `visibilityState === 'visible' && document.hasFocus()` を送る。端末のどれかのタブが見ていれば送らず `sent` にする（画面がブラウザの通知 B を出す）。理由（設計レビュー）: タブ単位にしないと、裏のタブの `visible: false` が見ているタブを上書きする。切れた後に遅れて届いた `visible: true` で通知が止まり続けない。
+- **配信元の応答**: `404` / `410` → 登録を消して `dropped`。`429`・`5xx`・`401` / `403`・届かない → 送り直し（(5) の 1・5・30 分）。理由（設計レビュー）: `401` / `403` は署名の側（時計のずれなど）の問題でもあり、登録を消すと一時の不具合で全部の端末の登録が消える。配信元が 30 秒応答しなければ届かないとして打ち切る（1 つの配信元が止まって、ほかの端末への送り出しを待たせない）。届かない（`fetch` が例外）は端末ごとにメモリに印を立て、届いたら下ろし、設定の画面が (7) の「配信元に届かない」の文を出す。1 送り先に何通かあれば 1 通ずつ送り、1 通でも送り直しなら全部を送り直す（送れた分は同じ `tag` で置き換わる）。
+- **送っている間の取り消し**: 送り手は 1 通ごとに、端末が外されていない・400 日以内・登録が変わっていないことを確かめ直す。送り出しの仕事は送り先ごとに確認待ちの古さ（(11)）を確かめ直す。`setDelivery` は `pending` の行だけを書き換える。理由（設計レビュー）: 送っている間に端末を外して `dropped` にした行が、遅れて返った送り直しの結果で `pending` に戻っていた。
+- **サービスワーカーの push**: 受けた push は (11) と同じ `show` を通すが、**必ず何か出す**。見ていても出し、同じ知らせ・同じ案件の新しい知らせが出ていれば、それを同じ `tag` で出し直す（置き換わるだけで鳴り直さない。閉じてから出すと置き換えにならない）。画面から渡された知らせと同じ列に並べる。
+- **マニフェスト**: `page/public/manifest.webmanifest`（`display: standalone`・`start_url: /`）を置き、`index.html` から指す。アイコンは置かない（iOS / iPadOS はホーム画面に頭文字のアイコンを出す）。
+- **設定の「お知らせ」の節**: 「このブラウザでは、画面を開いているあいだだけ通知します」は、画面を閉じたあとの通知に対応していないブラウザと、許可してもホストが登録を受け取れていない端末に出す。iPhone・iPad で通知を使えない（ホーム画面から開いていない）ときは (7) の「ホーム画面に追加」の文を、前に送ったとき配信元に届かなかった端末には (7) の「配信元に届かない」の文を出す。
+
+**(14) 実装の決め事（GitHub #53。(9) の 4）**
 
 (9) の 4 を作るときに決めたこと。設計を Codex の設計レビューに 1 回かけ、出た指摘を反映した。
 
 - **時間帯は `settings.json` の `quietHours`**（`{ from: "HH:MM", to: "HH:MM" }` か `null`。既定は `null` = 止めない）。GET / PUT `/api/settings/quiet-hours`（本文は `{ quietHours }`）。区間は [from, to) で、from > to は日をまたぐ（22:00〜07:00）。from と to が同じものは受け付けない。`NoticePrefs`（出来事ごとの入り切り）には入れない。理由: `NoticePrefs` は出来事ごとの真偽だけで、画面はそのキーを並べてチェックボックスにしている。
 - **時刻はホストの OS の時間帯の時・分で比べる**（`quietAt(at, q, timeZone)`。`host/src/server/notices.ts`）。時間帯は既定で OS のもの、テストは引数で渡す（CI の UTC に依らない）。
-- **出すかどうかは出す時刻で決め、出さなかったものに印を残す**（`notices.held`。マイグレーション 0010）。送り出しの仕事が SSE の `notice` を出すとき、今が時間帯の中なら `outside: false` で出して `held` を立てる（お知らせ欄には残る）。画面の外の送り先は、時間帯の中は何も送らない（送り直し待ちのものも残す）。送り先ごとに送る直前にも確かめ、送っているうちに時間帯に入れば残りは明けまで残す。明けたら、`held` の行の `pending` は送らずに `dropped`（明けの 1 通にまとめたので）。理由（設計レビュー）: 書いた時刻で決めると、時間帯の直前に書いて直後に出したものが鳴る。時刻だけで後から判定すると、本人が時間帯を変えたときに、止めていたものが数えられずに消える・止めていなかったものを数える。印を残せば、時間帯を後から変えても数えるものは変わらない。
+- **出すかどうかは出す時刻で決め、出さなかったものに印を残す**（`notices.held`。マイグレーション 0011）。送り出しの仕事が SSE の `notice` を出すとき、今が時間帯の中なら `outside: false` で出して `held` を立てる（お知らせ欄には残る）。画面の外の送り先は、時間帯の中は何も送らない（送り直し待ちのものも残す）。送り先ごとに送る直前にも確かめ、送っているうちに時間帯に入れば残りは明けまで残す。明けたら、`held` の行の `pending` は送らずに `dropped`（明けの 1 通にまとめたので）。理由（設計レビュー）: 書いた時刻で決めると、時間帯の直前に書いて直後に出したものが鳴る。時刻だけで後から判定すると、本人が時間帯を変えたときに、止めていたものが数えられずに消える・止めていなかったものを数える。印を残せば、時間帯を後から変えても数えるものは変わらない。
 - **明けの 1 通**（`quiet`）: 時間帯の外で送り出しの仕事が動くたびに、前の明けの 1 通が数えたところ（event_id の `quiet:<seq>`）より後の `held` の行を数え、1 件以上なら書く。案件ごとに最後の 1 行の種類で 1 件と数え、確認待ちは今もその revision のまま（まだ確認待ち）のものだけ。候補は、止めていた候補の知らせ 1 通ずつについて、直前の候補の知らせからそれまでに出た候補のうち、今も出したままで可能性「低」でないものを数える（候補の知らせを切っていたあいだの分は数えない）。0 件なら書かない。文は `NOTICE.quietEnd`（ui-wording.md）で、内訳は確認待ち・中止・完了・自動で開始・下書きに取りかかった・依頼の候補の順に、0 件を省いて並べる。開く面は `/`。
 - **自動で開始と下書きに取りかかったも内訳に入れる**。理由（設計レビュー）: 本人が画面の外へ出すと決めた出来事が、時間帯の中に起きたというだけで画面の外へ一度も出ないことになる。ui-wording.md の型（確認待ち・中止・完了・依頼の候補）にこの 2 つを足した。
 - **明けの 1 通は出来事ごとの入り切りに関わらず画面の外へ出す**（`noticeRoute.on('quiet')` は常に真）。時間帯を入れたこと自体が、明けに知らせてほしいという選択なので。
@@ -3701,7 +3730,7 @@ CREATE TABLE sessions (
 CREATE INDEX sessions_by_id ON sessions(session_id, seq);
 
 -- お知らせ 1 行（6.8）。event_id は <遷移の event_id>#notice・candidates:<数えた候補の出来事の seq>・quiet:<まとめた最後の seq>。
--- revision は書いた時点の案件の revision。held は通知を止める時間帯に出さなかった印（6.8 (12)）
+-- revision は書いた時点の案件の revision。held は通知を止める時間帯に出さなかった印（6.8 (14)）
 CREATE TABLE notices (
   seq INTEGER PRIMARY KEY AUTOINCREMENT, case_id TEXT, kind TEXT NOT NULL, text TEXT NOT NULL, at TEXT NOT NULL,
   event_id TEXT, path TEXT NOT NULL DEFAULT '/', outside INTEGER NOT NULL DEFAULT 0, revision INTEGER,
@@ -3715,6 +3744,11 @@ CREATE TABLE notice_deliveries (
   notice_seq INTEGER NOT NULL REFERENCES notices(seq), target TEXT NOT NULL,
   status TEXT NOT NULL /* 'pending' | 'sent' | 'dropped' */, tries INTEGER NOT NULL DEFAULT 0, next_at TEXT NOT NULL,
   PRIMARY KEY (notice_seq, target)
+);
+
+-- 画面を閉じていても届く通知の登録（6.8 (6)(13)）。端末に 1 つ、endpoint も 1 つの端末にだけ
+CREATE TABLE push_subscriptions (
+  session_id TEXT PRIMARY KEY, endpoint TEXT NOT NULL UNIQUE, p256dh TEXT NOT NULL, auth TEXT NOT NULL, at TEXT NOT NULL
 );
 
 -- 会話欄。thread は案件 id か 'lobby'
@@ -3770,7 +3804,7 @@ CREATE UNIQUE INDEX conversation_one_per_request ON conversation_messages(reques
 
 **`costs`**: 列は上の定義のとおり（`type: 'hold'|'charge'|'classified'`、`call_id`、`case_id: string|'推測'|'点検'|'会話'`、`role`、`family`、`model`、`yen`、`hold_yen`、`tokens_in` / `tokens_out`、`item_id`）。行の種類ごとに埋める欄・空にする欄と重複の防ぎ方は上の `CHECK` と一意の索引（理由は 9.4 (1)）。集計（どれも 1 本の SQL）: 案件の累計 = `charge` の合計 ＋ 未精算の `hold` の全額。全体の今月 = 同じ集計を全案件＋推測＋点検で（月の境界と、月をまたぐ呼び出しをどの月に数えるかは 9.4 (2)）。推測の 1 日の件数 = `classified` 行（分類した候補 1 件につき 1 行。中で Haiku と Jev を何回呼んでも 1 行）の数（JST の 1 日）。`model` / `family` は内部の記録で、画面には出さない（11.2）。
 
-**データベースのほかにルートに置くファイル**: `settings.json`（5.3 の `Settings`。置き換えで書く唯一のファイル。前の版を `settings.prev.json` に残す。API キーは入れない）、`api-keys.json`（設定の面から入れた API キー。`{ openai?: { value, savedAt }, jev?: { value, savedAt } }`。**オーナーだけが読み書きできる権限**で作る: POSIX は作るときから `0600`、一時ファイルに `0600` で書いて置き換える。素の Windows はユーザーのプロファイルの既定の権限に任せ、8.5 の拒否規則に足す。案件フォルダの外で、作り手のセッションの `denyRead`（8.3）の中にある。`settings.json` に入れないのは、`settings.prev.json` に写って値が 2 か所に残るため）、ペアリングのセッションは `sessions` 表、`pairing.txt`（未使用のペアリング URL。使ったら消す）、`STOP`（緊急停止。中身は時刻）、`isolation.json`（8.3）、`requirements.md`（依存の一覧。オーナー向け）、会話欄のお知らせは `notices` 表、会話欄は `conversation_messages` 表（`thread` = 案件 id か `lobby`）、`logs/`（CLI の生の出力。画面に出ない）、`calls/`（呼び出しの結果のファイル `<callId>.json`。精算したら消す。9.4 (7)）。
+**データベースのほかにルートに置くファイル**: `settings.json`（5.3 の `Settings`。置き換えで書く唯一のファイル。前の版を `settings.prev.json` に残す。API キーは入れない）、`api-keys.json`（設定の面から入れた API キー。`{ openai?: { value, savedAt }, jev?: { value, savedAt } }`。**オーナーだけが読み書きできる権限**で作る: POSIX は作るときから `0600`、一時ファイルに `0600` で書いて置き換える。素の Windows はユーザーのプロファイルの既定の権限に任せ、8.5 の拒否規則に足す。案件フォルダの外で、作り手のセッションの `denyRead`（8.3）の中にある。`settings.json` に入れないのは、`settings.prev.json` に写って値が 2 か所に残るため）、ペアリングのセッションは `sessions` 表、`pairing.txt`（未使用のペアリング URL。使ったら消す）、`push-keys.json`（Web Push の VAPID の鍵の組。`0600`。6.8 (13)）、`STOP`（緊急停止。中身は時刻）、`isolation.json`（8.3）、`requirements.md`（依存の一覧。オーナー向け）、会話欄のお知らせは `notices` 表、会話欄は `conversation_messages` 表（`thread` = 案件 id か `lobby`）、`logs/`（CLI の生の出力。画面に出ない）、`calls/`（呼び出しの結果のファイル `<callId>.json`。精算したら消す。9.4 (7)）。
 
 ### 9.3 案件フォルダ
 

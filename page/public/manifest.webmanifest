@@ -1,0 +1,8 @@
+{
+  "name": "libretto",
+  "short_name": "libretto",
+  "lang": "ja",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone"
+}
