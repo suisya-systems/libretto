@@ -805,6 +805,20 @@ export const STATES: Record<string, State> = {
     mark: W['result.receiveHeading'],
     selector: '.paste-preview',
   },
+  // 成果: 貼り付け用だけで完了し、Web ページを足せる（#72。長い保存先の名前のボタンが 390 ではみ出さない）
+  'done-add': {
+    script: [
+      ...entrance(briefDraft, { ...done, intake: { ...done.intake, destinations: ['paste'] } }),
+      draft(1),
+      verdicts(1, false),
+      draft(2),
+      verdicts(2, true),
+    ],
+    drive: toDone,
+    expect: (v) => v.state === '完了' && v.deliveryPlan.targets.every((t) => t.kind === 'paste'),
+    mark: W['result.addHeading'],
+    selector: '.result-add',
+  },
   // 完了した依頼の一覧
   'done-list': {
     script: clean,
