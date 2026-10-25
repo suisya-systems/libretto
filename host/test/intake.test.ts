@@ -421,6 +421,32 @@ describe('拾い上げ（6.4 (3)(4)）', () => {
     expect((await connections()).google.problem).toBeUndefined()
   })
 
+  it('Gmail API が有効でない（403 accessNotConfigured）は混雑と分けて連携の欄に出す', async () => {
+    await setup()
+    g.state.fail = {
+      status: 403,
+      body: JSON.stringify({ error: { code: 403, errors: [{ reason: 'accessNotConfigured' }] } }),
+      times: 1,
+      path: /\/labels$/,
+    }
+    await server.poller.run()
+    expect((await connections()).google.problem).toBe('api_disabled')
+  })
+
+  it('Drive API が有効でないことは、連携の欄に先に出し、有効にすれば消える', async () => {
+    await setup({ connected: false })
+    g.state.fail = {
+      status: 403,
+      body: JSON.stringify({ error: { code: 403, errors: [{ reason: 'accessNotConfigured' }] } }),
+      times: 1,
+      path: /\/about$/,
+    }
+    await connect() // 戻りで始まる回が先に問い合わせる
+    expect((await connections()).google.docsProblem).toBe('api_disabled')
+    await server.poller.run()
+    expect((await connections()).google.docsProblem).toBeUndefined()
+  })
+
   it('止めている間（STOP）は動かず、「今すぐ取り込む」も受けない', async () => {
     await setup()
     g.add(thread('t1'))

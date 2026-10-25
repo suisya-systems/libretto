@@ -187,6 +187,7 @@ export async function startFakeGoogle() {
       files.set(f.id, f)
       return json(200, pick(f))
     }
+    if (url.pathname === '/drive/v3/about') return json(200, { kind: 'drive#about' })
     if (url.pathname === '/drive/v3/files') {
       const q = url.searchParams.get('q') ?? ''
       const [, k, v] = /key='([^']*)' and value='([^']*)'/.exec(q) ?? []

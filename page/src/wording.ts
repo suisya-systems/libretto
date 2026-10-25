@@ -477,6 +477,10 @@ export const W = {
   'settings.google.labelMissing':
     'Gmail にラベル {label} がありません。Gmail でラベルを作って、取り込みたいメールに付けてください。',
   'settings.google.problem.rate_limited': 'Gmail が混み合っていたので、取り込みを次の回に回しました。',
+  'settings.google.problem.api_disabled':
+    'Gmail API が有効になっていません。Google Cloud のコンソールで、連携に使っているプロジェクトの「Gmail API」を有効にしてください。',
+  'settings.google.docsApiDisabled':
+    'Google Drive API が有効になっていません。Google ドキュメントに保存するには、Google Cloud のコンソールで、連携に使っているプロジェクトの「Google Drive API」を有効にしてください。',
   'settings.google.problem.network': 'Gmail につながりませんでした。15 分後にもう一度見ます。',
   'settings.google.lastAt': '{at} に取り込み',
   'settings.google.result.connected': '連携しました。',

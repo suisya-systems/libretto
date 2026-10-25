@@ -19,6 +19,8 @@ export const UNKNOWN_LIMIT = 3 // 不明の行がこの数になった後の周�
 export const GDOC_SAY = {
   notLinked: 'Google ドキュメントに保存できる連携がありません',
   rejected: 'Google ドライブが保存を受け付けませんでした',
+  driveDisabled:
+    'Google Drive API が有効になっていないため、保存できませんでした。Google Cloud のコンソールで、連携に使っているプロジェクトの「Google Drive API」を有効にしてから、もう一度送ってください',
   notFound: '保存した文書が 3 回探しても確かめられませんでした',
   mismatch: (missing: number, extra: number) =>
     `保存した文書の本文が元の本文と食い違っています（欠けた段落 ${missing}・増えた段落 ${extra}）`,
@@ -207,13 +209,18 @@ export async function deliverGdoc(
     const folder = target === FOLDER_NAME ? await libFolder(d, signal) : target
     if (typeof folder !== 'string')
       // 断られたら作れない。届かないなどは次の周期にもう一度（フォルダが用意できない周期も数える。6.5 (7)）
-      return folder.why === 'rejected' || folder.why === 'rate_limited' ? failed(GDOC_SAY.rejected) : miss()
+      return folder.why === 'api_disabled'
+        ? failed(GDOC_SAY.driveDisabled)
+        : folder.why === 'rejected' || folder.why === 'rate_limited'
+          ? failed(GDOC_SAY.rejected)
+          : miss()
     if (signal.aborted) return undefined
     writeAtomic(path, '{}\n')
     marker = {}
     const r = await upload(d.google, c, a, folder, docx, signal)
     if (!r.ok) {
       // 応答で断られたものは作られていない。届かない・時間切れ・連携の切れ目は作られたか分からない
+      if (r.why === 'api_disabled') return failed(GDOC_SAY.driveDisabled)
       if (r.why === 'rejected' || r.why === 'rate_limited') return failed(GDOC_SAY.rejected)
       return miss()
     }
