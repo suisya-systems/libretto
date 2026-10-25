@@ -1464,6 +1464,20 @@ describe('Google ドキュメントの届け先（6.5）', () => {
     expect(conn.google).toMatchObject({ state: 'connected', docs: false })
   })
 
+  it('Drive API が有効でない（403 accessNotConfigured）なら、有効にする場所を添えて失敗にする', async () => {
+    const id = await toConfirm(['gdoc'])
+    g.state.fail = {
+      status: 403,
+      body: JSON.stringify({ error: { code: 403, errors: [{ reason: 'accessNotConfigured' }] } }),
+      times: 99,
+      path: /\/drive\/v3\/files/,
+    }
+    await send(id)
+    await waitState(id, '停止')
+    expect(gdocRows(id).at(-1)?.reason).toBe(GDOC_SAY.driveDisabled)
+    expect(GDOC_SAY.driveDisabled).toContain('Google Cloud')
+  })
+
   it('T23b: 承認の面で保存先を page から Google ドキュメントに変えると、組に無い形式の項目をホストが足して判定する', async () => {
     home = mkdtempSync(join(tmpdir(), 'libretto-runner-'))
     link()

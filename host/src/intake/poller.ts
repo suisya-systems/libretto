@@ -48,14 +48,18 @@ export function createPoller(d: Deps) {
   let lastAt: string | undefined
   let startedAt = 0
   let labelFound: boolean | undefined
-  let problem: Problem
+  let problem: 'rate_limited' | 'network' | 'api_disabled' | undefined
+  // Drive は連携のたびに 1 度だけ先に問い合わせ、無効と分かったあいだは毎回見直す（直したら消える）
+  let docsProblem: 'api_disabled' | undefined
+  let docsCheckedAt = -1
   const sl: { lastAt?: string; problem: Problem; sweep?: string | undefined } = { problem: undefined }
 
   // 失敗は連携の欄に出す。auth_expired は google / slack の側が覚える
   const why = (f: GoogleFail | SlackFail): Problem =>
     f.why === 'rate_limited' || f.why === 'network' ? f.why : f.why === 'rejected' ? 'network' : undefined
   const failed = (f: GoogleFail) => {
-    problem = why(f) ?? problem
+    // API が有効でない（Gmail だけ）はそのまま出す
+    problem = f.why === 'api_disabled' ? 'api_disabled' : (why(f) ?? problem)
   }
   const slackFailed = (f: SlackFail) => {
     // 権限が足りない（missing_scope）は slack の側が名前で覚える
@@ -82,6 +86,15 @@ export function createPoller(d: Deps) {
     const g = d.google
     const generation = g.generation()
     const account = g.status().email ?? ''
+    if (g.status().docs && (docsCheckedAt !== generation || docsProblem)) {
+      const r = await g.drive('/drive/v3/about?fields=kind', {}, signal)
+      if (g.generation() !== generation) return
+      // 届かないなど決め手の無い失敗では、前の判断も「確かめた」印も変えない（次の回にもう一度）
+      if (r.ok || r.why === 'api_disabled') {
+        docsCheckedAt = generation
+        docsProblem = r.ok ? undefined : 'api_disabled'
+      }
+    }
     const label = await labelId(g, d.label(), signal)
     if (!label.ok) return failed(label)
     labelFound = !!label.id
@@ -225,6 +238,7 @@ export function createPoller(d: Deps) {
       ...(lastAt && { lastAt }),
       ...(labelFound !== undefined && { labelFound }),
       ...(problem && { problem }),
+      ...(docsProblem && { docsProblem }),
     }),
     slackView: () => ({ ...(sl.lastAt && { lastAt: sl.lastAt }), ...(sl.problem && { problem: sl.problem }) }),
   }

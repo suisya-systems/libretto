@@ -2203,6 +2203,8 @@ Issue の「決めること」の 1〜4 を下に決める。体験と範囲を�
 - **添付は中身を読まない**（設計書 3.5・Q9）: (a) `/attachments/` の口は呼ばない、(b) **`filename` が空でない部分と `Content-Disposition: attachment` の部分は、その下の部分ごと本文から外し、名前だけを取る**。理由（設計レビュー）: Gmail は小さな添付の中身を部分の `body.data` に入れて返すことがあり、(a) だけでは `.txt` の添付が本文に混ざる。
 - **本文は保存しない**（設計書 10.2）。メモリで「AI への指示」の検出と要約に渡して捨てる。案件の無い呼び出しは `jobs/` を書かない（6.1）。`calls/` の結果のファイルはどの役割でも精算の後に消す（9.4 (7)）。`LIBRETTO_DEBUG_DIR` は開発の確かめ用で、設定したときだけ生の出力を書く（既定は書かない）。JSON として読めない出力の `logs/` の 1 行には、読めなかったことだけを書き、パーサーの文（出力の一部を含む）は書かない（どの役割も同じ）。
 - 失敗: `401` → 1 回だけトークンを更新して呼び直し、だめなら `auth_expired`。`429` と `403`（`rateLimitExceeded` / `userRateLimitExceeded`）→ その回を飛ばす（`rate_limited`）。届かない・`5xx`・応答の本文が途中で切れた → その回を飛ばす（`network`。差分レビュー: 本文の受け取りの失敗が例外のまま上がり、入口の下書きが本文なしで続かなかった）。どれも連携の欄に出す（10.1 の `Unavailable` の形。`personText` は業務言語）。
+- `403` の本文が `accessNotConfigured` / `SERVICE_DISABLED`（Google Cloud のプロジェクトでその API が有効でない）なら `rejected` にせず `api_disabled`（`api: 'gmail' | 'drive'`。呼んだ先で決める）。権限・容量・混み合いとは直し方が違い、本人が Google Cloud のコンソールで有効にするしかないため。Gmail は連携の欄の `problem: 'api_disabled'`（`settings.google.problem.api_disabled`）、Drive は送付の失敗の理由（`GDOC_SAY.driveDisabled`。作られていないので `rejected` と同じく不明にせず失敗）に、有効にする API の名前と場所を書く。
+- **先に知らせる（Issue 41）**: 拾い上げの回の頭で、Google ドキュメントの権限があれば、連携ごとに 1 回だけ `GET /drive/v3/about?fields=kind` で問い合わせ、`api_disabled` なら `ConnectionsView.google.docsProblem` に出す（`settings.google.docsApiDisabled`）。無効のあいだは回ごとに見直し（直せば消える）、届かないなど別の失敗は黙って次の回に回す。専用の窓口・タイマーは足さない。Gmail は回の頭の `labels` 呼びで同じ分類が出るので、先の問い合わせは Drive だけ。
 
 **(4) 候補カードの中身**
 
@@ -2235,7 +2237,7 @@ Issue の「決めること」の 1〜4 を下に決める。体験と範囲を�
 
 **(7) 画面に返す形と画面**
 
-- `ConnectionsView.google`: `{ configured, state: 'none' | 'connected' | 'expired', email?, label, labelFound?, lastAt?, problem?: 'rate_limited' | 'network' }`（`configured` は `.env.local` の 2 つがあるか）。
+- `ConnectionsView.google`: `{ configured, state: 'none' | 'connected' | 'expired', email?, label, labelFound?, lastAt?, problem?: 'rate_limited' | 'network' | 'api_disabled', docsProblem?: 'api_disabled' }`（`configured` は `.env.local` の 2 つがあるか）。
 - `HomeView.intake`: `{ connected, running, lastAt? }`。**ホームの「依頼の候補」の欄は、連携しているか、候補が 1 件以上あるときに出す**（5.8 で欄ごと出さなかった理由は「候補を作る経路が無い」で、経路ができたので連携の有無で分ける）。
 - `HomeView.candidates.signal` / `meeting` / `inferred` は `candidates.status = presented` と `candidate_cards` を結び、由来と可能性で分けて新しい順に並べる。
 - ホームは SSE の `candidates.changed` と `connections.changed` でも取り直す（設計レビュー: ホームは `case.changed` と `notice` しか見ておらず、裏の拾い上げで増えた候補が出なかった）。拾い上げの始まりと終わり、候補の提示・昇格・書き直し・見送り・進める、連携と解除のどれでも `candidates.changed` か `connections.changed` を出す。

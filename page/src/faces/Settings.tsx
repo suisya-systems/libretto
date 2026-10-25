@@ -529,6 +529,11 @@ function LinkSection({
           {g.state === 'connected' && g.labelFound === false && (
             <p className="note-warn small">{w('settings.google.labelMissing', { label: g.label })}</p>
           )}
+          {g.state === 'connected' && g.docsProblem && (
+            <p className="note-warn small" role="status">
+              {W['settings.google.docsApiDisabled']}
+            </p>
+          )}
           {g.state === 'connected' && g.problem && (
             <p className="note-warn small">{W[`settings.google.problem.${g.problem}`]}</p>
           )}
