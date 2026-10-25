@@ -113,8 +113,14 @@ const shutdown = async (code: number) => {
 process.on('SIGINT', () => void shutdown(0))
 process.on('SIGTERM', () => void shutdown(0))
 
+// GET /pair/:token は確かめの画面だけを返し、Cookie は POST で出る（GitHub #71）
 const pairCookie = async () => {
-  const p = await server.app.fetch(new Request(`${origin}${new URL(server.issuePairing('shoot').url).pathname}`))
+  const p = await server.app.fetch(
+    new Request(`${origin}${new URL(server.issuePairing('shoot').url).pathname}`, {
+      method: 'POST',
+      headers: { origin },
+    }),
+  )
   return (p.headers.get('set-cookie') ?? '').split(';')[0] as string
 }
 const cookie = await pairCookie()

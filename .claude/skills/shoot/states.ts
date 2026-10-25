@@ -609,6 +609,12 @@ export const STATES: Record<string, State> = {
     expect: (v) => v.state === '入口待ち' && v.turn === '本人' && !!v.entrance,
     mark: W['band.isolationWeak'],
   },
+  // 入口: 渡してほしいものがあり、その行の中に次の画面で貼り付けることを書く（GitHub #68）
+  'entrance-wanted': {
+    script: entrance({ ...briefDraft, brief: { ...briefDraft.brief, wanted: ['ブレストのメモ'] } }),
+    expect: (v) => v.state === '入口待ち' && v.turn === '本人' && !!v.entrance?.brief.wanted.length,
+    mark: W['entrance.wantedNote'],
+  },
   // 進行: 渡してほしいものを待っている（本人の番）
   materials: {
     script: entrance({ ...briefDraft, brief: { ...briefDraft.brief, wanted: ['ブレストのメモ'] } }),
