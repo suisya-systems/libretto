@@ -1242,8 +1242,8 @@ function NoticeSection({
         </li>
         {slackBot && dm && <SlackDmRow status={slackBot} dm={dm} reload={reloadDm} />}
       </ul>
-      <fieldset className="revise">
-        <legend className="strong small">{W['settings.notices.kinds']}</legend>
+      <fieldset className="settings-group">
+        <legend className="key-label">{W['settings.notices.kinds']}</legend>
         {KINDS.map((k) => (
           <label key={k} className="row-gap">
             <input type="checkbox" checked={prefs[k]} disabled={busy} onChange={() => void toggle(k)} />
@@ -1357,19 +1357,19 @@ function QuietSection({ value, reload }: { value: QuietHours | null; reload: () 
     if (ok) reload()
   }
   return (
-    <fieldset className="revise">
-      <legend className="strong small">{W['settings.notices.quiet']}</legend>
+    <fieldset className="settings-group">
+      <legend className="key-label">{W['settings.notices.quiet']}</legend>
       <p className="muted small">{W['settings.notices.quietNote']}</p>
       <p className="small" role="status">
         {value ? w('settings.notices.quietNow', value) : W['settings.notices.quietNone']}
       </p>
       <div className="row-gap">
-        <label className="row-gap">
-          {W['settings.notices.quietFrom']}
+        <label className="voice-field">
+          <span className="small strong">{W['settings.notices.quietFrom']}</span>
           <input type="time" value={from} disabled={busy} onChange={(e) => setFrom(e.target.value)} />
         </label>
-        <label className="row-gap">
-          {W['settings.notices.quietTo']}
+        <label className="voice-field">
+          <span className="small strong">{W['settings.notices.quietTo']}</span>
           <input type="time" value={to} disabled={busy} onChange={(e) => setTo(e.target.value)} />
         </label>
       </div>

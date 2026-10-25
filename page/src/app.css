@@ -402,9 +402,10 @@ a.strong:hover {
   flex: none;
 }
 
-/* 入力 */
+/* 入力。字を打つ欄と選ぶ欄は同じ高さと枠。チェックボックス・ラジオは字の大きさの印にする（実装設計書 5.8 (7)） */
 textarea,
-input {
+input:where(:not([type="checkbox"], [type="radio"])),
+select {
   font: inherit;
   font-size: var(--text-lg);
   color: var(--color-ink);
@@ -415,12 +416,25 @@ input {
   width: 100%;
   resize: vertical;
 }
-input {
+input:where(:not([type="checkbox"], [type="radio"])),
+select {
   min-height: 48px;
   padding: 0 14px;
 }
+input[type="checkbox"] {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  accent-color: var(--color-action);
+}
+label:has(> input[type="checkbox"]) {
+  min-height: var(--tap);
+  flex-wrap: nowrap;
+}
 textarea:focus-visible,
-input:focus-visible {
+input:focus-visible,
+select:focus-visible {
   outline: 3px solid var(--color-ring);
   outline-offset: 1px;
   border-color: var(--color-action);
@@ -431,7 +445,8 @@ input::placeholder {
   opacity: 1;
 }
 textarea:disabled,
-input:disabled {
+input:where(:not([type="checkbox"], [type="radio"])):disabled,
+select:disabled {
   background: var(--color-sunken);
   color: var(--color-muted);
   cursor: not-allowed;
@@ -2580,6 +2595,28 @@ input:disabled {
 .voice-form input {
   font-size: var(--text-base);
 }
+/* 縦に積むフォームの欄。flex-basis が高さに効かないよう伸び縮みさせず、広い画面で横に間延びさせない */
+.stack > .voice-field {
+  flex: none;
+  max-width: 480px;
+}
+/* 設定の節の中の小さなまとまり（通知する出来事・知らせを止める時間帯）。枠を引かず、key-row と同じ線で区切る */
+.settings-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+  margin: 0;
+  padding: var(--space-4) 0 var(--space-2);
+  border: 0;
+  border-top: 1px solid var(--color-line);
+}
+.settings-group > legend {
+  float: left;
+  width: 100%;
+  padding: 0;
+  font-weight: 700;
+}
 @media (max-width: 720px) {
   .key-form .btn,
   .key-actions .btn,
@@ -2659,6 +2696,14 @@ input:disabled {
 /* 連携の行: ボタンの横の補足を縦中央に */
 .key-actions {
   align-items: center;
+}
+/* 設定の節の中の小さなまとまり: 入力の行とボタンの行を前の文から少し離す */
+.settings-group > .key-actions,
+.settings-group > .row-gap:has(> .voice-field) {
+  margin-top: var(--space-2);
+}
+.settings-group .voice-field {
+  flex: 0 1 220px;
 }
 @media (max-width: 720px) {
   .cand {
