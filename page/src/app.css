@@ -404,7 +404,7 @@ a.strong:hover {
 
 /* 入力。字を打つ欄と選ぶ欄は同じ高さと枠。チェックボックス・ラジオは字の大きさの印にする（実装設計書 5.8 (7)） */
 textarea,
-input:not([type="checkbox"], [type="radio"]),
+input:where(:not([type="checkbox"], [type="radio"])),
 select {
   font: inherit;
   font-size: var(--text-lg);
@@ -416,7 +416,7 @@ select {
   width: 100%;
   resize: vertical;
 }
-input:not([type="checkbox"], [type="radio"]),
+input:where(:not([type="checkbox"], [type="radio"])),
 select {
   min-height: 48px;
   padding: 0 14px;
@@ -445,7 +445,7 @@ input::placeholder {
   opacity: 1;
 }
 textarea:disabled,
-input:not([type="checkbox"], [type="radio"]):disabled,
+input:where(:not([type="checkbox"], [type="radio"])):disabled,
 select:disabled {
   background: var(--color-sunken);
   color: var(--color-muted);
