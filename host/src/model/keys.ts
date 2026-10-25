@@ -2,13 +2,20 @@
 import { randomUUID } from 'node:crypto'
 import { readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { ApiKeyKind, type ApiKeyStatus } from '@libretto/shared/api'
+import type { ApiKeyKind, ApiKeyStatus } from '@libretto/shared/api'
 import { z } from 'zod'
 import { jst } from '../ledger/ledger.ts'
 
 type Kind = z.infer<typeof ApiKeyKind>
 const Entry = z.object({ value: z.string(), savedAt: z.string() })
-const File = z.partialRecord(ApiKeyKind, Entry)
+// Google の OAuth クライアント（6.4 (10)）。ID と秘密の組なので API キーとは別の欄
+const GoogleClient = z.object({ clientId: z.string(), clientSecret: z.string(), savedAt: z.string() })
+const File = z.object({
+  openai: Entry.optional(),
+  jev: Entry.optional(),
+  slack: Entry.optional(),
+  googleClient: GoogleClient.optional(),
+})
 type File = z.infer<typeof File>
 
 const pathOf = (home: string) => join(home, 'api-keys.json')
@@ -58,3 +65,27 @@ export function deleteKey(home: string, kind: Kind): ApiKeyStatus {
 }
 
 export const readKey = (home: string, kind: Kind): string | undefined => load(home)[kind]?.value
+
+// Google の OAuth クライアント。値を返すのは readGoogleClient だけで、呼ぶのは google.ts だけ
+export function readGoogleClient(home: string): { clientId: string; clientSecret: string } | undefined {
+  const c = load(home).googleClient
+  return c && { clientId: c.clientId, clientSecret: c.clientSecret }
+}
+// 画面と入れ直しの判断に使う。秘密は含めない
+export function googleClientInfo(home: string): { clientId: string; savedAt: string } | undefined {
+  const c = load(home).googleClient
+  return c && { clientId: c.clientId, savedAt: c.savedAt }
+}
+
+export function setGoogleClient(home: string, c: { clientId: string; clientSecret: string }, now = new Date()) {
+  const f = load(home)
+  f.googleClient = { ...c, savedAt: jst(now) }
+  save(home, f)
+}
+
+export function deleteGoogleClient(home: string) {
+  const f = load(home)
+  if (!f.googleClient) return
+  delete f.googleClient
+  save(home, f)
+}

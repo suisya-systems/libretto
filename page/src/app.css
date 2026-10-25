@@ -477,6 +477,11 @@ input:disabled {
   font-weight: 700;
   overflow-wrap: anywhere;
 }
+/* ファイルを選ぶボタン（中の input は .sr-only）。キーボードで選んだときに枠を出す */
+.file-btn:has(input:focus-visible) {
+  outline: 3px solid var(--color-ring);
+  outline-offset: 2px;
+}
 /* 読み上げだけに出す */
 .sr-only {
   position: absolute;

@@ -311,6 +311,8 @@ stateDiagram-v2
 | `DELETE /api/devices/:sessionId` | 端末を外す | — | — |
 | `GET /oauth/:kind/callback` | 戻り口 | — | 画面「接続と合図」へ 303 |
 | `DELETE /api/connections/:kind` | 外す | — | — |
+| `PUT /api/connections/google/client` | Google の OAuth クライアントを入れる・入れ直す（6.4 (10)） | `{ json: string }`（ダウンロードした JSON の中身。20,000 字まで） | `{ disconnected }`（今の連携を解除したか）。読めない・`installed` でなければ `400` |
+| `DELETE /api/connections/google/client` | Google の OAuth クライアントを削除する（連携も解除する） | — | `204` |
 | `GET /api/connections` | 接続状態・権限の範囲（業務言語）・鍵の有無（値は出さない）・依存の事前点検 | — | `ConnectionsView` |
 | `POST /api/checks/run` | 「いま点検する」（依存・隔離の canary） | — | `202`。結果は `GET /api/connections` |
 | `GET /api/host` | ホストの状態（止まっているか・保存できるか。5.7 (8)） | — | `HostStatus` |
@@ -745,7 +747,7 @@ type Outcome =                         // costYen は全部の呼び出しの精
 |---|---|---|
 | 役割 → モデルの表 | `host/src/model/roles.ts` の `MODEL_BY_ROLE: Record<Role, { family, model }>`（設計書 12 章の表をそのまま）。表に無い役割は例外（既定に落ちない） | モデルの差し替えは表の 1 行の変更で済み、「どの役割がどの系統か」が 1 か所で読める |
 | 中身 4 つ | `claude-cli`（`claude -p --output-format json --max-budget-usd <n>` を子プロセスで。P5）、`openai`（Responses API を `fetch` で。JSON 出力を指定）、`jev`（`POST https://api.typesafe.ai/v1/systemone`。7.4）、`fake`（台本 JSON を返す。11 章） | 設計書 3.5。`fake` が最初からあることでループ全体を費用ゼロで回せる |
-| 鍵 | OpenAI と Jev の API キーと Slack のユーザートークンは `<LIBRETTO_HOME>/api-keys.json`（オーナーが設定の面から入れたもの。9.2・6.6 (2)）、Google の設定は `.env.local` にあり、**この層だけが読む**。読み書きは `host/src/model/keys.ts` の 1 か所で、設定の API（5.2）もこれを呼ぶ。外へ返すのは `ApiKeyStatus`（末尾 4 文字まで）だけで、値はアダプタの中でしか取り出さない。子プロセスには渡す環境変数を許可一覧で絞る（`LANG` / `TERM` / Claude のログイン情報など。OS ごとの一覧は 6.1.2 (1)） | D17。鍵が役割のセッションに渡らないことを**環境変数の許可一覧**で機械的に守る |
+| 鍵 | OpenAI と Jev の API キーと Slack のユーザートークンと Google の OAuth クライアントは `<LIBRETTO_HOME>/api-keys.json`（オーナーが設定の面から入れたもの。9.2・6.6 (2)・6.4 (10)）にあり、**この層だけが読む**。読み書きは `host/src/model/keys.ts` の 1 か所で、設定の API（5.2）もこれを呼ぶ。外へ返すのは `ApiKeyStatus`（末尾 4 文字まで）だけで、値はアダプタの中でしか取り出さない。子プロセスには渡す環境変数を許可一覧で絞る（`LANG` / `TERM` / Claude のログイン情報など。OS ごとの一覧は 6.1.2 (1)） | D17。鍵が役割のセッションに渡らないことを**環境変数の許可一覧**で機械的に守る |
 | 費用 | 呼ぶ**前**に `costs` 表へ `hold`（上限額）を 1 行、終わったら同じ `call` id で `charge` を 1 行。費用が取れなかった呼び出しは上限額のまま数える。円換算の率は `settings.json` の `usdJpy`（既定 150）。呼び出しの単位・上限の通知・費用が不明なときは 6.1.1 (1)〜(3)。途中でホストが落ちた呼び出しは、次の起動で結果のファイルから精算する（9.4 (7)） | 途中で死んだ呼び出しの費用を取りこぼさない。上限の判定（T29）はこの台帳の集計だけで行う |
 | 出力の検査 | `output.kind='json'` は zod で検査し、続けて `accept`（あれば）を流す。どちらかが通らなければ**同じ入力＋前の出力＋エラー**で 1 回だけ言い直させる。2 回目も通らなければ `invalid_output`。1 回は zod と受け入れ規則の**共通**（6.1.1 (4)） | 役割の出力は信用せず、型で受ける。言い直しは 1 回に限って費用を抑える |
 | CLI の語を外へ出さない | `Outcome.detail` は種類ごとの**固定の文言**（6.1.1 (6)）で、CLI・API の生のエラーは `host/logs/` だけに書く | 設計書 3.3 の「出さない語」。台帳と画面にモデルの語が漏れないことをテストで確認（11 章） |
@@ -2183,7 +2185,7 @@ Issue の「決めること」の 1〜4 を下に決める。体験と範囲を�
 
 **(2) 連携の形（OAuth）**
 
-- オーナーが Google Cloud で**デスクトップアプリ型**の OAuth クライアントを作り、ホストの `.env.local` に `LIBRETTO_GOOGLE_CLIENT_ID` / `LIBRETTO_GOOGLE_CLIENT_SECRET` を置く（設計書 7.2・D17。画面には移さない）。`npm start` は `--env-file-if-exists=.env.local` で読む。`.env.local` は `.gitignore` に入れ、名前だけの `.env.local.example` を置く。2 つが無いときは設定の面に「Google の連携の設定がまだありません」を出し、「連携する」を出さない。
+- オーナーが Google Cloud で**デスクトップアプリ型**の OAuth クライアントを作り、ダウンロードした JSON を設定の面の Google の行で入れる（設計書 7.2・D17。手順は (9)、入れ方は (10)）。入っていないときは設定の面に「設定がありません」と入れ方を出し、「連携する」を出さない。（Issue 44 までは `.env.local` の `LIBRETTO_GOOGLE_CLIENT_ID` / `LIBRETTO_GOOGLE_CLIENT_SECRET` に置いていた。今は読まない）
 - 認可コード ＋ PKCE（S256）、`access_type=offline`・`prompt=consent`（更新トークンを毎回受け取る）・`include_granted_scopes=true`。**権限は `gmail.readonly` だけ**（P7）。Drive の権限は Issue 21 が足し（`drive.file`。6.5 (1)）、そのとき本人は 1 回連携し直す（6.5 (2)）。理由: 使わない権限を先に取らない（設計書 10.3）。
 - **戻り先は `http://127.0.0.1:<port>/oauth/google/callback` に固定**。デスクトップ型のクライアントはループバックしか戻り先にできないため。`LIBRETTO_BIND` が `127.0.0.1` を含まない（Tailscale の IP・`::1`・`localhost` など。5.4）ときは、ホストは同じポートで `127.0.0.1` にも待ち受ける（設計レビューの Blocker: 戻り先に誰も待ち受けておらず、連携が完了しなかった）。同意は**ホストを動かしている PC のブラウザで**行う（スマホで押すと、戻り先がスマホ自身の `127.0.0.1` になって届かない）。設定の面の Google の行にこの 1 行を出す。
 - `POST /api/connections/google/start`（Cookie と `Origin` の検査を通ったもの）が `state`（32 バイトの乱数）・PKCE の verifier・要求の `Origin`・連携の世代を**メモリに 10 分・使い切り**で持ち、`{ url }` を返す。画面はその URL へ移る。
@@ -2192,7 +2194,7 @@ Issue の「決めること」の 1〜4 を下に決める。体験と範囲を�
 - **連携を解除**（`DELETE /api/connections/google`）は、(a) 連携の世代を進めて待っている `state` を全部捨て、(b) メモリのアクセストークンを捨て、(c) 動いている拾い上げを止め、(d) `google.json` を消してから、(e) 取り消しの口を呼ぶ（失敗しても解除は済んでいる）。出した候補は残る。理由（設計レビュー）: 解除の前に始めた連携の戻りが解除の後に届くと、`google.json` を書き戻してしまう。世代を確かめれば、解除の後の戻りは保存されない。
 - Gmail の呼び出しも始めたときの世代を覚え、応答の見出しを受けた時と本文を読み終えた時に世代が変わっていれば結果を使わず、今の連携のトークンにも触らない（差分レビュー: 本文の受け取り中に解除されると、古い連携のメールが入口に渡っていた）（差分レビュー: 連携し直しの後に古い呼び出しの `401` が新しいトークンを捨て、新しいアカウントで同じスレッド id を読み直していた）。127.0.0.1 の待ち受けは先の待ち受けが済んでから開き、`localhost` のように同じところを指していれば（`EADDRINUSE`）開かずに続ける。
 - 連携し直し（戻りの保存）でも世代を進める。トークンの更新も世代を確かめ、更新の間に解除・連携し直しがあれば結果を捨てる。トークンの口への要求は 15 秒で打ち切る（差分レビュー: 黙った口を待ち続け、止めた後も取り込みの回が終わらなかった）（差分レビュー: 古い連携の更新が、連携し直した後のアクセストークンを上書きしていた）。
-- 更新トークンが `invalid_grant` を返したら `auth_expired`。拾い上げの Gmail 部分を止め、設定の面に「連携し直してください」（10.2）。
+- 更新トークンが `invalid_grant`（と `unauthorized_client` / `invalid_client`。入れ直す前のクライアントの更新トークン・違う秘密。(10)）を返したら `auth_expired`。拾い上げの Gmail 部分を止め、設定の面に「連携し直してください」（10.2）。
 
 **(3) 拾い上げ（`poller.ts`・`gmail.ts`）**
 
@@ -2237,7 +2239,7 @@ Issue の「決めること」の 1〜4 を下に決める。体験と範囲を�
 
 **(7) 画面に返す形と画面**
 
-- `ConnectionsView.google`: `{ configured, state: 'none' | 'connected' | 'expired', email?, label, labelFound?, lastAt?, problem?: 'rate_limited' | 'network' | 'api_disabled', docsProblem?: 'api_disabled' }`（`configured` は `.env.local` の 2 つがあるか）。
+- `ConnectionsView.google`: `{ configured, clientSavedAt?, state: 'none' | 'connected' | 'expired', email?, label, labelFound?, lastAt?, problem?: 'rate_limited' | 'network' | 'api_disabled', docsProblem?: 'api_disabled' }`（`configured` は OAuth クライアントが入っているか、`clientSavedAt` はそれを保存した日時。(10)）。
 - `HomeView.intake`: `{ connected, running, lastAt? }`。**ホームの「依頼の候補」の欄は、連携しているか、候補が 1 件以上あるときに出す**（5.8 で欄ごと出さなかった理由は「候補を作る経路が無い」で、経路ができたので連携の有無で分ける）。
 - `HomeView.candidates.signal` / `meeting` / `inferred` は `candidates.status = presented` と `candidate_cards` を結び、由来と可能性で分けて新しい順に並べる。
 - ホームは SSE の `candidates.changed` と `connections.changed` でも取り直す（設計レビュー: ホームは `case.changed` と `notice` しか見ておらず、裏の拾い上げで増えた候補が出なかった）。拾い上げの始まりと終わり、候補の提示・昇格・書き直し・見送り・進める、連携と解除のどれでも `candidates.changed` か `connections.changed` を出す。
@@ -2249,6 +2251,35 @@ Issue の「決めること」の 1〜4 を下に決める。体験と範囲を�
 - 添付を取らない: 添付付きのスレッド（`/attachments/` で取るものと、`body.data` に中身の入った `.txt`）で、偽 Gmail が受けたパスに `/attachments/` が無く、`.txt` の中身がモデルへの材料に無いこと。
 - 本文を保存しない: 本文にだけある印の文字列が、データベースのファイルと `<LIBRETTO_HOME>` の下のどのファイルにも無いこと（読めない出力の言い直しを含む）。
 - 拾い上げ・連携・候補の操作・入口は (2)〜(6) の決め事ごとに 1 本ずつ（世代を進めた後の遅れた戻り・最後のページまでたどる・20 件の打ち切りと次の回・`change` の競合を含む）。
+
+**(9) オーナーが用意すること（Google Cloud。Issue 44）**
+
+1. <https://console.cloud.google.com/> でプロジェクトを作る（使っているものでもよい）。
+2. 「API とサービス」→「ライブラリ」で **Gmail API** と **Google Drive API** を探し、両方とも「有効にする」。片方でも無いと、取り込み・Google ドキュメントへの保存のときに設定の面に有効にする API の名前が出る（Issue 41。`settings.google.problem.api_disabled`・`settings.google.docsApiDisabled`）。
+3. 「Google Auth Platform」（「OAuth 同意画面」）を開き、アプリ名と本人のメールアドレスを入れる。対象（ユーザーの種類）は**「外部」**にする。
+4. 公開ステータスは**「テスト」のまま**にし、「対象」の**テストユーザーに本人の Google アカウント**（連携に使う Gmail のアドレス）を足す。足していないと、同意の画面で「アクセスをブロック」になって連携できない。
+   - 注意: 対象が「外部」で「テスト」のままだと、Google の決まりで**更新トークンが 7 日で切れる**。切れると設定の面に「連携し直してください」が出るので、「連携する」を押し直す。
+   - Google Workspace のアカウントで、プロジェクトがその Workspace の Google Cloud の組織に入っているなら、対象を**「内部」**にできる（テストユーザーも 7 日の期限も要らない。組織の人だけが使え、管理者の制限を受けることがある）。組織に入っていない・個人の Gmail のときは「外部」と「テスト」のまま。
+5. 「クライアント」→「クライアントを作成」で、アプリケーションの種類を**「デスクトップ アプリ」**にして作る（名前は何でもよい）。
+6. 作った直後の画面で **「JSON をダウンロード」** を押す（クライアントの秘密は作ったときにしか見られない。逃したら、クライアントの秘密を足すか、クライアントを作り直す）。
+7. libretto の設定の「連携」の Google の行で「JSON ファイルを選ぶ」から 6 のファイルを選ぶ（または中身を貼り付けて「保存」）。再起動は要らない。
+8. libretto を動かしている PC のブラウザで「連携する」を押し、本人のアカウントを選ぶ。「このアプリは Google で確認されていません」と出たら「続行」を押し、Gmail と Google ドライブの許可を両方とも許可する。設定の面に「連携済み」と本人のアドレスが出れば済み。
+
+**(10) OAuth クライアントの入れ方（Issue 44 の着手前の設計レビューで決めたこと）**
+
+- **保存は API キーと同じ扱い**: `host/src/model/keys.ts` の 1 か所で `<LIBRETTO_HOME>/api-keys.json` の `googleClient: { clientId, clientSecret, savedAt }` に読み書きする（`0600` の一時ファイルから置き換え。作り手からは `api-keys.json` と同じく読めない。8.3・8.5）。値はどの応答・SSE・`logs/` にも出さず、画面には保存した日だけを出す（設計書 D17）。理由: 新しいファイルを足すと、素の Windows の拒否規則にも足す必要が出る。
+- **入れ方**: `PUT /api/connections/google/client` に、Google Cloud からダウンロードした JSON の中身を `{ json }` で送る。ホストは `installed.client_id` / `installed.client_secret` を取り出す。読めない・`installed` が無い（`web` 型など）は `400` で、画面は「種類を「デスクトップ アプリ」にして作った JSON を選んでください」と出す。画面は「JSON ファイルを選ぶ」（選んだらそのまま送る）と、伏せた 1 行の欄への貼り付けの 2 つ。理由: 本人に値を書き写させない（設計書 3.5「鍵の置き場」）。ダウンロードした JSON は 1 行なので、1 行の欄に貼れる。
+- **ホストは呼ぶたびに読む**（再起動は要らない）。`createGoogle` は固定の `config`（テスト・撮影）が無ければ `keys.ts` から読む。
+- **入れ直したときの連携**: 前のクライアントがあって `client_id` が違えば、動いている取り込みを止め、今の連携を解除する（世代を進め、待っている `state`・メモリのトークン・`google.json` を捨て、取り消しの口を呼ぶ）。理由: 更新トークンは出したクライアントでしか使えない。`client_id` が同じ（秘密だけ作り直した）なら `google.json` は残し、世代を進めてメモリのトークンと「切れた」を捨て、取り込みを起こす（設計レビュー: 「切れた」が残ったままで、秘密を直しても取り込みが戻らなかった）。削除は必ず解除する。**解除と保存は同期で続けて行い**、取り消しの口はその後に呼ぶ（設計レビュー: 取り消しを待つ間にほかのタブで始めた連携の戻りが、前のクライアントの連携を書き戻していた）。
+- 前のクライアントが無いとき（初めて・`.env.local` からの移り）は `google.json` を残す。同じクライアントなら連携はそのまま続き、違えば更新が `unauthorized_client` / `invalid_client` になって「連携し直してください」になる。
+- **`.env.local` は読まない**（移行）。`LIBRETTO_GOOGLE_CLIENT_ID` / `_SECRET` を使っていた人は、設定の面で同じ JSON を 1 回入れれば、今の連携が続く。`.env.local.example` は消した。`npm start` の `--env-file-if-exists=.env.local`（`LIBRETTO_BIND` などほかの変数）と、`.env.local` を作り手に読ませない拒否（6.6 (2)。前の版の秘密が残りうる）は残す。理由: 画面が無ければ `.env.local` を読む形にすると正本が 2 つになり、画面で削除しても次の起動で戻ったように見える。
+- 本物の Google での確かめ（2026-10-25、窓口とオーナー）: `.env.local` 無しで起こすと Google の行は「設定がありません」。設定の API で今使っている JSON を入れると `disconnected: false` で「連携済み」のまま（Google ドキュメントの権限もある）。「今すぐ取り込む」で Gmail の取り込みが回った。`api-keys.json` は `0600`。
+
+| # | 問い | 判断（オーナー判断 2026-10-25。窓口経由） |
+|---|---|---|
+| A | `.env.local` から読む形を残すか | **読まない**（設定の面で同じ JSON を 1 回入れれば連携が続く） |
+| B | 同意画面を「テスト」のままにすると更新トークンが 7 日で切れる | **(9) の手順に書くだけにする**。本番公開（`gmail.readonly` は制限付きの権限で Google の審査が要る）は見送る |
+| C | 本物の Google での確かめ | **マージ前に行う**（上の 1 行。済み） |
 
 ### 6.5 Google ドキュメントの届け先の決め事（Issue 21 の着手前の設計レビューで決めたこと）
 
@@ -2358,7 +2389,7 @@ Slack で本人がリアクション `:memo:` を付けた投稿が「依頼の�
 - 取り込みの回の最初に毎回 `auth.test` を呼び、本人（`user_id`・`team`・ワークスペースの `url`）と、応答の見出し `x-oauth-scopes` の権限を確かめる。(3) の権限のうち足りないものの名前を覚えて設定の面に出す（見出しが無ければ、各口の `missing_scope` の `needed` で覚える）。
 - `invalid_auth`・`not_authed`・`token_revoked`・`token_expired`・`account_inactive` は `auth_expired`（状態 `expired`。設定の面に直し方）。トークンのローテーションは使わない（有効にすると 12 時間で切れる。(9) に「有効にしない」と書く）。
 - トークンは `api-keys.json` とメモリだけに置き、どの応答・SSE・`logs/` にも出さない。作り手のセッションからは読めない（`srt` は `<LIBRETTO_HOME>` を丸ごと `denyRead`、素の Windows の拒否規則は `Read(<home>/api-keys.json)`。8.3・8.5）。環境変数の許可一覧（`allowedEnv`。6.1.2）にも無い。
-- 合わせて、**`.env.local` の実際の場所（ホストのコードの置き場の直下。Google の OAuth クライアントの秘密がある）を、`srt` の `denyRead` と CLI の読み取り拒否規則の両方に足した**（設計レビュー: 拒否はホーム・`<LIBRETTO_HOME>`・claude の設定の置き場だけで、コードをホームの外（`/opt` など）に置くと `.env.local` が読めた）。
+- 合わせて、**`.env.local` の実際の場所（ホストのコードの置き場の直下。Issue 44 までは Google の OAuth クライアントの秘密を置いていた）を、`srt` の `denyRead` と CLI の読み取り拒否規則の両方に足した**（設計レビュー: 拒否はホーム・`<LIBRETTO_HOME>`・claude の設定の置き場だけで、コードをホームの外（`/opt` など）に置くと `.env.local` が読めた）。
 
 **(3) 権限（User Token Scopes）は 10 個**
 
@@ -3497,7 +3528,6 @@ libretto/
   .github/workflows/ci.yml  push（main）と pull_request で npm ci → npm run verify。Ubuntu と Windows で回す（ホストは本人の PC で動くため）
   .npmrc                    ignore-scripts=true（依存のインストールスクリプトを動かさない。9.1）
   requirements.md           依存の一覧（オーナー向け。事前点検が読む）
-  .env.local.example        Google の設定の名前だけ（API キーと Slack のトークンは設定の面で入れる）
 ```
 
 - 実行時の状態（データベース・案件フォルダ）はリポジトリの**外**（既定 `~/libretto/`、`LIBRETTO_HOME` で変更）。リポジトリにデータベースを置かない。

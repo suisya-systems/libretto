@@ -57,7 +57,7 @@ beforeEach(() => {
       return new Response('{}', { status: 202 })
     }
     if (path.startsWith('/api/connections/google') && init.method) {
-      sent.push({ method: init.method, path })
+      sent.push({ method: init.method, path, ...(init.body && { body: JSON.parse(String(init.body)) }) })
       return respond(init.method)
     }
     if (/^\/api\/settings\/keys\/(openai|jev|slack)$/.test(path) && init.method) {
@@ -80,7 +80,7 @@ async function render() {
       (b) => b.textContent?.trim() === label,
     ) as HTMLButtonElement | undefined
   const input = (scope = '[aria-labelledby="h-keys"]') =>
-    el.querySelector(`${scope} .key-form input`) as HTMLInputElement | null
+    el.querySelector(`${scope} .key-form input:not([type="file"])`) as HTMLInputElement | null
   return {
     el,
     text: () => el.textContent ?? '',
@@ -294,12 +294,67 @@ describe('連携の節（Google。6.4 (7)）', () => {
   }
   const row = (el: HTMLElement) => el.querySelector('#h-link')?.parentElement as HTMLElement
 
-  it('設定が無い: 設定がないことと入れ方を出し、連携するは出さない', async () => {
+  const G = '[aria-labelledby="h-link"] li:first-child'
+  const CLIENT = '{"installed":{"client_id":"1-abc.apps.googleusercontent.com","client_secret":"GOCSPX-secret"}}'
+
+  it('設定が無い: 入れ方を出し、連携するは出さない。貼った JSON を保存し、読めなければ直し方を出す', async () => {
     const r = await render()
     const g = row(r.el)
     expect(g.textContent).toContain(W['settings.google.unconfigured'])
-    expect(g.querySelector('.note-warn code')?.textContent).toBe('.env.local')
+    expect(g.textContent).toContain(W['settings.google.unconfiguredNote'])
+    expect(g.textContent).not.toContain('.env.local')
     expect(r.button(W['settings.google.connect'])).toBeUndefined()
+    expect(g.querySelector<HTMLInputElement>('input[type="file"]')?.accept).toBe('.json,application/json')
+    expect(r.input(G)?.type).toBe('password')
+    await r.type('{"web":{}}', G)
+    respond = () => new Response('{"reason":"invalid"}', { status: 400 })
+    await r.click(r.button(W['settings.key.save'], G))
+    expect(sent).toEqual([{ method: 'PUT', path: '/api/connections/google/client', body: { json: '{"web":{}}' } }])
+    expect(r.el.querySelector(`${G} [role="alert"]`)?.textContent).toBe(W['settings.google.clientInvalid'])
+    await r.type(CLIENT, G)
+    respond = () => new Response('{"disconnected":false}')
+    google({ clientSavedAt: '2026-10-25T10:00:00+09:00' })
+    await r.click(r.button(W['settings.key.save'], G))
+    expect(sent.at(-1)).toEqual({ method: 'PUT', path: '/api/connections/google/client', body: { json: CLIENT } })
+    expect(r.text()).toContain(W['settings.google.clientSaved'])
+    expect(r.text()).toContain(w('settings.google.clientAt', { at: '2026/10/25' }))
+    expect(r.input(G)).toBeNull()
+    expect(r.el.innerHTML).not.toContain('GOCSPX')
+    r.done()
+  })
+
+  it('ファイルを選ぶと、その中身をそのまま保存する', async () => {
+    respond = () => new Response('{"disconnected":false}')
+    const r = await render()
+    const file = row(r.el).querySelector('input[type="file"]') as HTMLInputElement
+    const f = new File([CLIENT], 'client_secret_1-abc.json', { type: 'application/json' })
+    Object.defineProperty(file, 'files', { value: [f], configurable: true })
+    await act(async () => {
+      file.dispatchEvent(new Event('change', { bubbles: true }))
+      await new Promise((ok) => setTimeout(ok, 0))
+    })
+    expect(sent).toEqual([{ method: 'PUT', path: '/api/connections/google/client', body: { json: CLIENT } }])
+    r.done()
+  })
+
+  it('設定済みで連携している: 入れ直すと今の連携を解除する注記。削除は確かめてから DELETE', async () => {
+    google({ state: 'connected', email: 'me@example.com', clientSavedAt: '2026-10-25T10:00:00+09:00' })
+    const r = await render()
+    const g = row(r.el)
+    expect(g.textContent).toContain(w('settings.google.clientAt', { at: '2026/10/25' }))
+    expect(r.input(G)).toBeNull()
+    await r.click(r.button(W['settings.key.replace'], G))
+    expect(g.textContent).toContain(W['settings.google.clientReplaceNote'])
+    respond = () => new Response('{"disconnected":true}')
+    await r.type(CLIENT, G)
+    await r.click(r.button(W['settings.key.save'], G))
+    expect(r.text()).toContain(W['settings.google.clientSavedReset'])
+    respond = () => new Response(null, { status: 204 })
+    await r.click(r.button(W['settings.key.delete'], G))
+    const dialog = document.querySelector('.dialog') as HTMLElement
+    expect(dialog.textContent).toContain(W['settings.google.clientDeleteBody'])
+    await r.click([...dialog.querySelectorAll('button')].at(-1))
+    expect(sent.at(-1)).toEqual({ method: 'DELETE', path: '/api/connections/google/client' })
     r.done()
   })
 
@@ -356,7 +411,7 @@ describe('連携の節（Google。6.4 (7)）', () => {
 })
 
 describe('Slack の行（6.6 (2)(7)）', () => {
-  const LINK = '[aria-labelledby="h-link"]'
+  const LINK = '[aria-labelledby="h-link"] li:last-child'
   it('未設定: 作り方の注記と伏せた入力欄。貼ったトークンを slack に保存し、形の誤りは Slack の文で出す', async () => {
     const r = await render()
     expect(r.text()).toContain(W['settings.slack.unsetNote'])
