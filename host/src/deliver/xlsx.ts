@@ -9,14 +9,14 @@ const MAIN = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
 const R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
 const strip = (s: string) => decode(s.replace(/<[^>]*>/g, '')).trim()
 
-// シート名は 31 字まで、[]:*?/\ は使えない。同じ名前は（2）を付ける
+// シート名は 31 字まで、[]:*?/\ は使えない。大文字と小文字を区別せずに同じ名前は（2）を付ける（Excel の決まり）
 function names(raw: string[]): string[] {
   const seen = new Set<string>()
   return raw.map((r, i) => {
-    const base = (r.replace(/[[\]:*?/\\]/g, '_').trim() || `表${i + 1}`).slice(0, 28)
-    let n = base
-    for (let k = 2; seen.has(n); k++) n = `${base}（${k}）`
-    seen.add(n)
+    const base = r.replace(/[[\]:*?/\\]/g, '_').trim() || `表${i + 1}`
+    let n = base.slice(0, 31)
+    for (let k = 2; seen.has(n.toLowerCase()); k++) n = `${base.slice(0, 31 - `（${k}）`.length)}（${k}）`
+    seen.add(n.toLowerCase())
     return n
   })
 }
@@ -44,7 +44,9 @@ const cells = (line: string) =>
     .trim()
     .replace(/^\||\|$/g, '')
     .split('|')
-    .map((c) => plain(c.trim()).trim())
+    .map((c) => inline(c.trim()).trim())
+// セルの中は強調・コード・リンクの記号だけを外す（行頭の 1. や > は字のまま。plain は段落の頭として外してしまう）
+const inline = (s: string) => s.replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/\*\*|__|~~|`/g, '')
 export function mdTables(md: string): Table[] {
   const lines = md.replace(/\r\n?/g, '\n').split('\n')
   const found: Table[] = []

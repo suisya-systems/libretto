@@ -99,6 +99,19 @@ describe('表（6.8 (1)(2)）', () => {
     })
   })
 
+  it('セルの行頭の 1. や > は字のまま。シート名は大文字と小文字を区別せずに重ねず、31 字に収める', () => {
+    const md = '| 項目 |\n| --- |\n| 1. 最初 |\n| > 10 |\n'
+    const html = '<table><tr><th>項目</th></tr><tr><td>1. 最初</td></tr><tr><td>&gt; 10</td></tr></table>'
+    expect(compareTables(mdTables(md), htmlTables(html))).toEqual({ cells: 0, tables: 0 })
+    const long = 'あ'.repeat(40)
+    const ns = htmlTables(
+      `<h2>Sales</h2><table></table><h2>sales</h2><table></table><h2>${long}</h2><table></table><h2>${long}</h2><table></table>`,
+    ).map((t) => t.name)
+    expect(ns.slice(0, 2)).toEqual(['Sales', 'sales（2）'])
+    expect(ns[3]?.endsWith('（2）')).toBe(true)
+    expect(ns.every((n) => n.length <= 31)).toBe(true)
+  })
+
   it('sharedStrings とエラーのセル（Google の書き出しの形）も読む', () => {
     const M = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
     const buf = zip([
