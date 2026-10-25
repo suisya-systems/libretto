@@ -2413,15 +2413,21 @@ Slack で本人がリアクション `:memo:` を付けた投稿が「依頼の�
 - 他人の投稿の印。「進める」の `intake.json`。候補の中の会話の読み直し（本人が違えば読まない）。
 - トークンの保存: `xoxp-` だけを受け、応答に値を出さず `0600` で保存し、入れ直すと前の「使えない」を持ち越さず、削除すると取り込まない。`.env.local` の場所が `srt` の `denyRead` と CLI の拒否規則に入る。
 - スレッドの返信に付けた印の読み直し: `conversations.replies` は返信の `ts` でもスレッドを返す（公式文書「親の投稿か、スレッドの中の投稿」）ので、候補 id の `ts` のままで引く。偽の Slack もそのとおりに答える。
-- 本物の Slack での確かめ（`reactions.list` の並び順・`x-oauth-scopes` の見出し・権限を足して入れ直した後のトークン・返信の `ts` での `conversations.replies`）は、窓口が実機で行う。
+- 本物の Slack での確かめ（2026-10-25、窓口とオーナー。有料のワークスペース）: (9) のマニフェストで作ったアプリのトークンを設定の画面で保存すると「連携済み」になり、`auth.test` の見出し `x-oauth-scopes` で権限が読めて、足りない権限は無かった（`missingScopes` が空）。「今すぐ取り込む」で、本人が `:memo:` を付けた本人の投稿が、要約と提案（保存先は Google ドキュメント）付きで候補に出た。まだ確かめていないもの: `reactions.list` の並び順、権限を足して入れ直した後のトークン、返信の `ts` での `conversations.replies`、他人の投稿のカード。
 
 **(9) オーナーが用意すること**
 
-1. <https://api.slack.com/apps> で「Create New App」→「From scratch」を選び、名前（例: libretto）と、使っているワークスペースを選ぶ。
-2. 左の「OAuth & Permissions」を開き、「Scopes」の **「User Token Scopes」** に (3) の 10 個を足す: `reactions:read`、`channels:history`、`groups:history`、`im:history`、`mpim:history`、`channels:read`、`groups:read`、`im:read`、`mpim:read`、`users:read`。「Bot Token Scopes」には何も足さない。
-3. 同じ画面の「Install to Workspace」を押して許可する。ワークスペースによっては管理者の承認が要る（承認されるまでトークンは出ない）。
+1. <https://api.slack.com/apps> で「Create New App」→ **「From a manifest」** を選び、使っているワークスペースを選ぶ。
+2. 形式を JSON にして、下のマニフェストをそのまま貼り付け、「Next」→「Create」。(3) の 10 個の権限（User Token Scopes）と、トークンのローテーションを切る設定（`token_rotation_enabled: false`）が入っている。ボットの権限は無い。
+
+   ```json
+   {"display_information":{"name":"libretto"},"oauth_config":{"scopes":{"user":["reactions:read","channels:history","groups:history","im:history","mpim:history","channels:read","groups:read","im:read","mpim:read","users:read"]}},"settings":{"org_deploy_enabled":false,"socket_mode_enabled":false,"token_rotation_enabled":false}}
+   ```
+
+3. 左の「Install App」（または「OAuth & Permissions」）で「Install to Workspace」を押して許可する。ワークスペースによっては管理者の承認が要る（承認されるまでトークンは出ない）。
 4. 「OAuth Tokens」に出る **「User OAuth Token」**（`xoxp-` で始まる。「Bot User OAuth Token」ではない）をコピーし、libretto の設定の「連携」の Slack の行に貼り付けて「保存」を押す。再起動は要らない。
-5. 「OAuth & Permissions」の「Token Rotation」（トークンのローテーション）は**有効にしない**。有効にするとトークンが 12 時間で切れ、取り込みが止まる。
+5. トークンのローテーション（Token Rotation）は**有効にしない**（マニフェストで切ってある）。有効にするとトークンが 12 時間で切れ、取り込みが止まる。
+- マニフェストが使えないとき: 「Blank app」で作り、「OAuth & Permissions」の「User Token Scopes」に (3) の 10 個を 1 つずつ足し（「Bot Token Scopes」には足さない）、3 から続ける。
 6. libretto の設定の「連携」で Slack が「連携済み」になり、足りない権限の注記が出ていないことを確かめる。Slack で投稿にリアクション :memo: を付け、ホームの「今すぐ取り込む」を押すと、依頼の候補に出る。
 - 権限が足りないと出たら: 2 で足りない権限を足し、3 でもう一度入れ直す。トークンが変わっていれば、4 のトークンを「入れ直す」から貼り付ける。
 - 「Slack がこのトークンを受け付けませんでした」と出たら: トークンが取り消されたか切れた。3 でもう一度入れ直し、出たトークンを「入れ直す」から貼り付ける。
