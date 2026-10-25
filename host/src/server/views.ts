@@ -10,10 +10,10 @@ import type {
   HostStatus,
 } from '@libretto/shared/api'
 import type { CaseRecord } from '@libretto/shared/ledger'
-import type { z } from 'zod'
 import { MAX_ROUNDS, planFingerprint } from '../case/transition.ts'
 import type { Ledger } from '../ledger/ledger.ts'
 import { nn, pastedCount, pastedName } from '../roles/maker.ts'
+import { ENTRANCE_DEFAULTS } from '../settings.ts'
 
 const OPEN: readonly CaseState[] = ['入口待ち', '材料待ち', '下書き中', '検品中', '承認待ち', '送付確認待ち', '送付中']
 
@@ -21,12 +21,6 @@ const OPEN: readonly CaseState[] = ['入口待ち', '材料待ち', '下書き�
 const CASE_CAP_YEN = 1500
 // 文言は docs/ui-wording.md（9.4 (7)）
 export const COST_UNKNOWN = '費用が分からなかったので予約の額で数えました'
-export const DEFAULTS: z.infer<typeof EntranceDefaults> = {
-  会話: '確認しながら',
-  gmail: '確認しながら',
-  slack: '確認しながら',
-  meet: '確認しながら',
-}
 
 export function toCard(ledger: Ledger, c: CaseRecord): CaseCard {
   return {
@@ -46,6 +40,7 @@ export function toCard(ledger: Ledger, c: CaseRecord): CaseCard {
     ...(ledger.costUnknown(c.caseId) && { costNote: COST_UNKNOWN }),
     ...(c.approvalKind && { approvalKind: c.approvalKind }),
     ...(c.state === '完了' && { doneAt: doneAt(ledger, c.caseId) ?? c.updatedAt }),
+    ...(c.auto && { startedAt: c.createdAt }),
   }
 }
 
@@ -59,16 +54,24 @@ export function homeView(
   intake: HomeView['intake'],
   meetNotes: HomeView['meetNotes'] = [],
   showLow = true,
+  defaults: EntranceDefaults = ENTRANCE_DEFAULTS,
+  closedSince?: string, // 自動で開始した依頼に、この時刻以後に中止・完了したものも残す（6.11 (5)）
 ): HomeView {
   const open = ledger.listCases(OPEN).map((c) => toCard(ledger, c))
+  const closed = closedSince
+    ? ledger
+        .listCases(['停止', '完了'])
+        .filter((c) => c.auto && c.updatedAt >= closedSince)
+        .map((c) => toCard(ledger, c))
+    : []
   return {
     yourTurn: open.filter((c) => c.turn === '本人'),
     notices: ledger.listNotices(20),
     candidates: candidateLists(ledger, showLow),
     meetNotes,
-    autoStarted: open.filter((c) => c.auto),
+    autoStarted: [...open.filter((c) => c.auto), ...closed],
     active: open.filter((c) => c.turn === 'libretto'),
-    defaults: DEFAULTS,
+    defaults,
     intake,
     host,
   }
@@ -106,6 +109,7 @@ export function caseView(
   fetched: { title: string; url: string; gathered?: boolean }[] = [],
   gatherFailed = false,
   destinationChoices: CaseView['destinationChoices'] = ['page', 'paste'],
+  quotesOthers = false, // ほかの人の言葉の引用（auto.ts の quotesOthers。6.11 (4)）
 ): CaseView {
   const approvals = ledger.listApprovals(c.caseId).filter((a) => !a.supersededBy)
   const approved = approvals.findLast((a) => a.gate === '入口')
@@ -148,7 +152,7 @@ export function caseView(
       fingerprint: planFingerprint(c),
       visibility,
       overwrites: false, // v1 の届け先は上書きしない（T22）
-      quotesOthers: false, // ponytail: facts.json を読む事実係の Issue（18）で埋める
+      quotesOthers,
     },
     deliveries: [...latest.values()].map((d) => ({
       attemptId: d.attemptId,

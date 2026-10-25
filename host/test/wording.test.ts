@@ -18,8 +18,8 @@ describe('ui-wording.md のホストが作る文', () => {
     expect(Object.keys(STEP)).toHaveLength(16)
     expect(table('**いまの 1 行')).toEqual(STEP)
   })
-  it('SAY の 8 個', () => {
-    expect(Object.keys(SAY)).toHaveLength(8)
+  it('SAY の 10 個', () => {
+    expect(Object.keys(SAY)).toHaveLength(10)
     expect(table('**会話欄に足す 1 行')).toEqual(SAY)
   })
   it('NOTICE の 14 個（出来事・キー・文・開く面の表）', () => {

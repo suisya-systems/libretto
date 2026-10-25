@@ -275,6 +275,8 @@ type Deps = {
   fetch?: (url: string, o: { signal: AbortSignal }) => Promise<Fetched | FetchFailure> // 文体の見本の取り寄せ（テストは偽物）
   // 候補から作った案件の取り込み元を読み直す（本文は保存しないので要るときに。6.4 (6)）。読めなければ undefined
   external?: (source: NonNullable<Intake['source']>, signal: AbortSignal) => Promise<string | undefined>
+  // 自動で入った案件の組ができた（T6）。runner が入口の承認を自動で出す（6.11 (2)）
+  entered?: (caseId: string) => void
 }
 
 // --- 組のファイル（6.2.2 (7)）
@@ -446,12 +448,23 @@ export function entranceView(home: string, ledger: Ledger, c: CaseRecord): Entra
   }
 }
 
-// --- 入口の承認の前に書く（4.2 T8・6.2.2 (7)）。呼ぶ側は eventId が台帳に無いときだけ呼ぶ
+// --- 入口の承認の前に書く（4.2 T8・6.2.2 (7)）。呼ぶ側は eventId が台帳に無いときだけ呼ぶ。
+// auto はおまかせの自動の承認（自動で入った案件の turn=libretto のとき。6.11 (2)）
 
-type Approve = Extract<CaseAction, { type: 'entrance.approve' }>
-export function writeApproval(home: string, ledger: Ledger, c: CaseRecord, a: Approve): 'invalid' | undefined {
+type Approve = Pick<
+  Extract<CaseAction, { type: 'entrance.approve' }>,
+  'answers' | 'setFingerprint' | 'expectedRevision'
+>
+export function writeApproval(
+  home: string,
+  ledger: Ledger,
+  c: CaseRecord,
+  a: Approve,
+  auto = false,
+): 'invalid' | undefined {
   // 遷移が拒む組にはファイルを書かない（拒否の記録は transition が書く）
-  if (c.state !== '入口待ち' || c.turn !== '本人' || c.revision !== a.expectedRevision) return undefined
+  const turnOk = auto ? c.auto && c.turn === 'libretto' : c.turn === '本人'
+  if (c.state !== '入口待ち' || !turnOk || c.revision !== a.expectedRevision) return undefined
   if (!c.setFingerprint || a.setFingerprint !== c.setFingerprint) return undefined
   const k = setNumber(ledger, c.caseId)
   const s = readSet(home, c.caseId, k)
@@ -704,6 +717,7 @@ export function createEntrance(d: Deps) {
     })
     d.storage(true)
     emit(caseId, r)
+    if (r.ok && !r.replayed && c.auto) d.entered?.(caseId)
   }
 
   // intake.json。T31 の新しい案件は元の案件の intake を写して自分のフォルダに置く（6.2.2 (1)）

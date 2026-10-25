@@ -248,6 +248,9 @@ describe('候補（4.6 (0)）', () => {
       'auto_entered',
     ])
     expect(ledger.listConversation('c1')).toEqual(['自動で開始しました'])
+    // 二度目は作った案件を返す（T2 と同じ。6.11 (2)）
+    expect(auto({ caseId: 'c2' })).toMatchObject({ ok: true, replayed: true, case: { caseId: 'c1' } })
+    expect(ledger.listCases()).toHaveLength(1)
   })
 
   it('T4 入口の既定が確認しながら・AI への指示の印があるときは自動で入れない', () => {
@@ -680,6 +683,52 @@ describe('仕立てと送付（T20〜T26c）', () => {
     expect(auto(true)).toMatchObject({ ok: false })
     ok(auto(false))
     expect(ledger.listApprovals('c1').at(-1)).toMatchObject({ gate: '送付', by: '自動' })
+  })
+
+  it('T22 おまかせの自走はドライブなら libretto のフォルダだけ。ほかのフォルダは止める（6.11 (4)）', () => {
+    const autoSend = (folderId: string, caseId: string) => {
+      request('おまかせ', [{ kind: 'gdoc', folderId }], caseId)
+      for (const [type, rest] of [
+        ['entrance.drafted', { setFingerprint: 'set1' }],
+        ['entrance.approve', { by: '本人', answers: {}, mode: 'おまかせ', setFingerprint: 'set1' }],
+        ['materials.ready', {}],
+        ['draft.done', { n: 1, versionFingerprint: 'v1' }],
+        ['review.pass', { n: 1 }],
+        ['format.checked', { n: 1, outputFingerprint: 'o1' }],
+      ] as const)
+        ok(host(type, rest, caseId))
+      return run({
+        type: 'delivery.send',
+        caseId,
+        by: '自動',
+        eventId: id(),
+        expectedRevision: get(caseId).revision,
+        planFingerprint: planFingerprint(get(caseId)),
+        quotesOthers: false,
+      })
+    }
+    expect(autoSend('shared-folder', 'c1')).toMatchObject({ ok: false, reason: 'invalid_transition' })
+    ok(autoSend('libretto', 'c2'))
+  })
+
+  it('T20 おまかせで送付の自走を止める理由があれば、会話欄に 1 行（6.11 (4)）', () => {
+    toDrafting('おまかせ')
+    draft()
+    review(true)
+    const ev = { type: 'format.checked', caseId: 'c1', by: 'libretto', eventId: id(), n: 1, outputFingerprint: 'o1' }
+    ok(transition(ledger, { ...ev, expectedRevision: get().revision } as Input, { hold: '引用' }))
+    expect(get()).toMatchObject({ state: '送付確認待ち', turn: '本人' })
+    expect(ledger.listConversation('c1')).toEqual([SAY.heldQuote])
+    expect(ledger.listNotices(5).map((x) => x.kind)).toContain('your_turn')
+  })
+
+  it('T20 おまかせで止める理由が無ければ、保存先の確認の知らせを出さない（続けてホストが保存する）', () => {
+    toDrafting('おまかせ')
+    draft()
+    review(true)
+    const before = ledger.listNotices(50).length
+    checked()
+    expect(ledger.listNotices(50)).toHaveLength(before)
   })
 
   it('T23 送付確認待ち delivery.decline → 承認待ち（完成稿の承認は残る）', () => {

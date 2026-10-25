@@ -281,6 +281,7 @@ export const CaseCard = z.object({
   costNote: z.string().optional(), // 費用の欄の 1 行。予約の額で確定した呼び出しがあるときだけ（9.4 (7)）
   approvalKind: ApprovalKind.optional(), // state = 承認待ち のときだけ（5.3.2）
   doneAt: z.string().optional(), // state = 完了 のときだけ。完了に入った遷移の時刻（6.2.8 (9)）
+  startedAt: z.string().optional(), // auto の案件だけ。自動で入口に入れた時刻（6.11 (5)）
 })
 export type CaseCard = z.infer<typeof CaseCard>
 
@@ -505,6 +506,7 @@ export const CandidateActionResult = z.object({ caseId: z.string().optional(), a
 export const DismissLow = z.object({ ids: z.array(z.string().min(1)).min(1).max(200) })
 
 export const EntranceDefaults = z.record(z.enum(['会話', 'gmail', 'slack', 'meet']), Mode)
+export type EntranceDefaults = z.infer<typeof EntranceDefaults>
 
 export const HomeView = z.object({
   yourTurn: z.array(CaseCard),

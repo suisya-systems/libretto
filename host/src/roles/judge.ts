@@ -698,6 +698,7 @@ type Deps = {
   now?: () => Date
   fetch?: Fetch // 出典の取り寄せ（テストは偽物。6.3.1 (5)）
   tools?: Tools // 事前点検で見つけた LibreOffice と poppler（6.10 (5)）
+  hold?: (c: CaseRecord) => '見える' | '引用' | undefined // おまかせで送付の自走を止める理由（6.11 (4)）
 }
 
 async function run(
@@ -922,8 +923,9 @@ export function judgeFormat(d: Deps, c: CaseRecord, signal: AbortSignal): Promis
         }
       },
     },
-    (r) =>
-      transition(
+    (r) => {
+      const hold = r.pass ? d.hold?.(c) : undefined
+      return transition(
         d.ledger,
         {
           caseId: c.caseId,
@@ -935,8 +937,9 @@ export function judgeFormat(d: Deps, c: CaseRecord, signal: AbortSignal): Promis
             : { type: 'format.failed' as const, ...(r.escalate && { escalate: r.escalate.why }) }),
           eventId: `${c.caseId}:format.${r.pass ? 'checked' : 'failed'}:v${c.version}:f${k}`,
         },
-        { marks: currentMarks(d.home, c) },
-      ),
+        { marks: currentMarks(d.home, c), ...(hold && { hold }) },
+      )
+    },
   )
 }
 

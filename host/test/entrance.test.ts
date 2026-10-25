@@ -568,9 +568,9 @@ describe('入口の段取り', () => {
     server.entrance.kick(id)
     await vi.waitFor(() => expect(callsOf('下書き役・依頼書')).toHaveLength(1))
     expect((await act(id, { type: 'entrance.revise', expectedRevision: 0, note: '短く' })).status).toBe(200)
-    // 自動で入った案件は T6 の後も turn=libretto（T8 の自動発火は Issue 25）
-    await vi.waitFor(() => expect(ledger.getCase(id)?.setFingerprint).toBeDefined())
-    expect(ledger.getCase(id)).toMatchObject({ turn: 'libretto', step: STEP.autoEntrance, revision: 2 })
+    // 自動で入った案件は T6（revision 2）の後にホストが入口の承認を出す（T8・6.11 (2)）
+    await vi.waitFor(() => expect(ledger.findEvent(`${id}:entrance.approve:auto:r2`)).toBeDefined())
+    expect(ledger.listApprovals(id)).toMatchObject([{ gate: '入口', by: '自動' }])
     expect(material(callsOf('下書き役・依頼書')[1], '本人の指示')).toBe(JSON.stringify('短く'))
   })
 })

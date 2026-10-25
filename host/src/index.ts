@@ -112,6 +112,7 @@ const server = createServer({
   invoke,
   origins,
   google,
+  monthCapYen,
   staticDir: fileURLToPath(new URL('../../page/dist', import.meta.url)),
   isolation: sandboxCheck.isolation,
   ...(cause && { cause }),
@@ -137,6 +138,7 @@ try {
 }
 // libretto の番の案件の仕事を起こし直す（4.4 の再起動。6.2.3 (1)）。精算と STOP の確認の後
 server.runner.resume()
+server.enterAuto() // 落ちる前に出した合図の候補（6.11 (2)）
 // 隔離の点検を裏で 1 回（8.4・8.10 (4)）。止めていれば起動時は流さない
 try {
   void server.checkIsolation()

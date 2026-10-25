@@ -65,6 +65,9 @@ export const SAY = {
   toolFailed: '動作環境の不具合で中止しました',
   costCap: '費用の上限に達したので中止しました',
   isolationLeaked: 'ライターにチェック項目が見えたおそれがあるので中止しました',
+  // おまかせで送付の前に止まった（D5。6.11 (4)）
+  heldShared: 'ほかの人にも見えるかもしれない保存先なので、保存の前に確認を待っています',
+  heldQuote: 'ほかの人の言葉を引用しているので、保存の前に確認を待っています',
 } as const
 
 // お知らせの 1 行（6.8 (3)。ui-wording.md の「お知らせの 1 行」）。{題} は依頼の題、{n} は数、{理由} は会話欄の SAY
@@ -177,7 +180,8 @@ export type Input = CaseInput | CandidateInput | RequestInput | { type: 'stop.al
 
 // materialsPending: T8 で承認する組の依頼書に「渡してほしいもの」がある（組を読んだ呼ぶ側が決める。6.2.4 (2)）
 // marks = 今の版の本文の判定の「要確認」印（approval.ok で HTTP が渡す。6.3.1 (9)）
-export type Ctx = { materialsPending?: boolean; marks?: readonly Mark[] }
+// hold = おまかせで送付の自走を止める理由（format.checked で判定役が渡す。6.11 (4)）
+export type Ctx = { materialsPending?: boolean; marks?: readonly Mark[]; hold?: '見える' | '引用' }
 
 export type Result =
   | {
@@ -202,6 +206,9 @@ export const planFingerprint = (c: CaseRecord) =>
 const sameTarget = (a: DeliveryTarget, b: DeliveryTarget) => sha256(a) === sha256(b)
 const visibilityOf = (t: DeliveryTarget) =>
   t.kind === 'page' && t.shared ? ('ほかの人にも見える' as const) : ('あなただけ' as const)
+// おまかせで送付まで自走してよい届け先。ドライブは libretto が作った自分だけのフォルダだけ（6.11 (4)）
+export const selfOnly = (t: DeliveryTarget) =>
+  t.kind === 'page' ? !t.shared : t.kind === 'paste' || t.kind === 'file' || t.folderId === 'libretto'
 
 // --- 入口
 
@@ -459,6 +466,8 @@ function decide(ledger: Ledger, c: CaseRecord, ev: CaseInput, ctx: Ctx): Plan | 
           step: STEP.confirmSave,
           outputFingerprint: ev.outputFingerprint,
           round,
+          ...(c.mode === 'おまかせ' &&
+            ctx.hold && { after: say(ctx.hold === '引用' ? SAY.heldQuote : SAY.heldShared) }),
         }
       if (round < MAX_ROUNDS && !ev.escalate)
         return {
@@ -475,10 +484,7 @@ function decide(ledger: Ledger, c: CaseRecord, ev: CaseInput, ctx: Ctx): Plan | 
       // T22
       if (!is('送付確認待ち') || !mine || !c.outputFingerprint) return 'invalid_transition'
       // おまかせで自走するのは D5 の 3 つを全部満たすときだけ。v1 の届け先は上書きしない（T24b の「次は新しいファイル」）
-      if (
-        ev.by === '自動' &&
-        (c.mode !== 'おまかせ' || ev.quotesOthers || c.destination.some((t) => visibilityOf(t) !== 'あなただけ'))
-      )
+      if (ev.by === '自動' && (c.mode !== 'おまかせ' || ev.quotesOthers || !c.destination.every(selfOnly)))
         return 'invalid_transition'
       if (ev.planFingerprint !== planFingerprint(c)) return 'stale'
       // 同じ版で送付済の届け先は送らない。共有を取り消した届け先も送り直さない（4.6 (3)）
@@ -712,6 +718,8 @@ export function noticeFor(
         if (after.approvalKind === '構成案') return at('your_turn', fill(NOTICE.outline, { 題 }))
         return at('your_turn', n ? fill(NOTICE.finalMarks, { 題, n }) : fill(NOTICE.final, { 題 }))
       case '送付確認待ち':
+        // おまかせで止める理由が無ければ、続けてホストが保存する（T22。6.11 (4)）。確認を求める知らせは出さない
+        if (after.mode === 'おまかせ' && ev.type === 'format.checked' && !ctx.hold) return undefined
         return at('your_turn', fill(NOTICE.confirmSave, { 題 }), `/cases/${after.caseId}/deliver`)
     }
   }
@@ -781,6 +789,8 @@ function candidate(ledger: Ledger, ev: CandidateInput): Result {
   if (!cand) return { ok: false, reason: 'not_found' }
   // 案件を作った後の proceed の二度目は、作った案件を返す（5.3.1）
   if (ev.type === 'candidate.proceed' && cand.status === 'proceeded' && cand.caseId)
+    return { ok: true, replayed: true, case: ledger.getCase(cand.caseId) as CaseRecord }
+  if (ev.type === 'candidate.auto_enter' && cand.status === 'auto_entered' && cand.caseId)
     return { ok: true, replayed: true, case: ledger.getCase(cand.caseId) as CaseRecord }
   const reject = (): Result => {
     ledger.appendCandidateEvent({

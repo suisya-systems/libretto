@@ -108,6 +108,9 @@ export function DeliverFace({ c, reload, stopped }: { c: CaseView; reload: () =>
           </div>
         </dl>
         {c.formatReview && <p className="deliver-checked">{W['deliver.checked']}</p>}
+        {c.mode === 'おまかせ' && c.turn === '本人' && (
+          <p className="note-warn small">{W[`deliver.held.${c.deliveryPlan.quotesOthers ? '引用' : '見える'}`]}</p>
+        )}
         <div className="approval-actions">
           <button
             type="button"
@@ -312,6 +315,20 @@ export function ResultFace({ c, reload, stopped }: { c: CaseView; reload: () => 
               </li>
             ))}
           </ul>
+        </section>
+      )}
+
+      {c.auto && (
+        <section aria-labelledby="h-undo" className="card pad stack">
+          <h2 id="h-undo">{W['deliver.undoHeading']}</h2>
+          {now.map((d) =>
+            // 共有したページには「ほかの人には見えません」を出さない
+            (d.target.kind === 'page' && !d.target.shared) || d.target.kind === 'paste' || d.target.kind === 'gdoc' ? (
+              <p key={d.attemptId} className="small">
+                {destLabel(d.target)}: {W[`deliver.undo.${d.target.kind}`]}
+              </p>
+            ) : null,
+          )}
         </section>
       )}
 
