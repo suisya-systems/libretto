@@ -34,6 +34,14 @@ beforeEach(() => {
     slack: { configured: false, state: 'none', emoji: 'memo', missingScopes: [] },
     slackDm: { state: 'none' },
     tools: { soffice: true, pdftoppm: true },
+    env: {
+      platform: 'linux',
+      port: 7780,
+      checking: false,
+      checkedAt: '2026-10-24T05:03:00Z',
+      ai: { state: 'ok', version: '2.1.310' },
+      phone: true,
+    },
     inference: { classifiedToday: 0, dailyLimit: 300, recall: { hit: 0, total: 0 }, suppressions: [] },
   }
   infer = { gmailDays: 7, slackChannels: [], dailyLimit: 300, showLow: true, useJev: true }
@@ -114,6 +122,12 @@ beforeEach(() => {
   })
 })
 afterEach(() => vi.unstubAllGlobals())
+
+// 動作環境の確認の節のコピーできる 1 行と、リンクの行き先
+const cmds = (el: HTMLElement) =>
+  [...(el.querySelector('#h-env')?.parentElement?.querySelectorAll('.env-cmd output') ?? [])].map((o) => o.textContent)
+const link = (el: HTMLElement, text: string) =>
+  [...el.querySelectorAll('a')].find((a) => a.textContent === text)?.getAttribute('href')
 
 async function render() {
   const el = document.createElement('div')
@@ -209,16 +223,19 @@ describe('API キーの節', () => {
 })
 
 describe('動作環境の確認（8.10 (6)）', () => {
-  it('しっかり隠せていて、まだ確認していない', async () => {
+  it('しっかり隠せていて、まだ確認していない。そろっていれば足りないものの数も警告も出さない', async () => {
     const r = await render()
     expect(r.text()).toContain(W['settings.envHeading'])
+    expect(r.text()).toContain(W['settings.env.ok'])
+    expect(r.text()).not.toContain(W['settings.env.where'])
+    expect(r.text()).not.toContain(W['band.envLink'])
     expect(r.text()).toContain(W['settings.isolation.strong'])
     expect(r.text()).toContain(W['settings.probe.never'])
     expect(r.el.querySelector('#h-env')?.parentElement?.querySelector('.note-warn, .note-alert')).toBeNull()
     r.done()
   })
 
-  it('弱い: 原因の文を出し、コマンドは code で出す。前回の結果と日時', async () => {
+  it('弱い: 原因の文とコピーできる 1 行を出す。前回の結果と日時', async () => {
     conn = {
       ...conn,
       isolation: {
@@ -230,9 +247,8 @@ describe('動作環境の確認（8.10 (6)）', () => {
     }
     const r = await render()
     expect(r.text()).toContain(W['settings.isolation.weak'])
-    expect(r.el.querySelector('#h-env')?.parentElement?.querySelector('.note-warn code')?.textContent).toBe(
-      'apt install bubblewrap socat ripgrep',
-    )
+    expect(cmds(r.el)).toEqual(['sudo apt install bubblewrap socat ripgrep'])
+    expect(r.text()).toContain(w('settings.env.missing', { n: 1 }))
     expect(r.text()).toContain(W['settings.probe.unknown'])
     expect(r.text()).toMatch(/2026\/10\/24 \d{2}:03 に確認/)
     r.done()
@@ -256,12 +272,110 @@ describe('動作環境の確認（8.10 (6)）', () => {
     r.done()
   })
 
-  it('今すぐ確認: POST して、確認している間は押せない', async () => {
+  it('もう一度確かめる: POST して、確かめている間は押せない。終われば直った行は済みの印になる', async () => {
+    conn = { ...conn, tools: { soffice: false, pdftoppm: false } }
     const r = await render()
-    await r.click(r.button(W['settings.probe.run']))
+    expect(r.text()).toContain(W['settings.tools.why'])
+    conn = { ...conn, env: { ...conn.env, checking: true } }
+    await r.click(r.button(W['settings.env.recheck']))
     expect(sent).toEqual([{ method: 'POST', path: '/api/checks/run' }])
-    await vi.waitFor(() => expect(r.text()).toContain(W['settings.probe.running']))
-    expect(r.button(W['settings.probe.run'])?.disabled).toBe(true)
+    await vi.waitFor(() => expect(r.button(W['settings.env.rechecking'])?.disabled).toBe(true))
+    r.done()
+    // 確かめ終わって取り直すと（connections.changed）、直った行は済みの印で、直し方は消える
+    conn = { ...conn, tools: { soffice: true, pdftoppm: true }, env: { ...conn.env, checking: false } }
+    const again = await render()
+    expect(again.text()).toContain(W['settings.env.ok'])
+    expect(again.text()).not.toContain(W['settings.tools.why'])
+    expect(again.text()).toContain(W['settings.tools.ok'])
+    expect(again.button(W['settings.env.recheck'])?.disabled).toBe(false)
+    again.done()
+  })
+
+  it('道具が無い: 何ができなくなるかと、ホストの OS の 1 行（Linux は apt、Mac は brew、Windows は WSL2 の中で apt）', async () => {
+    conn = { ...conn, tools: { soffice: false, pdftoppm: true } }
+    let r = await render()
+    expect(r.text()).toContain(W['settings.tools.missing'])
+    expect(r.text()).toContain(W['settings.env.where'])
+    expect(cmds(r.el)).toEqual(['sudo apt install libreoffice poppler-utils'])
+    // 節はページの下にあるので、先頭の帯から同じページの節へ飛べる
+    const band = [...r.el.querySelectorAll('a')].find((a) => a.textContent === W['band.envLink'])
+    expect(band?.getAttribute('href')).toBe('#h-env')
+    expect(r.text()).toContain(w('band.envMissing', { n: 1 }))
+    r.done()
+    conn = { ...conn, env: { ...conn.env, platform: 'darwin' } }
+    r = await render()
+    expect(cmds(r.el)).toEqual(['brew install --cask libreoffice && brew install poppler'])
+    r.done()
+    conn = { ...conn, env: { ...conn.env, platform: 'win32' } }
+    r = await render()
+    expect(r.text()).toContain(W['settings.tools.windows'])
+    expect(cmds(r.el)).toEqual(['sudo apt install libreoffice poppler-utils'])
+    r.done()
+  })
+
+  it('AI: 入っていない・古い・ログインが切れたときの 1 行。コピーのボタンで写す', async () => {
+    const writeText = vi.fn(async () => {})
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } })
+    conn = { ...conn, env: { ...conn.env, ai: { state: 'missing' } } }
+    let r = await render()
+    expect(r.text()).toContain(W['settings.ai.missingWhy'])
+    expect(cmds(r.el)).toEqual(['npm install -g @anthropic-ai/claude-code', 'claude auth login'])
+    await r.click(r.button(W['settings.env.copy']))
+    expect(writeText).toHaveBeenCalledWith('npm install -g @anthropic-ai/claude-code')
+    expect(r.text()).toContain(W['settings.env.copied'])
+    r.done()
+    conn = { ...conn, env: { ...conn.env, ai: { state: 'old', version: '2.0.0' } } }
+    r = await render()
+    expect(cmds(r.el)).toEqual(['claude update'])
+    r.done()
+    conn = { ...conn, env: { ...conn.env, ai: { state: 'signedOut', version: '2.1.310' } } }
+    r = await render()
+    expect(r.text()).toContain(W['settings.ai.signedOutWhy'])
+    expect(cmds(r.el)).toEqual(['claude auth login'])
+    r.done()
+  })
+
+  it('Slack の権限: 足りない名前と設定画面へのリンク。入れていなければ行を出さない', async () => {
+    let r = await render()
+    expect(r.text()).not.toContain(W['settings.envSlack.label'])
+    r.done()
+    conn = {
+      ...conn,
+      slack: { ...conn.slack, configured: true, state: 'connected', missingScopes: ['search:read'] },
+      slackDm: { state: 'missingScope' },
+    }
+    r = await render()
+    expect(r.text()).toContain(w('settings.envSlack.scopes', { scopes: 'search:read' }))
+    expect(r.text()).toContain(W['settings.envSlack.bot'])
+    expect(link(r.el, W['settings.envSlack.open'])).toBe('https://api.slack.com/apps')
+    expect(r.text()).toContain(w('settings.env.missing', { n: 1 }))
+    r.done()
+  })
+
+  it('Google の API: 有効でない API のページへのリンク', async () => {
+    conn = {
+      ...conn,
+      google: { ...conn.google, configured: true, state: 'connected', docs: true, docsProblem: 'api_disabled' },
+    }
+    const r = await render()
+    expect(r.text()).toContain(W['settings.envGoogle.drive'])
+    expect(r.text()).not.toContain(W['settings.envGoogle.gmail'])
+    expect(link(r.el, W['settings.envGoogle.openDrive'])).toBe(
+      'https://console.cloud.google.com/apis/library/drive.googleapis.com',
+    )
+    r.done()
+  })
+
+  it('スマホから開く: 未設定なら手順を出し、ポートは動いているホストのもの。足りないものの数には入れない', async () => {
+    conn = { ...conn, env: { ...conn.env, phone: false, port: 7790 } }
+    const r = await render()
+    expect(r.text()).toContain(W['settings.phone.unset'])
+    expect(r.text()).toContain(W['settings.env.ok'])
+    expect(cmds(r.el)).toEqual([
+      'tailscale serve --bg 7790',
+      'LIBRETTO_PORT=7790 LIBRETTO_ORIGIN=http://127.0.0.1:7790,https://<PC の名前>.<tailnet の名前>.ts.net npm start',
+    ])
+    expect(link(r.el, W['settings.phone.step2Link'])).toBe('https://login.tailscale.com/admin/dns')
     r.done()
   })
 })

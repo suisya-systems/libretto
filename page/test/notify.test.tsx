@@ -238,6 +238,14 @@ describe('設定の「お知らせ」の節', () => {
     slack: { configured: false, state: 'none', emoji: 'memo', missingScopes: [] },
     slackDm: { state: 'none' },
     tools: { soffice: true, pdftoppm: true },
+    env: {
+      platform: 'linux',
+      port: 7780,
+      checking: false,
+      checkedAt: '2026-10-24T05:03:00Z',
+      ai: { state: 'ok' },
+      phone: true,
+    },
     inference: { classifiedToday: 0, dailyLimit: 300, recall: { hit: 0, total: 0 }, suppressions: [] },
   }
   beforeEach(() => {

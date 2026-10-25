@@ -1,13 +1,13 @@
 # libretto を動かすのに要るもの
 
-オーナーが用意するものの一覧（設計書 7.2・実装設計書 6.10 (5)）。libretto は起動のたびに道具の有無を確かめ、無いものは設定の画面の「動作環境の確認」に出し、それを使う保存先を選択肢から外す。
+オーナーが用意するものの一覧（設計書 7.2・実装設計書 6.10 (5)・6.13）。libretto は起動のたびに道具の有無を確かめ、無いものは設定の画面の「動作環境の確認」に、何ができなくなるかと直し方（貼り付ける 1 行や、管理画面へのリンク）を出し、それを使う保存先を選択肢から外す。入れた後は、同じ画面の「もう一度確かめる」を押せば起動し直さずに確かめ直す。
 
 ## 必ず要るもの
 
 | もの | 何に使うか | 入れ方 | 無いとき |
 |---|---|---|---|
 | Node.js 22.12 以上 | libretto のホスト | <https://nodejs.org/> | 起動しない |
-| Claude Code（`claude`） | ライターと判定役 | 公式の手順でインストールし、ログインまで済ませる | 依頼が進まない |
+| Claude Code（`claude`） | ライターと判定役 | `npm install -g @anthropic-ai/claude-code` で入れ、`claude auth login` でログインする（古いときは `claude update`） | 依頼が進まない |
 
 ## チェック項目をライターから隠す道具（Linux / WSL2）
 
@@ -27,7 +27,7 @@ PowerPoint・Excel・Word のファイルと Google スライドに保存する�
 | Ubuntu / WSL2 | `sudo apt install libreoffice poppler-utils` |
 | macOS | `brew install --cask libreoffice` と `brew install poppler` |
 
-- 入れたら libretto を起動し直す（道具の有無は起動のときに 1 回だけ確かめる）。
+- 入れたら、設定の画面の「動作環境の確認」で「もう一度確かめる」を押す（起動し直さなくてよい）。入れたのに「入っていません」のままなら、新しく足された PATH が動いている libretto に届いていないので、起動し直す。
 - 確かめ方: `npm run verify:files` が `soffice` と `pdftoppm` の場所を出し、見本のスライドを 3 ページ（空白 0）、表の式を 2 つ（エラー 1）と数えれば動いている。`soffice` が PATH に無い場所にあるときは、環境変数 `LIBRETTO_SOFFICE` / `LIBRETTO_PDFTOPPM` にその場所を入れる。
 - 無いとき: PowerPoint・Excel・Word のファイルと Google スライドは保存先に出ない。Google スプレッドシートは保存できるが、ライターには式を使わず計算した値を書かせる。
 

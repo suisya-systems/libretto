@@ -521,6 +521,39 @@ describe('拾い上げ（6.4 (3)(4)）', () => {
     expect((await connections()).google.docsProblem).toBeUndefined()
   })
 
+  it('Gmail API を有効にすれば、ラベルがまだ無くても「有効でない」は消える（6.13 (1)）', async () => {
+    await setup()
+    g.labels.splice(1, 1)
+    g.state.fail = {
+      status: 403,
+      body: JSON.stringify({ error: { code: 403, errors: [{ reason: 'accessNotConfigured' }] } }),
+      times: 1,
+      path: /\/labels$/,
+    }
+    await server.poller.run()
+    expect((await connections()).google.problem).toBe('api_disabled')
+    await server.poller.run()
+    expect((await connections()).google.problem).toBeUndefined()
+    expect((await connections()).google.labelFound).toBe(false)
+  })
+
+  it('もう一度確かめる: 確かめ済みの Drive API も問い合わせ直す（6.13 (1)）', async () => {
+    await setup()
+    await server.poller.run()
+    expect((await connections()).google.docsProblem).toBeUndefined()
+    const disabled = {
+      status: 403,
+      body: JSON.stringify({ error: { code: 403, errors: [{ reason: 'accessNotConfigured' }] } }),
+      times: 1,
+      path: /\/about$/,
+    }
+    g.state.fail = { ...disabled }
+    await server.poller.run() // ふだんの回は確かめた印があれば問い合わせない
+    expect((await connections()).google.docsProblem).toBeUndefined()
+    await server.poller.recheck()
+    expect((await connections()).google.docsProblem).toBe('api_disabled')
+  })
+
   it('止めている間（STOP）は動かず、「今すぐ取り込む」も受けない', async () => {
     await setup()
     g.add(thread('t1'))

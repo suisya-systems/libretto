@@ -19,7 +19,13 @@ describe('wording.ts', () => {
     expect(table).toEqual(STATE)
   })
   it('出さない語を含まない。欄の名前としてオーナーが承認したキーだけ許す（11.2）', () => {
-    const allowed: string[] = ['settings.openai.label']
+    // 直し方のコマンドは名前を変えられない（貼り付けて動くこと。6.13 (2)）
+    const allowed: string[] = [
+      'settings.openai.label',
+      'settings.cmd.ai.install',
+      'settings.cmd.ai.update',
+      'settings.cmd.ai.login',
+    ]
     const rest = Object.entries(W).filter(([k]) => !allowed.includes(k))
     for (const s of [...rest.map(([, v]) => v), ...Object.values(STATE)]) expect(s).not.toMatch(CLI_MARKERS)
   })

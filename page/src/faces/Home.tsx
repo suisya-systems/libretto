@@ -1,9 +1,10 @@
 // ホーム（画面案 1。docs/implementation.md 5.8 (3)・6.2.1 (9)・6.4 (7)）。候補の欄は連携しているか候補があるときだけ
-import { type CaseCard, HomeView } from '@libretto/shared/api'
+import { type CaseCard, ConnectionsView, HomeView } from '@libretto/shared/api'
 import { Link } from 'wouter'
 import { useCaseAction } from '../action.ts'
 import { useLoad } from '../load.ts'
 import { Confirm } from '../parts/Dialog.tsx'
+import { EnvBand } from '../parts/EnvBand.tsx'
 import { STATE, W, w } from '../wording.ts'
 import { Candidates, when } from './Candidates.tsx'
 import { Chat } from './Chat.tsx'
@@ -82,6 +83,8 @@ export function Home({ stopped = false }: { stopped?: boolean }) {
   const home = useLoad('/api/home', HomeView, (s) =>
     ['case.changed', 'notice', 'candidates.changed', 'connections.changed'].includes(s.event),
   )
+  // 動作環境で足りないものの帯（6.13 (2)）。読めなければ出さない
+  const env = useLoad('/api/connections', ConnectionsView, (s) => s.event === 'connections.changed')
   const v = home.data
   if (!v) return home.problem ? <ProblemView problem={home.problem} retry={home.reload} /> : <div aria-busy="true" />
 
@@ -89,6 +92,7 @@ export function Home({ stopped = false }: { stopped?: boolean }) {
   return (
     <div className="face home">
       {home.problem && <ProblemView problem={home.problem} retry={home.reload} />}
+      <EnvBand c={env.data} />
       <header className="home-head">
         <div>
           <div className="muted small">{today()}</div>

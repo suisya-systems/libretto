@@ -252,6 +252,17 @@ export type CheckOptions = {
   userHome?: string
 }
 
+// claude のログイン（`claude auth status` の loggedIn。docs/implementation.md 6.13 (2)）。読めなければ undefined（確かめられない）
+export async function checkSignIn(claude: string[], env: NodeJS.ProcessEnv = process.env, timeoutMs = 30_000) {
+  const r = await run([...claude, 'auth', 'status'], allowedEnv(env), timeoutMs)
+  try {
+    const v = JSON.parse(r.out).loggedIn
+    return typeof v === 'boolean' ? v : undefined
+  } catch {
+    return undefined
+  }
+}
+
 // 起動時の自己点検（8.9 (5)）。版と隔離を独立に見る
 export async function checkSandbox(o: CheckOptions): Promise<SandboxCheck> {
   const env = allowedEnv(o.env ?? process.env)

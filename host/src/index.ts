@@ -17,7 +17,7 @@ import { readKey } from './model/keys.ts'
 import { JEV_DAILY_LIMIT } from './model/noul.ts'
 import { createOpenai } from './model/openai.ts'
 import { settleOrphans } from './model/orphans.ts'
-import { checkSandbox, createSandbox, MIN_CLAUDE, type Sandbox } from './model/sandbox.ts'
+import { checkSandbox, checkSignIn, createSandbox, MIN_CLAUDE, type Sandbox } from './model/sandbox.ts'
 import { createServer } from './server/app.ts'
 import { writeStopFile } from './server/stop.ts'
 
@@ -40,16 +40,19 @@ const settled = settleOrphans(ledger, callsDir(home))
 if (settled.result + settled.hold)
   console.error(`libretto: settled ${settled.result} calls from results, ${settled.hold} at the reserved amount`)
 // 作り手の隔離と claude の版を、runner が仕事を起こす前に確かめる（8.9 (5)）
+// 確かめ直し（6.13 (1)）で入れ替えるので、claude の命令は同じ配列の中身を、点検の結果は変数を替える（createSandbox は呼ぶたびに読む）
 const claude = resolveClaude()
-const sandboxCheck = await checkSandbox({ home, claude })
+let sandboxCheck = await checkSandbox({ home, claude })
+let signedIn = await checkSignIn(claude)
 console.error(
   `libretto: isolation ${sandboxCheck.isolation}${sandboxCheck.reason ? ` (${sandboxCheck.reason})` : ''}, claude ${sandboxCheck.claudeVersion ?? 'unknown'}`,
 )
-// ファイルを作る道具の事前点検（6.10 (5)）。起動時に 1 回。入れたらホストを起こし直す
-const tools = await preflight({
+// ファイルを作る道具の事前点検（6.10 (5)）。起動時と、設定の「もう一度確かめる」（6.13 (1)）
+const toolNames = {
   soffice: process.env.LIBRETTO_SOFFICE ?? 'soffice',
   pdftoppm: process.env.LIBRETTO_PDFTOPPM ?? 'pdftoppm',
-})
+}
+const tools = await preflight(toolNames)
 console.error(
   `libretto: soffice ${tools.soffice ? 'found' : 'missing'}, pdftoppm ${tools.pdftoppm ? 'found' : 'missing'}`,
 )
@@ -99,6 +102,11 @@ const invokeWith = (box: Sandbox) =>
     ...(process.env.LIBRETTO_DEBUG_DIR && { debugDir: process.env.LIBRETTO_DEBUG_DIR }),
   })
 const invoke = invokeWith(sandbox)
+const claudeOf = () => ({
+  ...(sandboxCheck.claudeVersion && { version: sandboxCheck.claudeVersion }),
+  ok: sandboxCheck.claudeOk,
+  ...(signedIn !== undefined && { signedIn }),
+})
 const cause = causeOf(sandboxCheck.reason)
 const invokeControl: (job: Job) => ReturnType<typeof invoke> = invokeWith(control)
 // Google の戻り先はループバックに固定（デスクトップ型の OAuth クライアント。6.4 (2)）。クライアントは設定の画面で入れたもの（6.4 (10)）
@@ -117,6 +125,20 @@ const server = createServer({
   isolation: sandboxCheck.isolation,
   ...(cause && { cause }),
   tools,
+  claude: claudeOf(),
+  port,
+  // 起動時の点検をやり直す。道具は同じオブジェクトの中身を入れ替える（runner・判定・保存先の選択肢が呼ぶたびに読む）
+  recheck: async () => {
+    claude.splice(0, claude.length, ...resolveClaude())
+    sandboxCheck = await checkSandbox({ home, claude })
+    signedIn = await checkSignIn(claude)
+    const found = await preflight(toolNames)
+    delete tools.soffice
+    delete tools.pdftoppm
+    Object.assign(tools, found)
+    const c = causeOf(sandboxCheck.reason)
+    return { isolation: sandboxCheck.isolation, ...(c && { cause: c }), claude: claudeOf() }
+  },
   probe: (signal) =>
     checkIsolation(
       {

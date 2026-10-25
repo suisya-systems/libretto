@@ -2694,6 +2694,29 @@ input:disabled {
   user-select: all;
 }
 
+/* 動作環境の確認の直し方の 1 行とコピー（6.13 (2)） */
+.env-cmd {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.env-cmd .device-url {
+  flex: 1;
+  min-width: 0;
+}
+.env-steps ol {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: var(--space-3) 0 0;
+  padding-left: 1.25em;
+}
+.env-steps li .env-cmd {
+  margin-top: var(--space-2);
+}
+.env-steps summary {
+  cursor: pointer;
+}
 .nowrap {
   white-space: nowrap;
 }

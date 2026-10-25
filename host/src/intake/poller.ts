@@ -118,6 +118,8 @@ export function createPoller(d: Deps) {
     }
     const label = await labelId(g, d.label(), signal)
     if (!label.ok) return failed(label)
+    // ラベルの一覧が読めた = Gmail API は有効（ラベルが無くても直ったと分かるように。6.13 (1)）
+    if (problem === 'api_disabled') problem = undefined
     labelFound = !!label.id
     if (!label.id) return
     const listed = await threadIds(g, label.id, signal)
@@ -294,6 +296,12 @@ export function createPoller(d: Deps) {
 
   return {
     run,
+    // 「もう一度確かめる」（6.13 (1)）。Drive の確かめた印を捨て、走っている回が終わってから新しい回で確かめ直す
+    async recheck() {
+      await running
+      docsCheckedAt = -1
+      return run()
+    },
     // 画面を開いたとき。前の回から minMs たっていれば起こす
     maybe(minMs = 60_000) {
       if (now().getTime() - startedAt >= minMs) void run()
