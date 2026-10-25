@@ -388,9 +388,10 @@ function decide(ledger: Ledger, c: CaseRecord, ev: CaseInput, ctx: Ctx): Plan | 
         clearOutput: true,
       }
     case 'outline.done': {
-      // T13。構成案ゲートは 1 案件 1 回（4.6 (4)）
+      // T13。構成案ゲートは 1 案件 1 回・最初の版の前だけ（4.6 (4)・6.12 (2)）
       const gateDone = ledger.listApprovals(c.caseId).some((a) => a.gate === '構成案')
-      if (!is('下書き中') || !working || c.mode !== '確認しながら' || gateDone) return 'invalid_transition'
+      if (!is('下書き中') || !working || c.mode !== '確認しながら' || gateDone || c.version !== 0)
+        return 'invalid_transition'
       return {
         to: '承認待ち',
         turn: '本人',

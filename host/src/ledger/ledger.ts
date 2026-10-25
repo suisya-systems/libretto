@@ -942,6 +942,18 @@ export class Ledger {
     return rows.find((r) => r.type === 'created')?.at
   }
 
+  // 外していないセッション（作った順）。寿命の判定は呼ぶ側（6.12 (5)）
+  listSessions(): { sessionId: string; label: string; at: string }[] {
+    const rows = this.#db
+      .prepare(
+        `SELECT session_id, label, at FROM sessions s WHERE type = 'created'
+           AND NOT EXISTS (SELECT 1 FROM sessions r WHERE r.session_id = s.session_id AND r.type = 'revoked')
+         ORDER BY seq`,
+      )
+      .all() as { session_id: string; label: string | null; at: string }[]
+    return rows.map((r) => ({ sessionId: r.session_id, label: r.label ?? '', at: r.at }))
+  }
+
   // --- notices
 
   // 画面の外へ出すかの本人の入り切りと送り先（6.8 (1)(5)）。settings と端末の登録を読むのはサーバーで、起動のときに差し込む

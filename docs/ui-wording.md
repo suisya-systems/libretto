@@ -69,6 +69,7 @@ libretto の画面に出す言葉の正本。設計書（[`docs/design.md`](./de
 | 鍵・キー（別系統・Jev） | API キー（欄の名前は「OpenAI の API キー」「Jev（TypeSafe）の API キー」。保存後は「設定済み（末尾 1a2b）」、操作は「入れ直す」「削除」） | 「鍵」は設計書の内部の言葉。画面で入れるものは普段「API キー」と呼ぶ |
 | 共有リンクを作る | （v1 は出さない）HTML をダウンロードして渡せます | v1 は公開 URL を持たず、共有リンクはほかの人に届かない（実装設計書 P1）。ほかの人に見せる方法を、実際にできる操作で書く |
 | 本人への知らせ・通知 | 通知（設定の見出しは「お知らせ」。端末の操作は「この端末に通知する」） | ブラウザやスマホが出すものは普段「通知」と呼ぶ。画面の中の一覧はもとの「お知らせ」のまま |
+| ペアリング・ペアリングの URL・セッション | 端末の追加・追加用のアドレス・端末 | 「ペアリング」は機器どうしをつなぐ技術の言い方。本人がすることは「この端末で開けるようにする」なので、端末を足す・外すと言う |
 | 静かな時間 | 通知を止める時間帯 | 「静かな時間」は内部の言い方。何をする設定かを言う |
 | 結果が無く予約（`hold`）の額で確定した（費用の欄の 1 行） | 費用が分からなかったので予約の額で数えました | 文言はオーナーが決めた（2026-10-23。実装設計書 9.4 (7)）。何が起きて、どう数えたかを 1 行で言う |
 
@@ -430,6 +431,8 @@ Slack の DM は、2 分のあいだに出たお知らせの 1 行を改行で�
 | `event.entrance.approve` | 依頼内容を確認しました |
 | `event.materials.provided` | 資料を受け取りました |
 | `event.materials.ready` | 資料がそろいました |
+| `event.outline.done` | 構成案ができました |
+| `event.outline.approve` | 構成案を確認しました |
 | `event.draft.done` | 新しいバージョンができ、チェックに入りました |
 | `event.review.pass` | チェックが終わりました |
 | `event.review.fail` | チェックで直すところが見つかり、書き直しに回しました |
@@ -543,6 +546,22 @@ Slack の DM は、2 分のあいだに出たお知らせの 1 行を改行で�
 | `approval.voice.ok.false` | 違います |
 | `approval.voice.ok.null` | まだです |
 | `approval.sourceOpens` | 別のタブで開く |
+
+**構成案の面（承認待ち kind=構成案。実装設計書 6.12 (3)）**
+
+長い文書を確認しながら進めるとき、最初のバージョンの前に 1 回だけ出す面。見出しは承認の面と同じ（`approval.eyebrow` と、いまの 1 行の `outline`）。`outline.ok` は指示なしで、`outline.changeSend` は書いた指示を添えて、どちらも構成案を承認して下書きに進む（指示はライターに渡す）。中止は進行の面と同じ `progress.stop` の確認を出す。
+
+| キー | 文 |
+|---|---|
+| `outline.lead` | 長い文書なので、書き始める前に構成案を作りました。見出しの順と、それぞれに書くことを確かめてください。 |
+| `outline.heading` | 構成案 |
+| `outline.ok` | この構成で書いてもらう |
+| `outline.change` | 変えてほしいところを伝える |
+| `outline.changeLabel` | どこをどう変えてほしいか書いてください（例: 2 つ目と 3 つ目を入れ替えて） |
+| `outline.changeSend` | この内容を伝えて書いてもらう |
+| `outline.changeCancel` | やめる |
+| `outline.note` | 構成案の確認はこの依頼で 1 回だけです。次は書き上がった下書きを確認します。 |
+| `outline.empty` | 構成案を読み込めませんでした。読み直してください |
 
 **送付の面（画面 5。実装設計書 6.2.8 (6)）**
 
@@ -899,3 +918,37 @@ Slack の行は API キーの行と同じ形（貼り付け・「入れ直す」
 | `settings.slackDm.missingScope` | Slack に通知を送る権限（chat:write）がありません。Slack アプリの設定でボットの権限に chat:write を足し、入れ直してから、出たトークンを貼り直してください |
 | `settings.slackDm.rejected` | Slack がこのトークンを受け付けませんでした。Slack アプリを入れ直し、出た Bot User OAuth Token を貼り直してください |
 | `settings.slackDm.openNote` | Slack の通知から libretto を開くには、その端末が Tailscale につながっている必要があります |
+
+**設定の面の端末（実装設計書 6.12 (5)）**
+
+この libretto を開ける端末（ペアリングしたブラウザ）の一覧と、別の端末の追加。この端末には `settings.devices.current` の印を付け、「外す」は出さない（自分を締め出さない）。追加用のアドレスは 10 分のあいだ 1 回だけ使え、期限を `settings.devices.expires` で添える。アドレスが `http://127.0.0.1` などこの PC の中だけのものなら `settings.devices.local` を添える。
+
+| キー | 文 |
+|---|---|
+| `settings.devicesHeading` | 端末 |
+| `settings.devices.use` | この libretto を開ける端末です。スマホなどほかの端末から開くには、ここで追加します。 |
+| `settings.devices.current` | この端末 |
+| `settings.devices.at` | {at} に追加 |
+| `settings.devices.unnamed` | 名前のない端末 |
+| `settings.devices.remove` | 外す |
+| `settings.devices.removeLabel` | {label} を外す |
+| `settings.devices.removeTitle` | この端末を外しますか |
+| `settings.devices.removeBody` | 外した端末では libretto を開けなくなります。もう一度使うときは、ここから追加し直してください。 |
+| `settings.devices.removeNo` | やめる |
+| `settings.devices.add` | 別の端末を追加する |
+| `settings.devices.nameLabel` | 追加する端末の名前（例: 私のスマホ） |
+| `settings.devices.issue` | 追加用のアドレスを出す |
+| `settings.devices.cancel` | やめる |
+| `settings.devices.urlLead` | 追加する端末で、このアドレスを開いてください。1 回だけ使えます。 |
+| `settings.devices.expires` | {at} まで使えます |
+| `settings.devices.copy` | アドレスをコピー |
+| `settings.devices.copied` | コピーしました |
+| `settings.devices.local` | このアドレスは libretto を動かしている PC の中でしか開けません。スマホから開くには、PC で Tailscale の HTTPS を用意し、そのアドレスを libretto の起動の設定に足してください（requirements.md の「スマホから開く」）。 |
+| `settings.devices.failed` | 出せませんでした。もう一度お試しください。 |
+| `settings.devices.removeFailed` | 外せませんでした。もう一度お試しください。 |
+
+**外から開いたときの帯（実装設計書 6.12 (6)）**
+
+| キー | 文 |
+|---|---|
+| `band.origin` | このアドレスで開いた画面からは操作できません。libretto を動かしている PC で、このアドレスを起動の設定に足してください（requirements.md の「スマホから開く」） |

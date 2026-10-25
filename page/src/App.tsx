@@ -119,6 +119,13 @@ export function App() {
               <strong>{W['band.storage']}</strong>
             </div>
           )}
+          {/* 操作を受け付けないアドレスで開いている（Origin が LIBRETTO_ORIGIN に無い。6.12 (6)） */}
+          {host.data?.origins && !host.data.origins.includes(window.location.origin) && (
+            <div className="band band-stopped" role="alert">
+              <span className="band-dot" aria-hidden="true" />
+              <strong>{W['band.origin']}</strong>
+            </div>
+          )}
           {sendFailed && (
             <div className="band band-stopped" role="alert">
               <strong>{W['band.sendFailed']}</strong>
