@@ -12,6 +12,7 @@ type ConfirmProps = {
   busy?: boolean
   danger?: boolean
   triggerClass?: string
+  triggerLabel?: string // 同じ文のボタンが並ぶときの読み上げの名前（どれを外すか）
   children?: ReactNode // 確かめの中で選ぶもの（見送りの理由など）
   canConfirm?: boolean // false の間は実行を押せない（既定は押せる）
   onConfirm: () => void
@@ -26,6 +27,7 @@ export function Confirm(p: ConfirmProps) {
         className={p.triggerClass ?? 'btn btn-secondary'}
         disabled={p.disabled || p.busy}
         aria-busy={p.busy || undefined}
+        aria-label={p.triggerLabel}
       >
         {p.trigger}
       </AlertDialog.Trigger>

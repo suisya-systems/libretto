@@ -135,6 +135,32 @@ describe('ペアリングと Cookie（5.4・5.7 (1)）', () => {
     const { url } = await res.json()
     expect((await server.app.request(new URL(url).pathname)).status).toBe(303)
   })
+  it('GET /api/devices はつないでいる端末とこの端末の印。外した・寿命の切れた端末は出さない（6.12 (5)）', async () => {
+    const phone = await pair()
+    clock = new Date(clock.getTime() + 60_000)
+    const { devices } = await (await get('/api/devices')).json()
+    expect(devices.map((d: { label: string; current: boolean }) => [d.label, d.current])).toEqual([
+      ['テスト', true],
+      ['テスト', false],
+    ])
+    expect((await send('DELETE', `/api/devices/${devices[1].id}`)).status).toBe(204)
+    expect((await get('/api/home', phone)).status).toBe(401)
+    expect((await (await get('/api/devices')).json()).devices).toHaveLength(1)
+    clock = new Date(clock.getTime() + SESSION_DAYS * 86_400_000)
+    const later = await pair()
+    expect((await (await get('/api/devices', later)).json()).devices).toHaveLength(1)
+  })
+  it('Tailscale の HTTPS の起点があれば、ペアリングの URL はそれで組む（スマホは 127.0.0.1 を開けない）', () => {
+    const s = createServer({
+      home,
+      ledger,
+      origins: [ORIGIN, 'https://pc.example.ts.net'],
+      staticDir: join(home, 'dist'),
+      invoke: () => Promise.reject(new Error('no model in this test')),
+      log: () => {},
+    })
+    expect(s.issuePairing('スマホ').url).toMatch(/^https:\/\/pc\.example\.ts\.net\/pair\//)
+  })
 })
 
 describe('経路の順（5.7 (6)）と Origin（5.4）', () => {
@@ -239,6 +265,7 @@ describe('POST /api/cases/:id/actions（5.2・5.3.1）', () => {
       storageOk: false,
       signIn: false,
       isolation: 'strong',
+      origins: [ORIGIN],
     })
     spy.mockRestore()
     expect((await action('cancel')).status).toBe(200)

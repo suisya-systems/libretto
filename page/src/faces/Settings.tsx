@@ -1,5 +1,5 @@
 // 設定の面（画面 7）。連携の節（Google と Slack。docs/implementation.md 6.4 (7)・6.6 (7)）、API キーの節（6.1.3 (6)。値は画面のどこにも出さない。設計書 D17）と
-// 自動検出の節（6.9 (10)）と動作環境の確認の節（8.10 (6)）、お知らせの節（6.8 (6)。通知を止める時間帯は 6.8 (14)）、進め方の初期設定の節（6.11 (1)）
+// 自動検出の節（6.9 (10)）と動作環境の確認の節（8.10 (6)）、お知らせの節（6.8 (6)。通知を止める時間帯は 6.8 (14)）、進め方の初期設定の節（6.11 (1)）、端末の節（6.12 (5)）
 import {
   type ApiKeyStatus,
   ConnectionsView,
@@ -19,6 +19,7 @@ import { send, useLoad } from '../load.ts'
 import { type DeviceState, deviceState, enable, pushable, syncPush } from '../notify.ts'
 import { Confirm } from '../parts/Dialog.tsx'
 import { W, type WKey, w } from '../wording.ts'
+import { DeviceSection } from './Devices.tsx'
 import { ProblemView } from './Pending.tsx'
 
 const Keys = SettingsSchema.shape.apiKeys
@@ -1280,6 +1281,7 @@ export function Settings() {
           {quiet.data && <QuietSection value={quiet.data.quietHours} reload={quiet.reload} />}
         </NoticeSection>
       )}
+      <DeviceSection />
       {modes.data && <ModeSection set={modes.data} reload={modes.reload} />}
       {voice.data && <VoiceSection samples={voice.data.samples} reload={voice.reload} />}
       {env.data && <EnvSection v={env.data.isolation} tools={env.data.tools} reload={env.reload} />}

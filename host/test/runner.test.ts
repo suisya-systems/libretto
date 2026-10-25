@@ -18,7 +18,7 @@ import type { Ledger } from '../src/ledger/ledger.ts'
 import { createFake, type ScriptEntry, type ScriptReply } from '../src/model/fake.ts'
 import { type Backend, createInvoke } from '../src/model/invoke.ts'
 import { OUTPUT_FILES } from '../src/roles/judge.ts'
-import { MAKER_LIMITS } from '../src/roles/maker.ts'
+import { longExpected, MAKER_LIMITS, OUTLINE, outlinePath, sha256 } from '../src/roles/maker.ts'
 import { createServer } from '../src/server/app.ts'
 import { type DriveFile, startFakeGoogle } from './fakes/google.ts'
 import { fakeOffice } from './fakes/office-bin.ts'
@@ -1825,5 +1825,111 @@ describe('おまかせ（6.11）', () => {
     await server.stop.stop()
     server.enterAuto()
     expect(ledger.listCases()).toEqual([])
+  })
+})
+
+describe('構成案（6.12）', () => {
+  // 長い文書: 承認した組の字数の上限が 2,000 字を超える
+  const longChecks = runnerChecks.map((c) =>
+    c.id === 'C01' ? { ...c, judge: { ...c.judge, args: { min: 2500, max: 3000 } } } : c,
+  )
+  const longEntrance: [Role, ScriptReply][] = [
+    ['話し相手', say(intake)],
+    ['下書き役・依頼書', say(briefDraft)],
+    ['下書き役・確認項目', say({ checks: longChecks })],
+    ['事実係・分類', say(classified)],
+  ]
+  const OUTLINE_MD = '# ブレストのまとめ\n\n## 1 つ目\n\n- 決まったこと\n\n## 2 つ目\n\n- その理由\n'
+  const outlined: ScriptReply = {
+    text: '構成案を書きました',
+    write: { 'outline.md': OUTLINE_MD, 'outline.done': 'done' },
+  }
+
+  it('長い文書は最初の版の前に構成案を頼み、承認の後にその構成と本人の指示で版を書く（T13・T14）', async () => {
+    await setup(script(...longEntrance, ['作り手', outlined], ['作り手', draft(1)]))
+    const id = await approved()
+    await waitState(id, '承認待ち')
+    const [first] = makerCalls()
+    expect(first?.instruction).toContain('outline.md')
+    expect(first?.instruction).not.toContain('draft-01.md')
+    const v = await caseView(id)
+    expect(v).toMatchObject({ approvalKind: '構成案', outline: OUTLINE_MD, outlineFingerprint: sha256(OUTLINE_MD) })
+    expect(v.versions).toEqual([])
+    // 作り手が承認の前に作業場の構成案を書き換えても、承認するのは作業場の外の写し
+    writeFileSync(work(id, 'outline.md'), '# 書き換えた\n')
+    const res = await act(id, {
+      type: 'outline.approve',
+      outlineFingerprint: v.outlineFingerprint,
+      note: '1 と 2 を入れ替えて',
+    })
+    expect(res.status).toBe(200)
+    await waitState(id, '検品中')
+    const second = makerCalls()[1]?.instruction ?? ''
+    expect(second).toContain('draft-01.md')
+    expect(second).toContain('構成案への本人の指示: 1 と 2 を入れ替えて')
+    expect(readFileSync(work(id, 'outline.md'), 'utf-8')).toBe(OUTLINE_MD)
+    expect(existsSync(work(id, 'outline.done'))).toBe(false)
+    // 構成案は判定しない。版を書いた後は構成案の面の値を出さない
+    expect(await caseView(id)).not.toHaveProperty('outline')
+    expect(fake.unused()).toEqual([])
+  })
+
+  it('おまかせでは長い文書でも構成案を頼まない', async () => {
+    await setup(script(...longEntrance, ['作り手', draft(1)]))
+    await approved('おまかせ')
+    await vi.waitFor(() => expect(makerCalls()).toHaveLength(1))
+    expect(makerCalls()[0]?.instruction).toContain('draft-01.md')
+  })
+
+  it('再起動: 構成案を書き終えていて T13 が無ければ、作り手を呼ばずに T13。版の回の maker.json では拾わない', async () => {
+    await setup(script(...longEntrance, ['作り手', { fail: 'hang' }]))
+    const id = await approved()
+    await vi.waitFor(() => expect(makerCalls()).toHaveLength(1))
+    writeFileSync(work(id, 'outline.md'), OUTLINE_MD)
+    writeFileSync(work(id, 'outline.done'), 'done')
+    ledger.close()
+    const before = n
+    await setup([], hangJudge, true)
+    n = before
+    server.runner.resume()
+    await waitState(id, '承認待ち')
+    expect(makerCalls()).toEqual([])
+    expect(readFileSync(outlinePath(home, id), 'utf-8')).toBe(OUTLINE_MD)
+  })
+
+  it('前の形の maker.json（kind が無い）は版の回として読む', async () => {
+    await setup(script(...longEntrance, ['作り手', { fail: 'hang' }]))
+    const id = await approved()
+    await vi.waitFor(() => expect(makerCalls()).toHaveLength(1))
+    await server.runs.abort(id)
+    await idle()
+    ledger.close()
+    await setup(script(['作り手', outlined]), hangJudge, true)
+    writeFileSync(work(id, 'outline.md'), '# 古い\n')
+    writeFileSync(work(id, 'outline.done'), 'done')
+    writeFileSync(
+      join(caseDir(home, id), 'maker.json'),
+      JSON.stringify({ n: 1, series: 1, at: '2026-10-24T00:00:00Z' }),
+    )
+    server.runner.resume()
+    await waitState(id, '承認待ち')
+    expect(makerCalls()).toHaveLength(1)
+    expect((await caseView(id)).outline).toBe(OUTLINE_MD)
+  })
+
+  it('見込み: 字数の上限（無ければ下限）が 2,000 字超、スライドは ## の見出しと表紙で 10 枚超', () => {
+    const code = (fn: 'charCount' | 'headingCount', args: Record<string, unknown>) =>
+      [{ ...runnerChecks[0], judge: { by: 'code' as const, fn, args } }] as typeof runnerChecks
+    const page = [{ kind: 'page' as const, shared: false }]
+    const slides = [{ kind: 'gslide' as const, folderId: 'f' }]
+    expect(longExpected(code('charCount', { min: 1500, max: 2500 }), page)).toBe(true)
+    expect(longExpected(code('charCount', { min: 1500, max: 2000 }), page)).toBe(false)
+    expect(longExpected(code('charCount', { min: 2400 }), page)).toBe(true)
+    expect(longExpected(code('headingCount', { max: 10 }), slides)).toBe(true)
+    expect(longExpected(code('headingCount', { level: 2, min: 9, max: 9 }), slides)).toBe(false)
+    expect(longExpected(code('headingCount', { level: 3, max: 20 }), slides)).toBe(false)
+    expect(longExpected(code('headingCount', { max: 20 }), page)).toBe(false)
+    expect(longExpected([], page)).toBe(false)
+    expect(OUTLINE).toEqual({ md: 'outline.md', done: 'outline.done' })
   })
 })

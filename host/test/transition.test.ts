@@ -456,6 +456,17 @@ describe('材料と下書き（T10〜T14）', () => {
     })
   })
 
+  it('T13 最初の版を書いた後（検品で戻った下書き中）は outline.done を拒む（6.12 (2)）', () => {
+    toDrafting()
+    draft()
+    review(false)
+    expect(get()).toMatchObject({ state: '下書き中', version: 1 })
+    expect(host('outline.done', { outlineFingerprint: 'ol1' })).toMatchObject({
+      ok: false,
+      reason: 'invalid_transition',
+    })
+  })
+
   it('T14 承認待ち（構成案）outline.approve → 下書き中（構成案の承認を記録。2 回目のゲートは無い）', () => {
     toDrafting()
     ok(host('outline.done', { outlineFingerprint: 'ol1' }))

@@ -382,5 +382,11 @@ export const FactsFile = z.object({
 })
 export type FactsFile = z.infer<typeof FactsFile>
 
-// maker.json（6.2.3 (5)）。作り手を最後に起こしたときの版と系列。再起動で書き終えた版を拾ってよいかの照合に使う
-export const MakerAttempt = z.object({ n: z.number().int().min(1), series: z.number().int().min(1), at: z.string() })
+// maker.json（6.2.3 (5)）。作り手を最後に起こしたときの版と系列。再起動で書き終えた版を拾ってよいかの照合に使う。
+// kind は構成案の回（6.12 (2)）。欄の無い前の形は版の回
+export const MakerAttempt = z.object({
+  n: z.number().int().min(1),
+  series: z.number().int().min(1),
+  kind: z.enum(['draft', 'outline']).default('draft'),
+  at: z.string(),
+})

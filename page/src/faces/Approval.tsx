@@ -21,6 +21,20 @@ const SOURCE_BADGE = {
   未判定: 'b-off',
 } as const
 
+// 末尾の「（7 項目）」を途中で折らない（スマホ幅で「7 項 / 目」と割れた。6.12 (4)）
+const keepTail = (text: string) => {
+  const i = text.lastIndexOf('（')
+  return i < 0 ? (
+    text
+  ) : (
+    // 1 つの span に包む（判定の行は flex なので、分けると別の列になる）
+    <span>
+      {text.slice(0, i)}
+      <span className="nowrap">{text.slice(i)}</span>
+    </span>
+  )
+}
+
 // 本文はホストが判定した Markdown から組み立てた HTML（許したタグとエスケープした文字だけ。6.2.5 (7)）
 function useDraft(caseId: string, n: number) {
   const [html, setHtml] = useState<string>()
@@ -129,7 +143,7 @@ export function ApprovalFace({
         <div className="now-eyebrow">{W['approval.eyebrow']}</div>
         <h2 className="now-title">{c.step}</h2>
         <p className="approval-verdict">
-          {clean ? w('approval.allPassed', { n: passed }) : w('approval.remaining', { n: failed.length })}
+          {clean ? keepTail(w('approval.allPassed', { n: passed })) : w('approval.remaining', { n: failed.length })}
         </p>
         {early && <p className="muted">{W[`approval.early.${early.why}`]}</p>}
         {!clean && <p className="muted">{W['approval.remainingLead']}</p>}

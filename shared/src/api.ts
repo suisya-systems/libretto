@@ -295,6 +295,7 @@ export const CaseView = CaseCard.extend({
   formatReview: ReviewSummary.optional(), // 今の版の形式の判定のうち最後のもの
   rounds: z.object({ series: z.number().int().min(1), used: z.number().int().min(0), max: z.literal(3) }),
   outlineFingerprint: z.string().optional(), // 承認待ち（kind=構成案）のとき。outline.approve に添える（4.6 (4)）
+  outline: z.string().optional(), // 同じとき。承認を待っている構成案の本文（6.12 (3)）
   deliveryPlan: DeliveryPlan,
   deliveries: z.array(Delivery),
   // 保存先を変える・足すときに選べる種類（Google は保存できる連携、ファイルは道具があるときだけ。表と文書は混ぜない。6.5 (3)・6.10 (3)）
@@ -390,6 +391,11 @@ export const PushSubscriptionInput = z.object({
   keys: z.object({ p256dh: z.string().min(1).max(200), auth: z.string().min(1).max(200) }),
 })
 // GET /api/devices/push。subscribed はこの端末の登録をホストが持っているか、unreachable は前に送ったとき配信元に届かなかったか
+// つないでいる端末（GET /api/devices。6.12 (5)）。id は外すときに DELETE /api/devices/:id へ渡す
+export const Device = z.object({ id: z.string(), label: z.string(), at: z.string(), current: z.boolean() })
+export type Device = z.infer<typeof Device>
+export const DeviceList = z.object({ devices: z.array(Device) })
+export const Pairing = z.object({ url: z.string(), expiresAt: z.string() })
 export const PushStatus = z.object({ publicKey: z.string(), subscribed: z.boolean(), unreachable: z.boolean() })
 export type PushStatus = z.infer<typeof PushStatus>
 // n はタブの中の通し番号（遅れて届いた前の POST で上書きしない）
@@ -409,6 +415,7 @@ export const HostStatus = z.object({
   storageOk: z.boolean(),
   signIn: z.boolean(),
   isolation: Isolation,
+  origins: z.array(z.string()).optional(), // GET /api/host だけ。操作を受け付ける起点（LIBRETTO_ORIGIN。6.12 (6)）
 })
 export type HostStatus = z.infer<typeof HostStatus>
 

@@ -2672,3 +2672,34 @@ input:disabled {
     padding: var(--space-3) 14px;
   }
 }
+
+/* 端末の節（6.12 (5)）。名前と追加日、右に「外す」。追加用のアドレスは折り返して全部見せる */
+.device-row {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+.device-current {
+  margin-left: var(--space-2);
+}
+.device-url {
+  display: block;
+  padding: var(--space-3);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-sm);
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.nowrap {
+  white-space: nowrap;
+}
+@media (max-width: 720px) {
+  /* ほかの節のボタンと同じく全幅（親指の的） */
+  .device-add .btn {
+    width: 100%;
+  }
+}

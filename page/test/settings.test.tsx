@@ -109,6 +109,7 @@ beforeEach(() => {
       sent.push({ method: init.method, path, ...(init.body && { body: JSON.parse(String(init.body)) }) })
       return respond(init.method)
     }
+    if (path === '/api/devices') return new Response(JSON.stringify({ devices: [] }))
     throw new Error(`unexpected ${path}`)
   })
 })

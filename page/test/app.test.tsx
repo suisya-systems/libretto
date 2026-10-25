@@ -162,6 +162,17 @@ describe('ホーム', () => {
     p.done()
   })
 
+  it('操作を受け付ける起点に今のアドレスが無ければ帯で知らせる（6.12 (6)）', async () => {
+    replies = { '/api/host': json({ ...host, origins: ['https://pc.example.ts.net'] }), '/api/home': json(empty) }
+    const p = await render()
+    expect(p.text()).toContain(W['band.origin'])
+    p.done()
+    replies = { '/api/host': json({ ...host, origins: [window.location.origin] }), '/api/home': json(empty) }
+    const q = await render()
+    expect(q.text()).not.toContain(W['band.origin'])
+    q.done()
+  })
+
   it('止まっているときは帯を出し、解除を送れる', async () => {
     replies = {
       '/api/host': json({ stopped: true, storageOk: false, signIn: false, isolation: 'strong' }),

@@ -41,3 +41,18 @@ PowerPoint・Excel・Word のファイルと Google スライドに保存する�
 | Slack アプリのユーザートークン | Slack の合図 | 実装設計書 6.6 (9) | Slack の入口を選べない |
 | OpenAI の API キー | チェック項目をライターとは別の種類の AI に作らせる | <https://platform.openai.com/> で作る | ライターと同じ種類の AI が作る（画面に出る） |
 | Jev（TypeSafe）の API キー | 文で書ける確認の判定 | オーナーが持っているもの | Claude が判定する（画面に出る） |
+
+## スマホから開く（外出先で承認する）
+
+libretto は PC の中だけで開く（公開の URL は作らない。実装設計書 P1）。スマホから開くときは、PC とスマホを Tailscale（自分の端末だけの網）でつなぎ、Tailscale の HTTPS のアドレスで開く。手順は実装設計書 6.12 (6)。
+
+| 手順 | すること |
+|---|---|
+| 1. Tailscale を入れる | PC とスマホに Tailscale を入れ（<https://tailscale.com/download>）、同じアカウントでログインする。WSL2 で libretto を動かすときは、Tailscale は Windows 側に入れる |
+| 2. HTTPS を有効にする | Tailscale の管理画面（<https://login.tailscale.com/admin/dns>）で **MagicDNS** と **HTTPS Certificates** を有効にする |
+| 3. PC で HTTPS の入口を開く | PC で `tailscale serve --bg 7780` を 1 回打つ（WSL2 なら Windows の PowerShell で）。`https://<PC の名前>.<tailnet の名前>.ts.net` で受けて、PC の中の libretto（`127.0.0.1:7780`）へ渡す。出たアドレスを控える。止めるときは `tailscale serve --https=443 off` |
+| 4. そのアドレスを libretto に教える | libretto を `LIBRETTO_ORIGIN=http://127.0.0.1:7780,https://<PC の名前>.<tailnet の名前>.ts.net npm start` で起動し直す。`LIBRETTO_BIND` は変えない（`127.0.0.1` のまま） |
+| 5. スマホを追加する | PC の libretto の設定の画面の「端末」で「別の端末を追加する」を押し、出たアドレスを 10 分以内にスマホで開く（1 回だけ使える）。以後スマホは 400 日そのまま使える |
+
+- 足りないときの画面: 手順 4 を忘れると、スマホで画面は開けても「このアドレスで開いた画面からは操作できません」の帯が出て、ボタンが効かない。手順 4 のアドレス（`https://` から `.ts.net` まで。末尾の `/` は付けない）を足して起動し直す。追加用のアドレスが `http://127.0.0.1` で始まるときは手順 3・4 がまだで、設定の画面に案内が出る。
+- スマホを外すとき: 設定の画面の「端末」で、その端末の「外す」を押す。

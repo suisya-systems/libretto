@@ -65,7 +65,7 @@ import type { Isolation } from '../model/sandbox.ts'
 import { createConversation, destChoices, TARGET } from '../roles/conversation.ts'
 import { createEntrance, currentSet, entranceView, writeApproval, writeAtomic } from '../roles/entrance.ts'
 import { currentMarks, OUTPUT_FILES, reviewsOf } from '../roles/judge.ts'
-import { draftNames, pastedCount, pastedName, versionDir, versionsOf } from '../roles/maker.ts'
+import { draftNames, outlinePath, pastedCount, pastedName, versionDir, versionsOf } from '../roles/maker.ts'
 import { createRuns, Stopped } from '../runs.ts'
 import {
   autoSince,
@@ -343,7 +343,8 @@ export function createServer(o: ServerOptions) {
     const token = randomBytes(32).toString('base64url')
     const expiresAt = now().getTime() + PAIRING_MS
     pairings.set(token, { expiresAt, label, file })
-    const url = `${o.origins[0]}/pair/${token}`
+    // スマホは 127.0.0.1 を開けないので、Tailscale の HTTPS の起点があればそれで組む（6.12 (5)）
+    const url = `${o.origins.find((x) => x.startsWith('https://')) ?? o.origins[0]}/pair/${token}`
     if (file) writeFileSync(pairingFile, `${url}\n`, { encoding: 'utf-8', mode: 0o600 })
     return { url, expiresAt: new Date(expiresAt).toISOString() }
   }
@@ -660,7 +661,8 @@ export function createServer(o: ServerOptions) {
     return c.json({}, 202)
   })
 
-  app.get('/api/host', (c) => c.json(status))
+  // 操作を受け付ける起点も返す。画面は今のアドレスが入っていなければ帯を出す（6.12 (6)）
+  app.get('/api/host', (c) => c.json({ ...status, origins: o.origins }))
   // ログインし直した本人の「続ける」（6.2.3 (7)）
   app.post('/api/host/resume', (c) => {
     runner.retrySignIn()
@@ -712,8 +714,14 @@ export function createServer(o: ServerOptions) {
     if (!rec) return c.json({ reason: 'not_found' }, 404)
     const g = readGathered(home, rec.caseId)
     const gathered = new Set(g?.state === '済み' ? g.sources.map((s) => s.url) : [])
-    return c.json(
-      caseView(
+    // 承認を待っている構成案（6.12 (3)）。指紋を取った作業場の外の写し
+    const op = outlinePath(home, rec.caseId)
+    const outline =
+      rec.state === '承認待ち' && rec.approvalKind === '構成案' && existsSync(op)
+        ? readFileSync(op, 'utf-8')
+        : undefined
+    return c.json({
+      ...caseView(
         ledger,
         rec,
         entranceView(home, ledger, rec),
@@ -724,7 +732,8 @@ export function createServer(o: ServerOptions) {
         caseChoices(rec.destination),
         quotesOthers(home, rec),
       ),
-    )
+      ...(outline !== undefined && { outline }),
+    })
   })
 
   // 版の本文（5.2・6.2.5 (7)）。html は判定した Markdown からホストが組み立てる（作り手の HTML は出さない）
@@ -1014,6 +1023,15 @@ export function createServer(o: ServerOptions) {
     return c.json({ quietHours: r })
   })
 
+  // つないでいる端末（6.12 (5)）。寿命の切れたものは出さない
+  app.get('/api/devices', (c) => {
+    const me = sessionOf(c)
+    const devices = ledger
+      .listSessions()
+      .filter((x) => valid(x.sessionId))
+      .map((x) => ({ id: x.sessionId, label: x.label, at: x.at, current: x.sessionId === me }))
+    return c.json({ devices })
+  })
   app.post('/api/devices', async (c) => {
     const body = DeviceInput.safeParse(await c.req.json().catch(() => undefined))
     if (!body.success) return c.json({ reason: 'invalid' }, 400)
