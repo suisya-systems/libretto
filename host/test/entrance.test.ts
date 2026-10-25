@@ -326,6 +326,34 @@ describe('入口の段取り', () => {
     expect(ledger.listDecisions(id).at(-1)?.text).toBe('U01: 任せる\nU02: b、a\nU03: a')
   })
 
+  it('資料が無いと満たせない項目の材料は渡してほしいものに足し、承認すると材料待ちになる。hidden の項目からは足さない（6.2.11 (1)）', async () => {
+    const items = classified.items.map((i) =>
+      i.checkId === 'C01'
+        ? { checkId: 'C01', verdict: '材料が要る', needs: '問い合わせ先の宛先' }
+        : i.checkId === 'C02'
+          ? { checkId: 'C02', verdict: '材料が要る', needs: '読者の名簿' }
+          : i,
+    )
+    await setup(
+      script(
+        ['話し相手', say(done)],
+        ['下書き役・依頼書', say(briefDraft)],
+        ['下書き役・確認項目', say({ checks: goodChecks })],
+        ['事実係・分類', say({ items })],
+      ),
+    )
+    const id = await request()
+    await waitTurn(id)
+    expect((await caseView(id)).entrance?.brief.wanted).toEqual(['問い合わせ先の宛先'])
+    expect(file(id, 'brief.json', BriefFile).wanted).toEqual(['問い合わせ先の宛先'])
+    expect(readFileSync(join(caseDir(home, id), 'brief.md'), 'utf-8')).toContain(
+      '本人から受け取る資料: 問い合わせ先の宛先',
+    )
+    const us = (await caseView(id)).entrance?.undecided.items ?? []
+    expect((await approve(id, Object.fromEntries(us.map((u) => [u.id, '任せる'])))).status).toBe(200)
+    expect(ledger.getCase(id)).toMatchObject({ state: '材料待ち', turn: '本人' })
+  })
+
   it('T7 直して出し直す: 2 回目の組は v2 のファイル。前の依頼書と本人の指示が下書き役に渡る', async () => {
     await setup(script(['話し相手', say(done)], ...entranceOk(), ...entranceOk()))
     const id = await request()

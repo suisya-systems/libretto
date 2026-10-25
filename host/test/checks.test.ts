@@ -2,11 +2,27 @@
 import { Brief } from '@libretto/shared/api'
 import { Check } from '@libretto/shared/checks'
 import { describe, expect, it } from 'vitest'
-import { checksViolations, judgeTerms, leaks } from '../src/checks/accept.ts'
+import { checksViolations, judgeTerms, leaks, negations } from '../src/checks/accept.ts'
 import { CANARY_SUMMARY, withHostItems } from '../src/checks/host-items.ts'
-import { CLASSIFIED_EXAMPLE, Classified, classifiedViolations, expects, toUndecided } from '../src/facts/undecided.ts'
+import {
+  CLASSIFIED_EXAMPLE,
+  Classified,
+  classifiedViolations,
+  expects,
+  MAX_NEEDS,
+  neededOf,
+  toUndecided,
+} from '../src/facts/undecided.ts'
 import { withoutNulls } from '../src/model/invoke.ts'
-import { BRIEF_EXAMPLE, BriefDraft, briefViolations, CHECK_EXAMPLES, ChecksDraft } from '../src/roles/entrance.ts'
+import {
+  BRIEF_EXAMPLE,
+  BriefDraft,
+  briefViolations,
+  CHECK_EXAMPLES,
+  ChecksDraft,
+  checksInstruction,
+  SCOPED_EXAMPLE,
+} from '../src/roles/entrance.ts'
 import { goodChecks } from './fixtures/entrance.ts'
 
 const shape = { voice: '合わせない', sources: '出典なし' } as const
@@ -278,6 +294,38 @@ describe('classifyUndecided の照合', () => {
     expect(CLASSIFIED_EXAMPLE.items.map((i) => i.multiple)).toContain(false)
   })
 
+  it('材料が要る: needs が要り、件数に上限。hidden でない項目の needs だけを渡してほしいものに足す（6.2.11 (1)）', () => {
+    const need = (checkId: string, needs?: string) => ({
+      checkId,
+      verdict: '材料が要る' as const,
+      ...(needs !== undefined && { needs }),
+    })
+    const ids = goodChecks.map((c) => c.id)
+    const answer = (...items: Classified['items']) => ({
+      items: [
+        ...items,
+        ...ids
+          .filter((id) => !items.some((i) => i.checkId === id))
+          .map((checkId) => ({ checkId, verdict: '決まる' as const })),
+      ],
+    })
+    expect(classifiedViolations(answer(need('C01', '問い合わせ先の宛先')), ids)).toEqual([])
+    expect(classifiedViolations(answer(need('C01')), ids).join()).toContain('needs を 1〜80 字')
+    expect(classifiedViolations(answer(need('C01', 'あ'.repeat(81))), ids).join()).toContain('needs を 1〜80 字')
+    expect(classifiedViolations(answer(need('C01', '連絡先に関しての情報')), ids).join()).toContain('直訳調')
+    const many = answer(...ids.slice(0, MAX_NEEDS + 1).map((id) => need(id, `資料 ${id}`)))
+    expect(classifiedViolations(many, ids).join()).toContain(`${MAX_NEEDS} 件まで`)
+    // C01 は hidden でない、C02 は hidden。同じ needs は 1 件、もう渡してほしいものにあれば足さない
+    const r = answer(
+      need('C01', '問い合わせ先の宛先'),
+      need('C02', '読者の名簿'),
+      need('C04', '問い合わせ先の宛先'),
+      need('C05', 'メモ'),
+    )
+    expect(goodChecks.find((c) => c.id === 'C04')?.hidden).toBe(false)
+    expect(neededOf(r, goodChecks, ['メモ'])).toEqual(['メモ', '問い合わせ先の宛先'])
+  })
+
   it('確かめ方と合格の条件を文にして渡す（同じ title でも値の違いが見える）', () => {
     expect(expects(goodChecks[0] as Check)).toBe('機械: charCount {"min":2200,"max":2800} / 合格: すべての単位で真')
     expect(expects(goodChecks[5] as Check)).toBe(
@@ -291,6 +339,11 @@ describe('下書き役への指示と型のずれ', () => {
     for (const c of CHECK_EXAMPLES) expect(Check.parse(c)).toEqual(c)
     const v = checksViolations(CHECK_EXAMPLES, shape, { minority: false })
     expect(v.filter((x) => /C0\d/.test(x))).toEqual([])
+  })
+
+  it('節ごとの項目の対象の絞り方を指示に書き、例の問いは否定語に当たらない（6.2.11 (3)）', () => {
+    expect(checksInstruction(true)).toContain(JSON.stringify(SCOPED_EXAMPLE))
+    expect(negations(SCOPED_EXAMPLE)).toEqual([])
   })
 
   it('任意の欄の null は欄が無いと読む', () => {

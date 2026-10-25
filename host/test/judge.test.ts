@@ -381,6 +381,29 @@ describe('3 回目を待たずに上げる（6.2.7）', () => {
     // 前の判定で通っていた項目は「2 回続けて」ではない
     expect(escalateOf(now(331, 1), prev([res('C01', 'pass', 0), res('C03', 'fail', 2)]))).toBeUndefined()
   })
+  it('モデル判定の項目も、同じ形で 2 回続けて落ちたら直らない（6.2.11 (2)）', () => {
+    const m = (id: string, verdict: 'pass' | 'fail', gap?: number) => ({
+      ...res(id, verdict, gap),
+      by: 'claude' as const,
+    })
+    const now = (results: Review['results']) => ({ results, pass: false, failedSummaries: ['a'], round: 2 })
+    // 資料が無い問い合わせ先（本文全体の項目は単位 1 つ）
+    const before = prev([m('C08', 'fail', 1), m('C10', 'fail', 2)])
+    expect(escalateOf(now([m('C08', 'fail', 1), m('C10', 'fail', 2)]), before)).toEqual({
+      why: '直らない',
+      checkIds: ['C08', 'C10'],
+    })
+    // 落ちた節が減った・合格した項目があれば続ける
+    expect(escalateOf(now([m('C08', 'fail', 1), m('C10', 'fail', 1)]), before)).toBeUndefined()
+    expect(escalateOf(now([m('C08', 'fail', 1), m('C10', 'pass')]), before)).toBeUndefined()
+    // 前の判定でモデル判定が流れていない（機械判定で落ちて skipped）なら 2 回続けてではない
+    expect(
+      escalateOf(
+        now([m('C08', 'fail', 1)]),
+        prev([res('C01', 'fail', 3), { id: 'C08', verdict: 'skipped', by: 'claude' }]),
+      ),
+    ).toBeUndefined()
+  })
   it('作り手に返す要約が 0 件なら判定できない（skipped が残っても）', () => {
     const r = { results: [res('C01', 'unable'), res('C02', 'skipped')], pass: false, failedSummaries: [], round: 1 }
     expect(escalateOf(r)).toEqual({ why: '判定できない', checkIds: ['C01'] })
@@ -561,6 +584,13 @@ describe('judge() の段取り（7.3）', () => {
       '要約 C04', // 本文全体の項目は箇所が 1 つなので添えない
     ])
     expect(r.failedSummaries.join()).not.toContain('機能')
+    // モデル判定の fail にも合格までの距離（null は合格に有利な側。6.2.11 (2)）
+    expect(r.results.map((x) => [x.id, x.measured?.gap])).toEqual([
+      ['C01', 0],
+      ['C02', 1],
+      ['C03', 2],
+      ['C04', 1],
+    ])
     // 段落の先頭は 20 字で切る
     const one = {
       ...reply,

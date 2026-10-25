@@ -81,7 +81,8 @@ export const Brief = z.object({
   docType: DocType,
   subject: z.string().min(1), // 書く内容（何について・何を入れるか）。表 4-1 に足した（6.2.3 (0)）
   // 本人に渡してほしいもの。あれば T8 で本人の番の材料待ちに入る。前の版のファイルで欄が無ければ []（6.2.4 (1)）
-  wanted: z.array(z.string().trim().min(1).max(80)).max(5).default([]),
+  // 上限 10 = 依頼書の下書き役の 5 件 ＋ 確認項目から足す 5 件（6.2.11 (1)）
+  wanted: z.array(z.string().trim().min(1).max(80)).max(10).default([]),
   // libretto がウェブで集める公開の情報。前の版のファイルで欄が無ければ []（6.3.3 (1)）
   gather: z.array(z.string().trim().min(1).max(80)).max(3).default([]),
   audience: z.string().min(1),

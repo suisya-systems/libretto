@@ -483,6 +483,18 @@ export async function judge(
     }
   }
 
+  // モデル判定の fail にも合格までの距離を付ける（null は合格に有利な側に読む。6.2.11 (2)）
+  for (const c of checks) {
+    const r = results.get(c.id) as CheckResult
+    if (r.by === 'code' || r.verdict !== 'fail' || !r.units) continue
+    const favorable = c.pass.kind !== 'count'
+    r.measured = {
+      gap: flipsToPass(
+        c.pass,
+        r.units.map((u) => u.yes ?? favorable),
+      ),
+    }
+  }
   const ordered = checks.map((c) => results.get(c.id) as CheckResult)
   const summaryOf = new Map(checks.map((c) => [c.id, c.summary]))
   for (const c of checks) {
@@ -646,15 +658,15 @@ function writeFacts(dir: string, f: FactsFile) {
   writeAtomic(join(dir, 'facts.md'), renderFacts(f))
 }
 const readReview = (path: string) => Review.parse(JSON.parse(readFileSync(path, 'utf-8')))
-// 機械判定で落ちた項目の合格までの距離（6.2.7 (1)）
-const gapOf = (x: CheckResult | undefined) => (x?.by === 'code' && x.verdict === 'fail' ? x.measured?.gap : undefined)
+// 落ちた項目の合格までの距離（6.2.7 (1)。モデル判定の項目にも付ける。6.2.11 (2)）
+const gapOf = (x: CheckResult | undefined) => (x?.verdict === 'fail' ? x.measured?.gap : undefined)
 // 使い回せる前の判定（型に通り、series・round が今の案件と一致）。無い・壊れていれば undefined（コミット前なので書き直す）。
-// 機械判定の fail に gap が無いのは #48 より前の形なので使い回さない（6.2.7 (4)）
+// fail に gap が無いのは前の形（機械判定は #48、モデル判定は #82 より前）なので使い回さない（6.2.7 (4)・6.2.11 (2)）
 function prior(path: string, c: CaseRecord): Review | undefined {
   if (!existsSync(path)) return undefined
   try {
     const r = readReview(path)
-    const old = r.results.some((x) => x.by === 'code' && x.verdict === 'fail' && gapOf(x) === undefined)
+    const old = r.results.some((x) => x.verdict === 'fail' && gapOf(x) === undefined)
     return r.series === c.series && r.round === c.round + 1 && !old ? r : undefined
   } catch {
     return undefined
@@ -674,10 +686,10 @@ export function escalateOf(
     const b = before(x)
     return now !== undefined && b !== undefined && now >= b
   })
-  // 前に機械判定で落ちていた項目が 1 つでも近づいた（合格を含む）なら続ける（オーナー判断 2026-10-25。6.2.7 (2)）
+  // 前に落ちていた項目が 1 つでも近づいた（合格を含む）なら続ける（オーナー判断 2026-10-25。6.2.7 (2)・6.2.11 (2)）
   const closer = r.results.some((x) => {
     const b = before(x)
-    const now = x.by === 'code' && x.verdict === 'pass' ? 0 : gapOf(x)
+    const now = x.verdict === 'pass' ? 0 : gapOf(x)
     return b !== undefined && now !== undefined && now < b
   })
   if (stuck.length && !closer) return { why: '直らない', checkIds: stuck.map((x) => x.id) }
