@@ -67,11 +67,12 @@ if (def.google)
     JSON.stringify({
       refreshToken: 'shoot',
       email: 'me@example.com',
-      // 'gmail' は Gmail だけの前の連携（Google ドキュメントには連携し直しが要る。6.5 (2)）
-      scopes:
-        def.google === 'gmail'
-          ? ['https://www.googleapis.com/auth/gmail.readonly']
-          : ['https://www.googleapis.com/auth/gmail.readonly', 'https://www.googleapis.com/auth/drive.file'],
+      // 'gmail' は Gmail だけの前の連携（Google ドキュメントには連携し直しが要る。6.5 (2)）、'docs' は会議メモの許可が無い（6.7 (1)）
+      scopes: [
+        'https://www.googleapis.com/auth/gmail.readonly',
+        ...(def.google === 'gmail' ? [] : ['https://www.googleapis.com/auth/drive.file']),
+        ...(def.google === true ? ['https://www.googleapis.com/auth/drive.meet.readonly'] : []),
+      ],
       savedAt: '2026-10-24T09:00:00.000+09:00',
     }),
   )
