@@ -74,6 +74,39 @@ describe('checkIsolation の判定', () => {
     expect(await run(main)).toMatchObject({ verdict: 'visible', ...more })
   })
 
+  it('ホームに挙がった名前は、同じ起こし方で本当にあるものだけ数える（作業場の /dev/null のかぶせ物を混ぜた返答。#74）', async () => {
+    const asked: string[][] = []
+    const present = async (_work: string, paths: string[]) => {
+      asked.push(paths)
+      return paths.filter((p) => p.endsWith('.ssh'))
+    }
+    const probe = (names: string[]) =>
+      checkIsolation(
+        {
+          home,
+          userHome: '/u',
+          check: () => strong,
+          invoke: reply({ home: ['.claude', ...names] }),
+          control: reply({ seen: true }),
+          homeNames: () => ['.claude', '.claude.json'],
+          present,
+        },
+        new AbortController().signal,
+      )
+    expect(await probe(['.bashrc', '.vscode'])).toMatchObject({
+      verdict: 'hidden',
+      homeOk: true,
+      extraHome: [],
+      unseenHome: ['.bashrc', '.vscode'],
+    })
+    expect(asked[0]).toEqual([join('/u', '.bashrc'), join('/u', '.vscode')])
+    expect(await probe(['.bashrc', '.ssh'])).toMatchObject({
+      verdict: 'visible',
+      extraHome: ['.ssh'],
+      unseenHome: ['.bashrc'],
+    })
+  })
+
   it('言い直しの前の回にだけ語が出ても visible', async () => {
     const main = async (j: Job) => {
       j.onReply?.(`{broken ${token()}`)
@@ -152,6 +185,7 @@ describe('POST /api/checks/run と GET /api/connections', () => {
     homeOk: true,
     control: true,
     extraHome: [],
+    unseenHome: [],
   }
   beforeEach(async () => {
     ledger = initHome(home)

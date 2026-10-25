@@ -170,6 +170,18 @@ export function createSandbox(o: SandboxOptions) {
     homeNames(work: string, parentEnv: NodeJS.ProcessEnv = process.env): string[] {
       return homeNamesOf(settingsFor(work, tmpdir(), envOf(parentEnv)).filesystem.allowRead, userHome)
     },
+    // 作り手と同じ起こし方で見て、本当にあるもの。無いものと文字デバイス（srt が書かせないために /dev/null をかぶせた所。
+    // 中身は空）は除く。strong でないとき・起こせなかったときは全部を返す（見えたと数える側に倒す）。8.10 (4)
+    async present(work: string, paths: string[], parentEnv: NodeJS.ProcessEnv = process.env): Promise<string[]> {
+      if (o.check().isolation !== 'strong' || paths.length === 0) return paths
+      const p = await this.prepare(work, [], parentEnv, [realpathSync(process.execPath), '-e', PRESENT, ...paths])
+      try {
+        const r = await run(p.argv, p.env, 30_000, work)
+        return r.code === 0 ? r.out.split('\n').filter((l) => paths.includes(l)) : paths
+      } finally {
+        await p.cleanup()
+      }
+    },
     async prepare(work: string, args: string[], parentEnv: NodeJS.ProcessEnv, inner?: string[]): Promise<Prepared> {
       const c = o.check()
       if (c.isolation === 'broken') throw new Error(`sandbox: isolation broken (${c.reason})`)
@@ -240,6 +252,9 @@ export const atLeast = (v: string, min: string) => {
 
 // srt が渡す HTTPS_PROXY に CONNECT して 200 を見る（名前解決は proxy の側。Node の fetch は proxy を見ない。8.9 (5)）
 export const NET_PROBE = `const u=new URL(process.env.HTTPS_PROXY||process.env.https_proxy||'');const h={};if(u.username)h['Proxy-Authorization']='Basic '+Buffer.from(decodeURIComponent(u.username)+':'+decodeURIComponent(u.password)).toString('base64');const r=require('node:http').request({host:u.hostname,port:u.port,method:'CONNECT',path:'api.anthropic.com:443',headers:h});r.on('connect',(s,k)=>{k.destroy();process.exit(s.statusCode===200?0:1)});r.on('error',()=>process.exit(1));r.setTimeout(10000,()=>process.exit(1));r.end()`
+
+// 引数のパスのうち、あって文字デバイスでないものを 1 行ずつ出す（present）
+const PRESENT = `for(const p of process.argv.slice(1)){try{if(!require('node:fs').lstatSync(p).isCharacterDevice())console.log(p)}catch{}}`
 
 export type CheckOptions = {
   home: string

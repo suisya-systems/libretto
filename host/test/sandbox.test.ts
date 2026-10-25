@@ -490,6 +490,25 @@ describe('隔離の点検の対照と、ホームに出てよい名前（8.10 (4
     await q.cleanup()
   })
 
+  it.skipIf(win)(
+    'present: 同じ起こし方で見て、無いものと文字デバイス（/dev/null のかぶせ物）を除く。strong でなければ全部',
+    async () => {
+      const file = join(dir, 'real')
+      writeFileSync(file, 'x')
+      const paths = [file, join(dir, 'absent'), '/dev/null']
+      const w = join(dir, 'w')
+      mkdirSync(w)
+      const box = createSandbox({ home: join(dir, 'home'), claude: [FAKE], srt: FAKE_SRT, check: () => strong })
+      expect(await box.present(w, paths)).toEqual([file])
+      const weak = createSandbox({
+        home: join(dir, 'home'),
+        claude: [FAKE],
+        check: () => ({ isolation: 'weak', reason: 'userns', claudeOk: true }),
+      })
+      expect(await weak.present(w, paths)).toEqual(paths)
+    },
+  )
+
   it('ホームの下の allowRead の一番上の名前と .claude.json だけ', () => {
     const h = join(dir, 'u')
     expect(
