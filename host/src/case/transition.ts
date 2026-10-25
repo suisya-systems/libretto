@@ -177,6 +177,7 @@ type Plan = Pick<
   | 'approvalKind'
   | 'mode'
   | 'destination'
+  | 'target'
   | 'setFingerprint'
   | 'outlineFingerprint'
   | 'versionFingerprint'
@@ -485,9 +486,10 @@ function decide(ledger: Ledger, c: CaseRecord, ev: CaseInput, ctx: Ctx): Plan | 
             ...clean({ link: ev.link, shareToken: ev.shareToken }),
           })
           const rest = [...current.values()].some((d) => d.attemptId !== a.attemptId && d.status !== '送付済')
-          if (rest) return { to: '送付中', turn: 'libretto', step: STEP.saving, after }
+          if (rest) return { to: '送付中', turn: 'libretto', step: STEP.saving, target: a.target, after }
           return {
             to: '完了',
+            target: a.target,
             turn: '本人',
             step: STEP.done,
             after: all(after, decision('送付', `バージョン ${c.version} を保存しました`)),

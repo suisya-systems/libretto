@@ -430,6 +430,9 @@ libretto の画面に出す言葉の正本。設計書（[`docs/design.md`](./de
 | `event.delivery.send` | 保存を頼みました |
 | `event.delivery.decline` | 保存しないで戻りました |
 | `event.delivery.done` | 保存先に保存しました |
+| `event.delivery.done.page` | Web ページに保存しました |
+| `event.delivery.done.paste` | 貼り付け用の下書きに保存しました |
+| `event.delivery.done.gdoc` | Google ドキュメントに保存しました |
 | `event.delivery.failed` | 保存できなかったので中止しました |
 | `event.delivery.mismatch` | 保存した文書の中身が本文と違ったので、書き直しに回しました |
 | `event.delivery.unknown` | 保存できたか確かめています |

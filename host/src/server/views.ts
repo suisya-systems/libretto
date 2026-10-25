@@ -163,7 +163,7 @@ export function caseView(
     events: ledger.listCaseEvents(c.caseId).map((e) => ({
       at: e.at,
       type: e.type,
-      ...(e.type === 'transition' && { from: e.from, to: e.to, event: e.event, by: e.by }),
+      ...(e.type === 'transition' && { from: e.from, to: e.to, event: e.event, by: e.by, target: e.target }),
       ...(e.type === 'created' && { to: e.to }),
       ...(e.type === 'rejected' && { event: e.event }),
     })),

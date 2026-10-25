@@ -241,6 +241,7 @@ export const EventRow = z.object({
   to: CaseState.optional(),
   event: z.string().optional(),
   by: z.string().optional(),
+  target: DeliveryTarget.optional(),
 })
 
 export const CaseCard = z.object({

@@ -309,10 +309,18 @@ const failTo = (e: CaseView['events'][number]) =>
         : ''
     : ''
 
+// 保存先の名前の入った文があればそれ、無ければ（古い行・文の無い種類）名前の無い文（#21）
+const named = (key: string, e: CaseView['events'][number]) =>
+  e.target && has(`${key}.${e.target.kind}`) ? `${key}.${e.target.kind}` : key
+
 export function History({ c }: { c: CaseView }) {
   const history = c.events
     .filter((e) => e.type === 'created' || e.type === 'transition')
-    .map((e, n) => ({ n, at: e.at, key: e.type === 'created' ? 'event.created' : `event.${e.event}${failTo(e)}` }))
+    .map((e, n) => ({
+      n,
+      at: e.at,
+      key: e.type === 'created' ? 'event.created' : named(`event.${e.event}${failTo(e)}`, e),
+    }))
     .filter((e): e is { n: number; at: string; key: WKey } => has(e.key))
     .reverse()
   return (
