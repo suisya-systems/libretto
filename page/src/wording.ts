@@ -622,6 +622,10 @@ export const W = {
     'このブラウザでは libretto の通知が許可されていません。ブラウザのサイトの設定で通知を「許可」にしてから、もう一度押してください',
   'settings.notices.insecure':
     'この開き方では通知を使えません。https:// で始まるアドレス（Tailscale の HTTPS）で開き直してください',
+  'settings.notices.homescreen':
+    'iPhone では、ホーム画面に追加した libretto から開くと通知を受け取れます。Safari の共有ボタンから「ホーム画面に追加」を選び、追加したアイコンから開いてください',
+  'settings.notices.unreachable':
+    '画面を閉じているときの通知を送れませんでした。libretto を動かしている PC がインターネットにつながっているか確かめてください。画面を開いているあいだの通知は出ます',
   'settings.notices.kinds': '通知する出来事',
   'settings.notices.kindsNote': '切っても、お知らせ欄には残ります。',
   'settings.notices.kind.your_turn': '確認待ちになった',

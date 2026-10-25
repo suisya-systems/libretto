@@ -2756,6 +2756,22 @@ GitHub #29 は、本物のモデルで依頼を流したオーナーの所感（
 - **`POST /api/devices/presence` は (9) の 2 で足す**。読むのはホストが Web Push を送るかを決めるときだけで、この Issue には送り先が無い。
 - **設定の「お知らせ」の節**: この端末の状態（「この端末に通知します」/「許可されていません」/「この開き方では使えません」）と「この端末に通知する」（押したときだけ許可を求める）、ブラウザで拒んだとき・`http://` の開き方のときの (7) の文、出来事ごとの入り切り。画面を閉じていても届く通知はまだ無いので、(7) の「このブラウザでは、画面を開いているあいだだけ通知します」を常に出す。iPhone の「ホーム画面に追加」の文は、マニフェストを置く (9) の 2 で出す（今は追加しても通知を受け取れないため）。
 
+**(12) 実装の決め事（GitHub #51。(9) の 2）**
+
+(9) の 2 を作るときに決めたこと。設計レビューに 1 回かけ、出た指摘を反映した。
+
+- **送り先は登録のある端末**。`ledger.noticeRoute.targets()` が `push_subscriptions` の端末を `push:<sessionId>` で返し、送り手は `host/src/server/push.ts`（`senders.push`）。暗号化（`aes128gcm`）と VAPID の署名は `web-push` の `generateRequestDetails` で組み、送るのは `fetch`。理由: `sendNotification` は `https` モジュール固定で、テストの偽の配信元（プロセス内の HTTP サーバー）に向けられない。`TTL` は送り残しを捨てる 24 時間（(5)）と同じ。
+- **VAPID の鍵**は、公開鍵を初めて求められたとき（設定の画面・開いたときの登録）に作り、`<LIBRETTO_HOME>/push-keys.json`（`0600`。API キーと同じ書き方）に持つ。連絡先（`subject`）は libretto の公開のリポジトリの URL。理由: 本人のメールアドレスを配信元に渡さずに済み、Safari の配信元が受け付けない `https://localhost`・`127.0.0.1` を避けられる。
+- **登録**は端末に 1 つ（`push_subscriptions` の `session_id` が主キー）で、`endpoint` も 1 つの端末にだけ結ぶ（`UNIQUE`）。同じブラウザでペアリングし直して登録したら、前の端末の登録と送り残しを消す。理由（設計レビュー）: ペアリングし直しても前の端末は外れないので、そのままだと新しい端末を外しても前の端末の登録から届き続ける。
+- **API**: `GET /api/devices/push`（公開鍵・この端末の登録をホストが持っているか・前に送ったとき配信元に届かなかったか）、`PUT /api/devices/push`（`PushSubscription.toJSON()` の形。配信元は `https://` だけ）、`POST /api/devices/presence { tab, visible }`。端末は Cookie のセッションで決める。`DELETE /api/devices/:sessionId` は登録と送り残しも消す。
+- **画面の登録の手順は 1 つ**（`syncPush`）。許可したとき（「この端末に通知する」）と、SSE がつながるたび・設定の面を開いたときに、ブラウザの登録を取り（無ければ作り）、ホストへ置き換えで渡す。ホストの公開鍵が変わっていれば作り直す。理由（設計レビュー）: 開くたびだけにすると、初めて許可して閉じた端末が登録されない。`pushsubscriptionchange` は扱わず、次に開いたときに拾う。
+- **見ている**: タブはページを開くたびの印（`tab`）を持ち、SSE の URL（`/api/events?tab=`）と `POST /api/devices/presence` に付ける。ホストは SSE がつながっている間だけそのタブを数え、切れたら消す（つなぎ直しの後に前のつなぎの切れが届いても新しいほうは消さない）。つながっていないタブの POST は捨てる。ページは SSE がつながるたびと `visibilitychange`・`focus`・`blur` で `visibilityState === 'visible' && document.hasFocus()` を送る。端末のどれかのタブが見ていれば送らず `sent` にする（画面がブラウザの通知 B を出す）。理由（設計レビュー）: タブ単位にしないと、裏のタブの `visible: false` が見ているタブを上書きする。切れた後に遅れて届いた `visible: true` で通知が止まり続けない。
+- **配信元の応答**: `404` / `410` → 登録を消して `dropped`。`429`・`5xx`・`401` / `403`・届かない → 送り直し（(5) の 1・5・30 分）。理由（設計レビュー）: `401` / `403` は署名の側（時計のずれなど）の問題でもあり、登録を消すと一時の不具合で全部の端末の登録が消える。届かない（`fetch` が例外）は端末ごとにメモリに印を立て、届いたら下ろし、設定の画面が (7) の「配信元に届かない」の文を出す。1 送り先に何通かあれば 1 通ずつ送り、1 通でも送り直しなら全部を送り直す（送れた分は同じ `tag` で置き換わる）。
+- **送っている間の取り消し**: 送り手は 1 通ごとに、端末が外されていない・400 日以内・登録が変わっていないことを確かめ直す。送り出しの仕事は送り先ごとに確認待ちの古さ（(11)）を確かめ直す。`setDelivery` は `pending` の行だけを書き換える。理由（設計レビュー）: 送っている間に端末を外して `dropped` にした行が、遅れて返った送り直しの結果で `pending` に戻っていた。
+- **サービスワーカーの push**: 受けた push は (11) と同じ `show` を通すが、**必ず何か出す**。見ていても出し、同じ知らせ・同じ案件の新しい知らせが出ていれば、それを同じ `tag` で出し直す（置き換わるだけで鳴り直さない。閉じてから出すと置き換えにならない）。画面から渡された知らせと同じ列に並べる。
+- **マニフェスト**: `page/public/manifest.webmanifest`（`display: standalone`・`start_url: /`）を置き、`index.html` から指す。アイコンは置かない（iOS / iPadOS はホーム画面に頭文字のアイコンを出す）。
+- **設定の「お知らせ」の節**: 「このブラウザでは、画面を開いているあいだだけ通知します」は、画面を閉じたあとの通知に対応していないブラウザと、許可してもホストが登録を受け取れていない端末に出す。iPhone・iPad で通知を使えない（ホーム画面から開いていない）ときは (7) の「ホーム画面に追加」の文を、前に送ったとき配信元に届かなかった端末には (7) の「配信元に届かない」の文を出す。
+
 ### 6.9 推測の分類と抑え方の決め事（Issue 24 の着手前の設計レビューで決めたこと）
 
 Gmail と Slack の文から「文書づくりを頼まれていそうだ」と libretto が見つけたものを、可能性（高・中・低）と見つけた理由付きの候補にし、見送りの学習・1 日の上限・見落としの自己測定を動かすまでを決める（設計書 4.2.2・5.7.3・10.1〜10.3）。中身は `host/src/intake/classify.ts`（`prefilter`・`classifyCandidate`・合成の `combine`）と `infer.ts`（読む範囲と回）、`poller.ts`（回の順）、設定の「自動検出」の欄。画面の言葉は ui-wording.md の対応表のとおり（推測 → 自動検出、確信度 → 可能性、拾った理由 → 見つけた理由、拾い漏れ → 見落とし、拾わないようにする → 除外する）。作らないもの: Slack の DM の推測（(13) A）、低の「やっぱり残す」（`keep`。(13) D）、過去 30 日に遡って分類し直すスクリプト（(13) C）。
@@ -3702,6 +3718,11 @@ CREATE TABLE notice_deliveries (
   PRIMARY KEY (notice_seq, target)
 );
 
+-- 画面を閉じていても届く通知の登録（6.8 (6)(12)）。端末に 1 つ、endpoint も 1 つの端末にだけ
+CREATE TABLE push_subscriptions (
+  session_id TEXT PRIMARY KEY, endpoint TEXT NOT NULL UNIQUE, p256dh TEXT NOT NULL, auth TEXT NOT NULL, at TEXT NOT NULL
+);
+
 -- 会話欄。thread は案件 id か 'lobby'
 CREATE TABLE conversation_messages (
   seq INTEGER PRIMARY KEY AUTOINCREMENT, thread TEXT NOT NULL, who TEXT NOT NULL /* '本人' | 'libretto' */,
@@ -3755,7 +3776,7 @@ CREATE UNIQUE INDEX conversation_one_per_request ON conversation_messages(reques
 
 **`costs`**: 列は上の定義のとおり（`type: 'hold'|'charge'|'classified'`、`call_id`、`case_id: string|'推測'|'点検'|'会話'`、`role`、`family`、`model`、`yen`、`hold_yen`、`tokens_in` / `tokens_out`、`item_id`）。行の種類ごとに埋める欄・空にする欄と重複の防ぎ方は上の `CHECK` と一意の索引（理由は 9.4 (1)）。集計（どれも 1 本の SQL）: 案件の累計 = `charge` の合計 ＋ 未精算の `hold` の全額。全体の今月 = 同じ集計を全案件＋推測＋点検で（月の境界と、月をまたぐ呼び出しをどの月に数えるかは 9.4 (2)）。推測の 1 日の件数 = `classified` 行（分類した候補 1 件につき 1 行。中で Haiku と Jev を何回呼んでも 1 行）の数（JST の 1 日）。`model` / `family` は内部の記録で、画面には出さない（11.2）。
 
-**データベースのほかにルートに置くファイル**: `settings.json`（5.3 の `Settings`。置き換えで書く唯一のファイル。前の版を `settings.prev.json` に残す。API キーは入れない）、`api-keys.json`（設定の面から入れた API キー。`{ openai?: { value, savedAt }, jev?: { value, savedAt } }`。**オーナーだけが読み書きできる権限**で作る: POSIX は作るときから `0600`、一時ファイルに `0600` で書いて置き換える。素の Windows はユーザーのプロファイルの既定の権限に任せ、8.5 の拒否規則に足す。案件フォルダの外で、作り手のセッションの `denyRead`（8.3）の中にある。`settings.json` に入れないのは、`settings.prev.json` に写って値が 2 か所に残るため）、ペアリングのセッションは `sessions` 表、`pairing.txt`（未使用のペアリング URL。使ったら消す）、`STOP`（緊急停止。中身は時刻）、`isolation.json`（8.3）、`requirements.md`（依存の一覧。オーナー向け）、会話欄のお知らせは `notices` 表、会話欄は `conversation_messages` 表（`thread` = 案件 id か `lobby`）、`logs/`（CLI の生の出力。画面に出ない）、`calls/`（呼び出しの結果のファイル `<callId>.json`。精算したら消す。9.4 (7)）。
+**データベースのほかにルートに置くファイル**: `settings.json`（5.3 の `Settings`。置き換えで書く唯一のファイル。前の版を `settings.prev.json` に残す。API キーは入れない）、`api-keys.json`（設定の面から入れた API キー。`{ openai?: { value, savedAt }, jev?: { value, savedAt } }`。**オーナーだけが読み書きできる権限**で作る: POSIX は作るときから `0600`、一時ファイルに `0600` で書いて置き換える。素の Windows はユーザーのプロファイルの既定の権限に任せ、8.5 の拒否規則に足す。案件フォルダの外で、作り手のセッションの `denyRead`（8.3）の中にある。`settings.json` に入れないのは、`settings.prev.json` に写って値が 2 か所に残るため）、ペアリングのセッションは `sessions` 表、`pairing.txt`（未使用のペアリング URL。使ったら消す）、`push-keys.json`（Web Push の VAPID の鍵の組。`0600`。6.8 (12)）、`STOP`（緊急停止。中身は時刻）、`isolation.json`（8.3）、`requirements.md`（依存の一覧。オーナー向け）、会話欄のお知らせは `notices` 表、会話欄は `conversation_messages` 表（`thread` = 案件 id か `lobby`）、`logs/`（CLI の生の出力。画面に出ない）、`calls/`（呼び出しの結果のファイル `<callId>.json`。精算したら消す。9.4 (7)）。
 
 ### 9.3 案件フォルダ
 
