@@ -3787,7 +3787,7 @@ CI（ubuntu-latest は 24.04 で userns が制限されている）と、名前�
 
 **(7) macOS の実機での確認**
 
-`npm run verify:isolation`（`verify:sandbox` の `--model --probe --record`）を 1 本の手順にする。8.9 (9) の表に (4) の点検を本物の claude で 1 回流した結果を足し、`docs/verification/isolation-<platform>-<日付>.md` に書く。手順と置き場は [`docs/verification/isolation.md`](./verification/isolation.md)。macOS の実機は手元に無いので、オーナーが流した結果だけを載せる（推測で書かない）。
+`npm run verify:isolation`（`verify:sandbox` の `--model --probe --record`）を 1 本の手順にする。8.9 (9) の表に (4) の点検を本物の claude で 1 回流した結果を足し、`docs/verification/isolation-<OS>-<日付>.md`（`macos` / `linux`）に書き、記録の表のその OS の行も差し替える（`host/scripts/isolation-record.ts`）。手順と置き場は [`docs/verification/isolation.md`](./verification/isolation.md)。macOS の実機は手元に無いので、オーナーが流した結果だけを載せる（推測で書かない）。
 
 ---
 

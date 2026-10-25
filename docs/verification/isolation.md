@@ -20,7 +20,82 @@ npm run verify:isolation
 4. ホストを強制終了しても、作り手と孫のプロセスが残らない
 5. 隔離の点検（画面の「今すぐ確認」と同じ中身）: 作業場に届き、チェック項目の語が見えず、ホームが許した名前だけで、対照（チェック項目を開け直した起こし方）では語が見える
 
-費用は 3 と 5 で claude（haiku）を 5 回呼ぶ分（数円）。終わると `docs/verification/isolation-<OS>-<日付>.md` に表を書く（手元の絶対パスは `~` と `<LIBRETTO_HOME>` に伏せる）。そのファイルを commit して残す。
+費用は 3 と 5 で claude（haiku）を 5 回呼ぶ分（数円）。終わると `docs/verification/isolation-<OS>-<日付>.md`（`<OS>` は `macos` / `linux`）に表を書き、下の記録の表のその OS の行も差し替える（手元の絶対パスは `~` と `<LIBRETTO_HOME>` に伏せる）。この 2 つのファイルを commit して残す。
+
+## macOS で流す（オーナー向け）
+
+Mac のターミナル（「アプリケーション」→「ユーティリティ」→「ターミナル」）に、下の枠を上から 1 つずつ貼って Enter を押す。全部で 10〜20 分ほど。
+
+**1. 前提を確かめる**
+
+```bash
+node --version
+claude --version
+```
+
+- `node` は `v22.12.0` 以上。`command not found` か古いときは https://nodejs.org/ から LTS を入れ、ターミナルを開き直す
+- `claude` は `2.1.309` 以上。古いときは `claude update`。一度も使っていなければ `claude` と打ってログインし、`/exit` で抜ける（ログイン情報は Mac のキーチェーンに入る。それでよい）
+- `git` が無いと言われたら、出てきた画面で「インストール」を押す（Xcode のコマンドラインツール）
+
+**2. リポジトリを用意する**（初めてのとき）
+
+```bash
+cd ~ && git clone https://github.com/suisya-systems/libretto.git && cd libretto && npm ci --ignore-scripts
+```
+
+すでにあるときは:
+
+```bash
+cd ~/libretto && git checkout main && git pull && npm ci --ignore-scripts
+```
+
+**3. 流す**
+
+```bash
+npm run verify:isolation
+```
+
+- 行ごとに `PASS` か `FAIL` が出る。最後に `30/30 passed.`（数は版で変わる）・`recorded: …/isolation-macos-<日付>.md`・`updated: …/isolation.md` が出たら終わり
+- 途中で「キーチェーンへのアクセスを許可しますか」のような画面が出たら、押す前にその文面を写真かメモで残し、「許可」を押す（どの段で出たかが切り分けの手がかりになる）
+- `FAIL` が出ても最後まで流す。記録はそのまま残す（直さない）
+
+**4. 記録を渡す**
+
+どちらか 1 つ。
+
+- git が使えるなら: 枝を切って `docs/verification` の 2 つのファイルを commit し、GitHub に上げて PR を作る（本文に `Closes #23`）
+
+  ```bash
+  git checkout -b verify/isolation-macos && git add docs/verification && git commit -m "docs(libretto): macOS で隔離の確認を流した記録"
+  git push -u origin verify/isolation-macos
+  ```
+
+- git を使わないなら: 次の 1 行で中身を画面に出し、全部コピーして Issue #23 にコメントで貼る
+
+  ```bash
+  cat docs/verification/isolation-macos-*.md
+  ```
+
+記録に入るのは OS・Node・claude の版と、表（行の名前・PASS / FAIL・短い補足）だけ。ユーザー名を含む絶対パスは `~` に置き換わっている。貼る前に `/Users/` が残っていないか目で見る。
+
+## 記録の取り込み（受け取った側）
+
+1. PR で受け取ったら、`isolation-macos-<日付>.md` と記録の表の macOS の行が変わっていることを見る。Issue のコメントで受け取ったら、貼られた中身を `docs/verification/isolation-macos-<日付>.md` に置き、表の macOS の行を同じ形（Linux の行にならう）で埋める
+2. `grep -n '/Users/' docs/verification/isolation-macos-*.md` が何も出さないことを確かめる
+3. 全部 PASS なら #23 を閉じる。FAIL があれば、下の表で切り分けて Issue を分ける
+
+### FAIL の切り分け
+
+| FAIL の行（名前の頭） | どこの問題か |
+|---|---|
+| `isolation strong` | Seatbelt での起動（`srt` の自己点検。補足に理由が出る） |
+| `claude version >= minimum` | claude の版（`claude update`） |
+| `shell: … not readable`・`shell: write …`・`shell: versions unchanged …` | Seatbelt での起動（拒否の規則が効いていない） |
+| `shell: home shows only allowed entries`・`shell: ~/.claude …`・`probe: home shows only allowed entries` | ホームの扱い（補足に見えた名前が出る） |
+| `model+srt: work readable`・`probe: session ended normally`・`probe: reached the work folder` | ログイン情報（キーチェーン）。隔離の中の claude がログインできていない |
+| `model+srt: checks/…`・`model+rules: …`・`probe: checks token not visible` | Seatbelt での起動（モデルが外を読めた。いちばん重い） |
+| `model control: …`・`probe: control sees the token …` | 点検の対照（検出の経路。隔離の問題ではない） |
+| `crash: …` | 見張りの効き方（ホストを強制終了したあと子が残る） |
 
 ## 記録
 
