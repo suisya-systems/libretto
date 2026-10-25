@@ -986,15 +986,55 @@ export class Ledger {
     return (r?.revision as number | null) ?? undefined
   }
 
+  // 通知を止める時間帯に出さなかった印（6.8 (14)）
+  holdNotice(seq: number) {
+    this.#db.prepare('UPDATE notices SET held = 1 WHERE seq = ?').run(seq)
+  }
+
+  // 前の明けの 1 通が数えたところ（event_id の quiet:<seq>）より後の、出さなかったお知らせ
+  heldNotices(): Notice[] {
+    const rows = this.#db
+      .prepare(
+        `SELECT * FROM notices WHERE held = 1 AND seq > (
+           SELECT COALESCE(MAX(CAST(substr(event_id, 7) AS INTEGER)), 0) FROM notices WHERE event_id LIKE 'quiet:%')
+         ORDER BY seq`,
+      )
+      .all() as Row[]
+    return rows.map(toNotice)
+  }
+
+  // 候補の知らせ 1 通が数えた範囲（直前の候補の知らせの candidates:<seq> 〜 自分の candidates:<seq>）のうち、
+  // 今も出したままで可能性「低」でない候補の数（明けの 1 通。6.8 (14)）
+  candidatesStill(noticeSeq: number): number {
+    const upTo = `CAST(substr(event_id, 12) AS INTEGER)`
+    const r = this.#db
+      .prepare(
+        `WITH n AS (
+           SELECT ${upTo} AS upTo, (SELECT COALESCE(MAX(${upTo}), 0) FROM notices
+             WHERE event_id LIKE 'candidates:%' AND seq < ?) AS since
+           FROM notices WHERE seq = ? AND event_id LIKE 'candidates:%')
+         SELECT COUNT(*) AS count FROM n, candidate_events e JOIN candidates c ON c.candidate_id = e.candidate_id
+         WHERE e.type = 'presented' AND e.seq > n.since AND e.seq <= n.upTo
+           AND c.status = 'presented' AND COALESCE(c.confidence, '') <> '低'`,
+      )
+      .get(noticeSeq, noticeSeq) as { count: number }
+    return r.count
+  }
+
   // 送る時が来た pending を、お知らせと一緒に古い順に
-  dueDeliveries(at: Date): (Notice & { target: string; tries: number })[] {
+  dueDeliveries(at: Date): (Notice & { target: string; tries: number; held: boolean })[] {
     const rows = this.#db
       .prepare(
         `SELECT n.*, d.target, d.tries FROM notice_deliveries d JOIN notices n ON n.seq = d.notice_seq
          WHERE d.status = 'pending' AND d.next_at <= ? ORDER BY d.notice_seq, d.target`,
       )
       .all(jst(at)) as Row[]
-    return rows.map((r) => ({ ...toNotice(r), target: r.target as string, tries: r.tries as number }))
+    return rows.map((r) => ({
+      ...toNotice(r),
+      target: r.target as string,
+      tries: r.tries as number,
+      held: bool(r.held),
+    }))
   }
 
   setDelivery(

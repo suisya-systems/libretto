@@ -1,5 +1,5 @@
 // 設定の面（画面 7）。連携の節（Google と Slack。docs/implementation.md 6.4 (7)・6.6 (7)）、API キーの節（6.1.3 (6)。値は画面のどこにも出さない。設計書 D17）と
-// 自動検出の節（6.9 (10)）と動作環境の確認の節（8.10 (6)）、お知らせの節（6.8 (6)）
+// 自動検出の節（6.9 (10)）と動作環境の確認の節（8.10 (6)）、お知らせの節（6.8 (6)。通知を止める時間帯は 6.8 (14)）
 import {
   type ApiKeyStatus,
   ConnectionsView,
@@ -7,6 +7,8 @@ import {
   MaterialRef,
   NoticePrefs,
   PushStatus,
+  type QuietHours,
+  QuietHoursInput,
   Settings as SettingsSchema,
 } from '@libretto/shared/api'
 import { type ReactNode, useEffect, useId, useState } from 'react'
@@ -978,12 +980,14 @@ function NoticeSection({
   slackBot,
   dm,
   reloadDm,
+  children,
 }: {
   prefs: NoticePrefs
   reload: () => void
   slackBot?: ApiKeyStatus | undefined
   dm?: SlackDm | undefined
   reloadDm: () => void
+  children?: ReactNode
 }) {
   const [device, setDevice] = useState(deviceState)
   const push = useLoad('/api/devices/push', PushStatus)
@@ -1066,6 +1070,7 @@ function NoticeSection({
         ))}
         <p className="muted small">{W['settings.notices.kindsNote']}</p>
       </fieldset>
+      {children}
       {saved && (
         <p
           className={saved === 'saved' ? 'muted small' : 'note-alert small'}
@@ -1078,12 +1083,83 @@ function NoticeSection({
   )
 }
 
+// 通知を止める時間帯（6.8 (14)）。既定は止めない。始まりと終わりが同じ時刻は保存できない
+function QuietSection({ value, reload }: { value: QuietHours | null; reload: () => void }) {
+  const [from, setFrom] = useState(value?.from ?? '')
+  const [to, setTo] = useState(value?.to ?? '')
+  useEffect(() => {
+    setFrom(value?.from ?? '')
+    setTo(value?.to ?? '')
+  }, [value])
+  const [busy, setBusy] = useState(false)
+  const [saved, setSaved] = useState<'saved' | 'failed'>()
+  const save = async (quietHours: QuietHours | null) => {
+    setBusy(true)
+    setSaved(undefined)
+    let ok = false
+    try {
+      const res = await fetch('/api/settings/quiet-hours', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json', accept: 'application/json' },
+        body: JSON.stringify({ quietHours }),
+      })
+      ok = res.ok
+    } catch {}
+    setBusy(false)
+    setSaved(ok ? 'saved' : 'failed')
+    if (ok) reload()
+  }
+  return (
+    <fieldset className="revise">
+      <legend className="strong small">{W['settings.notices.quiet']}</legend>
+      <p className="muted small">{W['settings.notices.quietNote']}</p>
+      <p className="small" role="status">
+        {value ? w('settings.notices.quietNow', value) : W['settings.notices.quietNone']}
+      </p>
+      <div className="row-gap">
+        <label className="row-gap">
+          {W['settings.notices.quietFrom']}
+          <input type="time" value={from} disabled={busy} onChange={(e) => setFrom(e.target.value)} />
+        </label>
+        <label className="row-gap">
+          {W['settings.notices.quietTo']}
+          <input type="time" value={to} disabled={busy} onChange={(e) => setTo(e.target.value)} />
+        </label>
+      </div>
+      <div className="key-actions">
+        <button
+          type="button"
+          className="btn btn-primary btn-sm"
+          disabled={busy || !from || !to || from === to}
+          onClick={() => void save({ from, to })}
+        >
+          {W['settings.notices.quietSave']}
+        </button>
+        {value && (
+          <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={() => void save(null)}>
+            {W['settings.notices.quietOff']}
+          </button>
+        )}
+      </div>
+      {saved && (
+        <p
+          className={saved === 'saved' ? 'muted small' : 'note-alert small'}
+          role={saved === 'saved' ? 'status' : 'alert'}
+        >
+          {W[`settings.notices.${saved}`]}
+        </p>
+      )}
+    </fieldset>
+  )
+}
+
 export function Settings() {
   const keys = useLoad('/api/settings/keys', Keys, (s) => s.event === 'settings.changed')
   const env = useLoad('/api/connections', ConnectionsView, (s) => s.event === 'connections.changed')
   const voice = useLoad('/api/settings/voice-samples', Samples, (s) => s.event === 'settings.changed')
   const infer = useLoad('/api/settings/inference', InferenceSettings, (s) => s.event === 'settings.changed')
   const notices = useLoad('/api/settings/notices', NoticePrefs, (s) => s.event === 'settings.changed')
+  const quiet = useLoad('/api/settings/quiet-hours', QuietHoursInput, (s) => s.event === 'settings.changed')
   return (
     <section className="face">
       <h1 className="face-title">{W['nav.settings']}</h1>
@@ -1132,7 +1208,9 @@ export function Settings() {
             env.reload()
             keys.reload()
           }}
-        />
+        >
+          {quiet.data && <QuietSection value={quiet.data.quietHours} reload={quiet.reload} />}
+        </NoticeSection>
       )}
       {voice.data && <VoiceSection samples={voice.data.samples} reload={voice.reload} />}
       {env.data && <EnvSection v={env.data.isolation} tools={env.data.tools} reload={env.reload} />}
