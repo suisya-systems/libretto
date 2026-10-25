@@ -390,6 +390,21 @@ describe('Slack の推測（6.9 (5)）', () => {
     expect(sl.seen.some((x) => x.method === 'conversations.history' && x.params.channel === 'C3')).toBe(false)
   })
 
+  it('メンションの投稿を読めない（履歴の権限が無い）ときは判定を残さず、次の回にもう一度', async () => {
+    await setup({ slack: true })
+    const sl = s as NonNullable<typeof s>
+    const ts = (Date.parse('2026-10-24T01:00:00Z') / 1000).toFixed(6)
+    sl.state.mentions = [{ channel: 'C1', ts }]
+    sl.state.fail.set('conversations.replies', { error: 'missing_scope', needed: 'channels:history' })
+    await server.poller.run()
+    expect(classifyCalls()).toHaveLength(0)
+    expect(ledger.getCandidate(`slack:C1:${ts}`)).toBeUndefined()
+    sl.state.fail.delete('conversations.replies')
+    sl.state.history.set('C1', [{ ts, user: 'U0ALICE', text: `<@${ME}> 資料をお願いします` }])
+    await server.poller.run()
+    expect(ledger.getCandidate(`slack:C1:${ts}`)).toMatchObject({ origin: '推測' })
+  })
+
   it('設定の面のチャンネルの候補（DM は出さない）', async () => {
     await setup({ slack: true })
     const r = (await (await get('/api/connections/slack/channels')).json()) as { channels: { id: string }[] }

@@ -309,6 +309,16 @@ describe('自動検出の候補（6.9 (7)(10)）', () => {
     r.done()
   })
 
+  it('まとめて見送るは 200 件ずつ送る', async () => {
+    const low = Array.from({ length: 201 }, (_, i) => inferred(`gmail:l${i}`, '低'))
+    home = view({ candidates: { signal: [], meeting: [], inferred: { high: [], mid: [], low } } })
+    const r = await render()
+    await r.click(r.button(W['home.lowDismiss']))
+    await r.click(r.button(W['home.lowDismiss'], document.querySelector('.dialog') as HTMLElement))
+    expect(sent.map((x) => (x.body as { ids: string[] }).ids.length)).toEqual([200, 1])
+    r.done()
+  })
+
   it('除外しないで閉じる', async () => {
     answer = () =>
       new Response(JSON.stringify({ askSuppress: { kind: 'channel', value: 'C1', label: '#general', count: 3 } }))

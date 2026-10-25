@@ -267,7 +267,9 @@ export function Candidates({ v, stopped, reload }: { v: HomeView; stopped: boole
             triggerClass="btn btn-quiet btn-sm"
             onConfirm={async () => {
               setBulk(true)
-              await post('/api/candidates/dismiss-low', { ids: low.map((c) => c.id) })
+              // 1 回に送れるのは 200 件まで（DismissLow）
+              for (let i = 0; i < low.length; i += 200)
+                await post('/api/candidates/dismiss-low', { ids: low.slice(i, i + 200).map((c) => c.id) })
               setBulk(false)
               reload()
             }}
