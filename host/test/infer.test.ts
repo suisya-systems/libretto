@@ -156,7 +156,7 @@ async function setup(o: { slack?: boolean; jev?: boolean; monthCapYen?: number; 
     runsWaitMs: 50,
   })
   const { url } = server.issuePairing('テスト')
-  const res = await server.app.request(new URL(url).pathname)
+  const res = await server.app.request(new URL(url).pathname, { method: 'POST' })
   cookie = (res.headers.get('set-cookie') ?? '').split(';')[0] as string
   expect(cookie.startsWith(`${COOKIE}=`)).toBe(true)
   const start = await send('POST', '/api/connections/google/start')

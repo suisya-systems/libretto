@@ -171,6 +171,19 @@ Slack の DM は、2 分のあいだに出たお知らせの 1 行を改行で�
 | `moved` | 依頼の状態が変わったので、直す内容を受け付けられませんでした |
 | `candidateMoved` | 候補の状態が変わったので、直す内容を受け付けられませんでした |
 
+**追加用のアドレスを開いたときの確かめの画面（`host/src/server/app.ts` の `PAIR`。実装設計書 6.12 (7)）**
+
+開いただけでは追加せず、「この端末を追加する」を押したときに追加する。端末の名前は「別の端末を追加する」で入れたもの（無ければ `pairConfirm.unnamed`）、期限は日本時間の時刻。
+
+| キー | 文 |
+|---|---|
+| `pairConfirm.title` | この端末を追加しますか |
+| `pairConfirm.name` | 追加する端末: {label} |
+| `pairConfirm.unnamed` | 名前のない端末 |
+| `pairConfirm.expires` | {at} まで使えます |
+| `pairConfirm.browser` | いつも使うブラウザで開いてから押してください。チャットのアプリの中で開いたときは、アドレスをコピーしてブラウザに貼ってください。 |
+| `pairConfirm.add` | この端末を追加する |
+
 ### 画面が `wording.ts` で引くラベル
 
 正本は `page/src/wording.ts`。`{n}` などは画面が数や日付を入れるところ。

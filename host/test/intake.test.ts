@@ -76,7 +76,7 @@ async function setup(o: { connected?: boolean; script?: ScriptEntry[]; configure
     runsWaitMs: 50,
   })
   const { url } = server.issuePairing('テスト')
-  const res = await server.app.request(new URL(url).pathname)
+  const res = await server.app.request(new URL(url).pathname, { method: 'POST' })
   cookie = (res.headers.get('set-cookie') ?? '').split(';')[0] as string
   expect(cookie.startsWith(`${COOKIE}=`)).toBe(true)
   if (o.connected !== false && o.configured !== false) await connect()
