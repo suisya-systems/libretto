@@ -458,6 +458,23 @@ export const STATES: Record<string, State> = {
     selector: '.cand',
     path: () => '/',
   },
+  // ホーム: お知らせ欄の 1 行は面へのリンク（6.8 (3)）。会話で出した依頼の「依頼内容がまとまりました」が入っている
+  'home-notice': {
+    script: entrance(),
+    expect: (v) => v.state === '入口待ち',
+    mark: W['home.noticeHeading'],
+    selector: '.notices a',
+    path: () => '/',
+    sameFirst390: true, // お知らせ欄は 390 の 1 画面目より下にある
+  },
+  // 設定: お知らせの節（この端末の状態と、出来事ごとの入り切り。6.8 (6)）
+  'settings-notices': {
+    script: entrance(),
+    expect: (v) => v.state === '入口待ち',
+    mark: W['settings.notices.kinds'],
+    path: () => '/settings',
+    sameFirst390: true, // お知らせの節は 390 の 1 画面目より下にある
+  },
   // 設定: Google と連携済み（6.4 (7)）
   'settings-google': {
     script: entrance(),

@@ -76,6 +76,24 @@ describe('ホーム', () => {
     p.done()
   })
 
+  it('お知らせ欄の 1 行は、その知らせの面へのリンク（6.8 (3)）', async () => {
+    const notice = {
+      id: 3,
+      at: '2026-10-25T09:30:00.000+09:00',
+      caseId: 'c1',
+      kind: 'your_turn',
+      text: '『週報』を保存する前の確認です。保存先と公開範囲を確かめてください',
+      path: '/cases/c1/deliver',
+      outside: true,
+    } as const
+    replies = { '/api/host': json(host), '/api/home': json({ ...empty, notices: [notice] }) }
+    const p = await render()
+    const a = [...p.el.querySelectorAll('.notices a')]
+    expect(a.map((x) => [x.getAttribute('href'), x.textContent])).toEqual([['/cases/c1/deliver', notice.text]])
+    expect(p.el.querySelector('.notices time')?.textContent).toBe('09:30')
+    p.done()
+  })
+
   it('つながっていない端末: ナビも空の一覧も出さず、つなぎ方を出す', async () => {
     replies = { '/api/host': json({ reason: 'not_paired' }, 401), '/api/home': json({ reason: 'not_paired' }, 401) }
     const p = await render()

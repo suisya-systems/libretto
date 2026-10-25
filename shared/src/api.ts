@@ -351,13 +351,29 @@ export const ActionResult = z.object({
 })
 export const ActionRejected = z.object({ reason: z.enum(['stale', 'invalid_transition']), current: CaseCard })
 
+// お知らせの 1 行（6.8 (1)(3)）。id は notices.seq、path は押すと開く面。outside は画面の外へも出すか（本人の操作でなく、本人が切っていない）
+export const NoticeKind = z.enum(['your_turn', 'stopped', 'done', 'auto_started', 'candidates', 'started', 'info'])
+export type NoticeKind = z.infer<typeof NoticeKind>
 export const Notice = z.object({
+  id: z.number().int(),
   at: z.string(),
   caseId: z.string().optional(),
   text: z.string(),
-  kind: z.enum(['info', 'your_turn', 'stopped']),
+  kind: NoticeKind,
+  path: z.string().startsWith('/'),
+  outside: z.boolean(),
 })
 export type Notice = z.infer<typeof Notice>
+// 出来事ごとに画面の外へ出すか（設定の「お知らせ」。6.8 (1)(6)）。GET / PUT /api/settings/notices
+export const NoticePrefs = z.object({
+  your_turn: z.boolean(),
+  stopped: z.boolean(),
+  done: z.boolean(),
+  auto_started: z.boolean(),
+  candidates: z.boolean(),
+  started: z.boolean(),
+})
+export type NoticePrefs = z.infer<typeof NoticePrefs>
 
 // 止めたのは本人、保存できないのはホスト。別の欄（5.7 (8)）。signIn は Claude のログインし直し待ち（6.2.3 (7)）
 // isolation は作り手の隔離（8.9 (5)）。入口・承認の帯と設定の面が読む（8.10 (6)）

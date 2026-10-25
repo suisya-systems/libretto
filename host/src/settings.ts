@@ -1,9 +1,9 @@
-// settings.json（docs/implementation.md 9.2）。今は「あなたの文体の見本」（6.3.2 (10)）と自動検出（6.9 (10)）の欄だけ。
+// settings.json（docs/implementation.md 9.2）。今は「あなたの文体の見本」（6.3.2 (10)）と自動検出（6.9 (10)）と、お知らせの出来事ごとの入り切り（6.8 (6)）。
 // 置き換えで書き、前の版を settings.prev.json に残す。読めない・欄が無いときは既定
 import { randomBytes } from 'node:crypto'
 import { copyFileSync, existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { InferenceSettings, MaterialRef } from '@libretto/shared/api'
+import { InferenceSettings, MaterialRef, NoticePrefs } from '@libretto/shared/api'
 import { z } from 'zod'
 
 // 自動検出の既定は設計書 4.2.2・10.3 のとおり（Gmail は直近 7 日、Slack はチャンネル指定なし＋メンション、1 日 300 件）
@@ -14,11 +14,21 @@ export const INFERENCE_DEFAULTS: InferenceSettings = {
   showLow: true,
   useJev: true,
 }
+// お知らせの既定は 6.8 (1) の表（下書きに取りかかったは出さない）
+export const NOTICE_DEFAULTS: NoticePrefs = {
+  your_turn: true,
+  stopped: true,
+  done: true,
+  auto_started: true,
+  candidates: true,
+  started: false,
+}
 // 欄ごとに読めなければ既定（1 つの欄が壊れても、ほかの欄を既定に戻さない）
 const File = z
   .object({
     voiceSamples: z.array(MaterialRef).catch([]).default([]),
     inference: InferenceSettings.catch(INFERENCE_DEFAULTS).default(INFERENCE_DEFAULTS),
+    notices: NoticePrefs.catch(NOTICE_DEFAULTS).default(NOTICE_DEFAULTS),
   })
   .loose()
 type File = z.infer<typeof File>
@@ -26,7 +36,7 @@ const pathOf = (home: string) => join(home, 'settings.json')
 
 function read(home: string): File {
   const p = pathOf(home)
-  const none = { voiceSamples: [], inference: INFERENCE_DEFAULTS }
+  const none = { voiceSamples: [], inference: INFERENCE_DEFAULTS, notices: NOTICE_DEFAULTS }
   if (!existsSync(p)) return none
   try {
     const r = File.safeParse(JSON.parse(readFileSync(p, 'utf-8')))
@@ -49,6 +59,11 @@ export const inferenceSettings = (home: string) => read(home).inference
 export function saveInference(home: string, inference: InferenceSettings) {
   write(home, { ...read(home), inference })
   return inference
+}
+export const noticePrefs = (home: string) => read(home).notices
+export function saveNoticePrefs(home: string, notices: NoticePrefs) {
+  write(home, { ...read(home), notices })
+  return notices
 }
 
 // PUT の形。最大 5 件、題は 1〜80 字、URL は http / https

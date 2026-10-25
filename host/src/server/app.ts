@@ -24,6 +24,7 @@ import {
   MaterialsPost,
   type Mode,
   mixesTables,
+  NoticePrefs,
   SuppressionInput,
 } from '@libretto/shared/api'
 import type { Intake } from '@libretto/shared/ledger'
@@ -63,7 +64,16 @@ import { createEntrance, currentSet, entranceView, writeApproval, writeAtomic } 
 import { currentMarks, OUTPUT_FILES, reviewsOf } from '../roles/judge.ts'
 import { draftNames, pastedCount, pastedName, versionDir, versionsOf } from '../roles/maker.ts'
 import { createRuns, Stopped } from '../runs.ts'
-import { inferenceSettings, saveInference, saveVoiceSamples, VoiceSamplesInput, voiceSamples } from '../settings.ts'
+import {
+  inferenceSettings,
+  noticePrefs,
+  saveInference,
+  saveNoticePrefs,
+  saveVoiceSamples,
+  VoiceSamplesInput,
+  voiceSamples,
+} from '../settings.ts'
+import { createNotices, type Sender } from './notices.ts'
 import { createHub, type SseMessage } from './sse.ts'
 import { createStop, isStorageError } from './stop.ts'
 import { caseView, DEFAULTS, homeView, toCard } from './views.ts'
@@ -97,6 +107,7 @@ export type ServerOptions = {
   slack?: Slack // Slack の連携（6.6 (2)）。無ければ設定の画面で入れたトークンで
   slackEmoji?: string // 取り込みの目印（設定の Issue までは既定の memo）
   tools?: Tools // 起動時の事前点検で見つけた LibreOffice と poppler（6.10 (5)）
+  senders?: Record<string, Sender> // お知らせの画面の外の送り手（6.8 (5)。Web Push・Slack の DM は後の Issue）
 }
 
 export function createServer(o: ServerOptions) {
@@ -105,6 +116,9 @@ export function createServer(o: ServerOptions) {
   const { home, ledger } = o
   const status: HostStatus = { stopped: false, storageOk: true, signIn: false, isolation: o.isolation ?? 'strong' }
   const hub = createHub()
+  // お知らせ（6.8）。出来事ごとの入り切りは書くときに settings から。画面の外の送り先は後の Issue（今は画面の通知 B だけ）
+  ledger.noticeRoute = { on: (kind) => kind !== 'info' && noticePrefs(home)[kind], targets: () => [] }
+  const notices = createNotices({ ledger, hub, ...(o.senders && { senders: o.senders }), now, log })
   const changed = () => hub.emit('host.changed', { ...status })
   const storage = (written: boolean) => {
     const ok = written && !stop.unsaved()
@@ -116,6 +130,7 @@ export function createServer(o: ServerOptions) {
     const c = ledger.getCase(caseId)
     if (!c) return
     hub.emit('case.changed', { caseId, state: c.state, turn: c.turn })
+    void notices.flush()
     // 閉じたら、動いている仕事の終わりを待ってから資料と出典の本文を消す（6.3.1 (10)）。待ち切れなければ次の起動で
     if (CLOSED.includes(c.state))
       void runs.abort(caseId).then((left) => {
@@ -174,7 +189,10 @@ export function createServer(o: ServerOptions) {
   const choices = () => destChoices(ready())
   // 保存先を変える・足すときの選択肢。表の依頼は表だけ、文書の依頼は表のほかだけ（6.10 (1)）
   const caseChoices = (now: readonly DeliveryTarget[]) => choices().filter((k) => !mixesTables([...now, TARGET[k]]))
-  const candidatesChanged = () => hub.emit('candidates.changed', {})
+  const candidatesChanged = () => {
+    hub.emit('candidates.changed', {})
+    void notices.flush() // 拾い上げの回の終わりの 1 通（6.8 (4)）
+  }
   const poller = createPoller({
     home,
     ledger,
@@ -716,11 +734,12 @@ export function createServer(o: ServerOptions) {
       if (w === 'invalid') return c.json({ reason: 'invalid' }, 400)
     }
     // 承認する組の依頼書に「渡してほしいもの」があれば本人の番の材料待ち（T8。6.2.4 (2)）
-    // 完成稿の承認は今の版の印の一覧と照らす（6.3.1 (9)）
+    // 完成稿の承認は今の版の印の一覧と照らす（6.3.1 (9)）。最終版に戻すときはお知らせの要確認の数に使う（6.8 (3)）
     const ctx =
       action.type === 'entrance.approve' && rec0
         ? { materialsPending: !!currentSet(home, ledger, caseId)?.brief.wanted.length }
-        : action.type === 'approval.ok' && rec0
+        : (action.type === 'approval.ok' || action.type === 'delivery.decline' || action.type === 'delivery.change') &&
+            rec0
           ? { marks: currentMarks(home, rec0) }
           : {}
     // revision は先に比べない。eventId → expectedRevision の順は transition が持つ（5.3.1・5.7 (5)）
@@ -914,6 +933,17 @@ export function createServer(o: ServerOptions) {
     return c.json({ samples: r })
   })
 
+  // お知らせの出来事ごとの入り切り（6.8 (6)）。GET /api/settings ができたらその中に移す
+  app.get('/api/settings/notices', (c) => c.json(noticePrefs(home)))
+  app.put('/api/settings/notices', async (c) => {
+    const body = NoticePrefs.safeParse(await c.req.json().catch(() => undefined))
+    if (!body.success) return c.json({ reason: 'invalid' }, 400)
+    const r = writing(c, () => saveNoticePrefs(home, body.data))
+    if (r instanceof Response) return r
+    hub.emit('settings.changed', {})
+    return c.json(r)
+  })
+
   app.post('/api/devices', async (c) => {
     const body = DeviceInput.safeParse(await c.req.json().catch(() => undefined))
     if (!body.success) return c.json({ reason: 'invalid' }, 400)
@@ -992,6 +1022,7 @@ export function createServer(o: ServerOptions) {
     checkIsolation,
     poller,
     google,
+    notices,
   }
 }
 

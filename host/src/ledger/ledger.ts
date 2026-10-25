@@ -5,6 +5,7 @@ import {
   type Choice,
   ConversationMessage,
   Notice,
+  type NoticeKind,
   type Turn,
 } from '@libretto/shared/api'
 import {
@@ -81,6 +82,14 @@ export type Hold = Pick<
 >
 // daily は系統ごとの 1 日（JST）の呼び出しの数の上限（hold 行の数。docs/implementation.md 7.6 (4)）
 export type Reserve = Hold & { caseCapYen: number | null; monthCapYen: number | null; daily?: number }
+// お知らせ 1 行（6.8 (5)）。outside は noticeFor の決めた「画面の外へ出しうる」で、本人の入り切りは appendNotice が掛ける
+export type NewNotice = Pick<Notice, 'kind' | 'text' | 'path' | 'outside'> & {
+  eventId: string
+  caseId?: string
+  revision?: number
+}
+// 送り先は push:<sessionId> / slack（6.8 (5)）。足すのは後の Issue（Web Push・Slack の DM）
+export type NoticeRoute = { on: (kind: NoticeKind) => boolean; targets: () => string[] }
 export type Charge = Pick<Extract<CostRecord, { type: 'charge' }>, 'callId' | 'yen' | 'tokensIn' | 'tokensOut'>
 
 // 生の行（snake_case・0/1・JSON 文字列・null）
@@ -107,6 +116,19 @@ function bool(v: unknown) {
 }
 // 書く前に読み出し形で検査する（読めない費用の行を書かない。NaN・Infinity・小数のトークン数も落ちる）
 const checkCost = (r: Row) => CostRecord.parse({ ...r, seq: 0, at: '' })
+
+const toNotice = (r: Row) =>
+  Notice.parse(
+    clean({
+      id: r.seq,
+      at: r.at,
+      caseId: r.case_id,
+      text: r.text,
+      kind: r.kind,
+      path: r.path,
+      outside: bool(r.outside),
+    }),
+  )
 
 const toCase = (r: Row) =>
   CaseRecord.parse(
@@ -922,9 +944,90 @@ export class Ledger {
 
   // --- notices
 
+  // 画面の外へ出すかの本人の入り切りと送り先（6.8 (1)(5)）。settings と端末の登録を読むのはサーバーで、起動のときに差し込む
+  noticeRoute: NoticeRoute = { on: (kind) => kind !== 'started', targets: () => [] }
+
+  // 遷移・拾い上げの回と同じトランザクションの中で呼ぶ。outside のときだけ送り先ごとに pending を書く
+  appendNotice(n: NewNotice): number {
+    return this.transaction(() => {
+      const at = jst(this.#now())
+      const outside = n.outside && this.noticeRoute.on(n.kind)
+      const seq = this.#db
+        .prepare(
+          'INSERT INTO notices (event_id, case_id, kind, text, path, outside, revision, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        )
+        .run(n.eventId, n.caseId ?? null, n.kind, n.text, n.path, outside ? 1 : 0, n.revision ?? null, at)
+        .lastInsertRowid as number
+      if (outside)
+        for (const target of this.noticeRoute.targets())
+          this.#db
+            .prepare(`INSERT INTO notice_deliveries (notice_seq, target, status, next_at) VALUES (?, ?, 'pending', ?)`)
+            .run(seq, target, at)
+      return seq
+    })
+  }
+
   listNotices(limit: number): Notice[] {
     const rows = this.#db.prepare('SELECT * FROM notices ORDER BY seq DESC LIMIT ?').all(limit) as Row[]
-    return rows.map((r) => Notice.parse(clean({ at: r.at, caseId: r.case_id, text: r.text, kind: r.kind })))
+    return rows.map(toNotice)
+  }
+
+  noticesAfter(seq: number): Notice[] {
+    return (this.#db.prepare('SELECT * FROM notices WHERE seq > ? ORDER BY seq').all(seq) as Row[]).map(toNotice)
+  }
+
+  lastNoticeSeq(): number {
+    return (this.#db.prepare('SELECT COALESCE(MAX(seq), 0) AS n FROM notices').get() as { n: number }).n
+  }
+
+  // 書いた時点の案件の revision（確認待ちの送る前の確かめ直し。6.8 (4)）
+  noticeRevision(seq: number): number | undefined {
+    const r = this.#db.prepare('SELECT revision FROM notices WHERE seq = ?').get(seq) as Row | undefined
+    return (r?.revision as number | null) ?? undefined
+  }
+
+  // 送る時が来た pending を、お知らせと一緒に古い順に
+  dueDeliveries(at: Date): (Notice & { target: string; tries: number })[] {
+    const rows = this.#db
+      .prepare(
+        `SELECT n.*, d.target, d.tries FROM notice_deliveries d JOIN notices n ON n.seq = d.notice_seq
+         WHERE d.status = 'pending' AND d.next_at <= ? ORDER BY d.notice_seq, d.target`,
+      )
+      .all(jst(at)) as Row[]
+    return rows.map((r) => ({ ...toNotice(r), target: r.target as string, tries: r.tries as number }))
+  }
+
+  setDelivery(
+    seq: number,
+    target: string,
+    d: { status: 'pending' | 'sent' | 'dropped'; tries: number; nextAt?: Date },
+  ) {
+    this.#db
+      .prepare(
+        'UPDATE notice_deliveries SET status = ?, tries = ?, next_at = COALESCE(?, next_at) WHERE notice_seq = ? AND target = ?',
+      )
+      .run(d.status, d.tries, d.nextAt ? jst(d.nextAt) : null, seq, target)
+  }
+
+  // 候補の知らせの数え方（6.8 (4)）。前の候補の知らせが数えたところ（event_id の candidates:<seq>）より後に出て、まだ出したままで、
+  // 可能性「低」でない候補。落ちた回・止めた回の分も次の回が数える
+  newCandidates(): { upTo: number; count: number } {
+    const from = (
+      this.#db
+        .prepare(
+          `SELECT COALESCE(MAX(CAST(substr(event_id, 12) AS INTEGER)), 0) AS n FROM notices WHERE event_id LIKE 'candidates:%'`,
+        )
+        .get() as { n: number }
+    ).n
+    const r = this.#db
+      .prepare(
+        `SELECT COALESCE(MAX(e.seq), ?) AS upTo,
+           COUNT(CASE WHEN c.status = 'presented' AND COALESCE(c.confidence, '') <> '低' THEN 1 END) AS count
+         FROM candidate_events e JOIN candidates c ON c.candidate_id = e.candidate_id
+         WHERE e.type = 'presented' AND e.seq > ?`,
+      )
+      .get(from, from) as { upTo: number; count: number }
+    return r
   }
 
   // --- costs

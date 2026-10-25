@@ -57,6 +57,12 @@ export function connectEvents(url = '/api/events') {
   }
 }
 
+// 面に結び付かない受け手（ブラウザの通知。6.8 (2)）。戻り値で外す
+export function listen(l: Listener) {
+  listeners.add(l)
+  return () => listeners.delete(l)
+}
+
 export function useOffline() {
   const [offline, setOffline] = useState(false)
   useEffect(() => {

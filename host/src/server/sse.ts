@@ -15,10 +15,11 @@ export function createHub(keep = 500) {
   const subs = new Set<(m: SseMessage) => void>()
 
   return {
-    emit<E extends SseEvent>(event: E, data: z.infer<(typeof SseData)[E]>) {
+    // replay: false は送り直さない合図（つなぎ直した後に古い知らせでブラウザの通知を出さない。6.8 (2)）
+    emit<E extends SseEvent>(event: E, data: z.infer<(typeof SseData)[E]>, { replay = true } = {}) {
       seq += 1
       const m = { id: `${boot}:${seq}`, n: seq, event, data: JSON.stringify(data) }
-      kept.push(m)
+      if (replay) kept.push(m)
       if (kept.length > keep) kept.shift()
       for (const s of subs) s(m)
     },

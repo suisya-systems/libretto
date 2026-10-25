@@ -1,15 +1,17 @@
 // 設定の面（画面 7）。連携の節（Google と Slack。docs/implementation.md 6.4 (7)・6.6 (7)）、API キーの節（6.1.3 (6)。値は画面のどこにも出さない。設計書 D17）と
-// 自動検出の節（6.9 (10)）と動作環境の確認の節（8.10 (6)）
+// 自動検出の節（6.9 (10)）と動作環境の確認の節（8.10 (6)）、お知らせの節（6.8 (6)）
 import {
   type ApiKeyStatus,
   ConnectionsView,
   InferenceSettings,
   MaterialRef,
+  NoticePrefs,
   Settings as SettingsSchema,
 } from '@libretto/shared/api'
 import { type ReactNode, useEffect, useId, useState } from 'react'
 import { z } from 'zod'
 import { send, useLoad } from '../load.ts'
+import { type DeviceState, deviceState, enable } from '../notify.ts'
 import { Confirm } from '../parts/Dialog.tsx'
 import { W, type WKey, w } from '../wording.ts'
 import { ProblemView } from './Pending.tsx'
@@ -930,11 +932,96 @@ function InferSection({
   )
 }
 
+// お知らせの節（6.8 (6)(7)）。この端末の状態と、出来事ごとに画面の外へ出すか
+const DEVICE: Record<DeviceState, [string, WKey]> = {
+  on: ['b-done', 'settings.notices.on'],
+  off: ['b-off', 'settings.notices.off'],
+  denied: ['b-off', 'settings.notices.off'],
+  insecure: ['b-alert', 'settings.notices.unavailable'],
+  unavailable: ['b-alert', 'settings.notices.unavailable'],
+}
+const KINDS = NoticePrefs.keyof().options
+
+function NoticeSection({ prefs: loaded, reload }: { prefs: NoticePrefs; reload: () => void }) {
+  const [device, setDevice] = useState(deviceState)
+  // 保存の応答を待たずに続けて押しても、前の入り切りから送る
+  const [prefs, setPrefs] = useState(loaded)
+  useEffect(() => setPrefs(loaded), [loaded])
+  const [busy, setBusy] = useState(false)
+  const [saved, setSaved] = useState<'saved' | 'failed'>()
+  const [badge, label] = DEVICE[device]
+  const toggle = async (k: (typeof KINDS)[number]) => {
+    const next = { ...prefs, [k]: !prefs[k] }
+    setBusy(true)
+    setSaved(undefined)
+    let ok = false
+    try {
+      const res = await fetch('/api/settings/notices', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json', accept: 'application/json' },
+        body: JSON.stringify(next),
+      })
+      ok = res.ok
+    } catch {}
+    setBusy(false)
+    setSaved(ok ? 'saved' : 'failed')
+    if (ok) {
+      setPrefs(next)
+      reload()
+    }
+  }
+  return (
+    <section aria-labelledby="h-notices" className="card pad">
+      <h2 id="h-notices">{W['settings.noticesHeading']}</h2>
+      <p className="muted small">{W['settings.notices.use']}</p>
+      <ul className="key-list">
+        <li className="key-row">
+          <div className="key-head">
+            <div className="grow">
+              <h3 className="key-label">{W['settings.notices.device']}</h3>
+              <p className="muted small">{W['settings.notices.openOnly']}</p>
+            </div>
+            <span className={`badge ${badge} key-status`}>{W[label]}</span>
+          </div>
+          {device === 'denied' && <p className="note-warn small">{W['settings.notices.denied']}</p>}
+          {device === 'insecure' && <p className="note-warn small">{W['settings.notices.insecure']}</p>}
+          {(device === 'off' || device === 'denied') && (
+            <div className="key-actions">
+              <button type="button" className="btn btn-primary btn-sm" onClick={() => void enable().then(setDevice)}>
+                {W['settings.notices.enable']}
+              </button>
+            </div>
+          )}
+        </li>
+      </ul>
+      <fieldset className="revise">
+        <legend className="strong small">{W['settings.notices.kinds']}</legend>
+        {KINDS.map((k) => (
+          <label key={k} className="row-gap">
+            <input type="checkbox" checked={prefs[k]} disabled={busy} onChange={() => void toggle(k)} />
+            {W[`settings.notices.kind.${k}`]}
+          </label>
+        ))}
+        <p className="muted small">{W['settings.notices.kindsNote']}</p>
+      </fieldset>
+      {saved && (
+        <p
+          className={saved === 'saved' ? 'muted small' : 'note-alert small'}
+          role={saved === 'saved' ? 'status' : 'alert'}
+        >
+          {W[`settings.notices.${saved}`]}
+        </p>
+      )}
+    </section>
+  )
+}
+
 export function Settings() {
   const keys = useLoad('/api/settings/keys', Keys, (s) => s.event === 'settings.changed')
   const env = useLoad('/api/connections', ConnectionsView, (s) => s.event === 'connections.changed')
   const voice = useLoad('/api/settings/voice-samples', Samples, (s) => s.event === 'settings.changed')
   const infer = useLoad('/api/settings/inference', InferenceSettings, (s) => s.event === 'settings.changed')
+  const notices = useLoad('/api/settings/notices', NoticePrefs, (s) => s.event === 'settings.changed')
   return (
     <section className="face">
       <h1 className="face-title">{W['nav.settings']}</h1>
@@ -973,6 +1060,7 @@ export function Settings() {
           }}
         />
       )}
+      {notices.data && <NoticeSection prefs={notices.data} reload={notices.reload} />}
       {voice.data && <VoiceSection samples={voice.data.samples} reload={voice.reload} />}
       {env.data && <EnvSection v={env.data.isolation} tools={env.data.tools} reload={env.reload} />}
     </section>
