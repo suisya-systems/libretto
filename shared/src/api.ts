@@ -360,9 +360,10 @@ export const ConnectionsView = z.object({
     running: z.boolean(),
     last: z.object({ at: z.string(), verdict: z.enum(['hidden', 'visible', 'unknown']) }).optional(),
   }),
-  // configured は .env.local に OAuth クライアントの 2 つがあるか。labelFound は最後の取り込みで見つかったか
+  // configured は設定の画面で OAuth クライアントを入れたか（clientSavedAt はその日時。6.4 (10)）。labelFound は最後の取り込みで見つかったか
   google: z.object({
     configured: z.boolean(),
+    clientSavedAt: z.string().optional(),
     state: z.enum(['none', 'connected', 'expired']),
     email: z.string().optional(),
     label: z.string(),
@@ -375,7 +376,7 @@ export const ConnectionsView = z.object({
     meetLastAt: z.string().optional(),
     meetProblem: z.enum(['rate_limited', 'network', 'api_disabled']).optional(),
   }),
-  // Slack（6.6 (7)）。configured は .env.local にトークンがあるか。missingScopes は足りない権限の名前
+  // Slack（6.6 (7)）。configured は設定の画面でトークンを入れたか。missingScopes は足りない権限の名前
   slack: z.object({
     configured: z.boolean(),
     state: z.enum(['none', 'connected', 'expired']),
@@ -534,3 +535,6 @@ export const ApiKeyInput = z.object({
     .min(8)
     .regex(/^[\x21-\x7e]+$/),
 }) // 印字できる ASCII だけ（6.1.3 (4)）
+
+// PUT /api/connections/google/client。Google Cloud からダウンロードした JSON の中身（6.4 (10)）
+export const GoogleClientInput = z.object({ json: z.string().max(20_000) })

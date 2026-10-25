@@ -490,7 +490,19 @@ export const W = {
   'settings.google.expiredNote': 'Google との連携が切れました。もう一度「連携する」を押してください。',
   'settings.google.unconfigured': '設定がありません',
   'settings.google.unconfiguredNote':
-    'Google と連携する設定がまだありません。PC の `.env.local` に設定を入れて、libretto を再起動してください。',
+    'Google と連携するには、Google Cloud で作った OAuth クライアント（種類は「デスクトップ アプリ」）の JSON ファイルを選ぶか、ファイルの中身を貼り付けて保存してください。',
+  'settings.google.clientAt': 'OAuth クライアントを {at} に保存しました',
+  'settings.google.clientFile': 'JSON ファイルを選ぶ',
+  'settings.google.clientInput': 'JSON ファイルの中身を貼り付け',
+  'settings.google.clientReplaceNote': '別の OAuth クライアントに入れ直すと、今の連携を解除します。',
+  'settings.google.clientSaved': '保存しました。「連携する」を押してください。',
+  'settings.google.clientSavedKept': '保存しました。',
+  'settings.google.clientSavedReset': '保存しました。前の連携は解除しました。もう一度「連携する」を押してください。',
+  'settings.google.clientInvalid':
+    '読み取れませんでした。Google Cloud で種類を「デスクトップ アプリ」にして作った OAuth クライアントの JSON ファイルを選んでください。',
+  'settings.google.clientDeleteTitle': 'Google の OAuth クライアントを削除しますか',
+  'settings.google.clientDeleteBody':
+    'Google との連携を解除し、メールの取り込みと Google ドキュメントへの保存を止めます。出ている依頼の候補はそのまま残ります。',
   'settings.google.pcNote': '連携は、libretto を動かしている PC のブラウザで行ってください。',
   'settings.google.connect': '連携する',
   'settings.google.disconnect': '連携を解除',

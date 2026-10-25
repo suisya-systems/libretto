@@ -425,6 +425,151 @@ function useResult(): Result | undefined {
   return r
 }
 
+// OAuth クライアントの保存と削除（6.4 (10)）。400 は読めない JSON、それ以外の失敗は「保存できませんでした」
+async function sendClient(json?: string): Promise<{ disconnected: boolean } | 'invalid' | 'failed'> {
+  try {
+    const res = await fetch('/api/connections/google/client', {
+      method: json === undefined ? 'DELETE' : 'PUT',
+      headers: { 'content-type': 'application/json', accept: 'application/json' },
+      ...(json !== undefined && { body: JSON.stringify({ json }) }),
+    })
+    if (!res.ok) return res.status === 400 ? 'invalid' : 'failed'
+    return json === undefined ? { disconnected: true } : ((await res.json()) as { disconnected: boolean })
+  } catch {
+    return 'failed'
+  }
+}
+
+// Google の OAuth クライアント（6.4 (10)）。Google Cloud からダウンロードした JSON をファイルで選ぶか、中身を貼る。
+// 値は画面に二度と出さず、保存した日だけを出す（API キーと同じ。設計書 D17）
+function GoogleClient({ g, reload }: { g: Google; reload: () => void }) {
+  const id = useId()
+  const [editing, setEditing] = useState(false)
+  const [value, setValue] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [notice, setNotice] = useState<{ key: WKey; alert?: boolean }>()
+  const open = !g.configured || editing
+
+  const run = async (json?: string) => {
+    setBusy(true)
+    setNotice(undefined)
+    const r = await sendClient(json)
+    setBusy(false)
+    if (typeof r === 'string')
+      return setNotice({ key: r === 'invalid' ? 'settings.google.clientInvalid' : NOTICE.failed, alert: true })
+    setValue('')
+    setEditing(false)
+    setNotice({
+      key:
+        json === undefined
+          ? NOTICE.deleted
+          : r.disconnected
+            ? 'settings.google.clientSavedReset'
+            : g.state === 'none'
+              ? 'settings.google.clientSaved'
+              : 'settings.google.clientSavedKept',
+    })
+    reload()
+  }
+
+  return (
+    <>
+      {g.clientSavedAt && (
+        <p className="muted small key-saved">{w('settings.google.clientAt', { at: day(g.clientSavedAt) })}</p>
+      )}
+      {open ? (
+        <>
+          {editing && g.state !== 'none' && <p className="note-warn small">{W['settings.google.clientReplaceNote']}</p>}
+          <form
+            className="key-form"
+            onSubmit={(e) => {
+              e.preventDefault()
+              if (value.trim()) void run(value)
+            }}
+          >
+            <label className="btn btn-secondary file-btn">
+              {W['settings.google.clientFile']}
+              <input
+                type="file"
+                className="sr-only"
+                accept=".json,application/json"
+                disabled={busy}
+                onChange={(e) => {
+                  const f = e.target.files?.[0]
+                  e.target.value = ''
+                  if (f) void f.text().then(run)
+                }}
+              />
+            </label>
+            <label className="sr-only" htmlFor={`${id}-i`}>
+              {W['settings.google.clientInput']}
+            </label>
+            <input
+              id={`${id}-i`}
+              className="grow"
+              type="password"
+              autoComplete="off"
+              spellCheck={false}
+              placeholder={W['settings.google.clientInput']}
+              aria-describedby={notice ? `${id}-n` : undefined}
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+            />
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={busy || !value.trim()}
+              aria-busy={busy || undefined}
+            >
+              {W['settings.key.save']}
+            </button>
+            {editing && (
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={busy}
+                onClick={() => {
+                  setEditing(false)
+                  setValue('')
+                  setNotice(undefined)
+                }}
+              >
+                {W['settings.key.cancel']}
+              </button>
+            )}
+          </form>
+        </>
+      ) : (
+        <div className="key-actions">
+          <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={() => setEditing(true)}>
+            {W['settings.key.replace']}
+          </button>
+          <Confirm
+            trigger={W['settings.key.delete']}
+            title={W['settings.google.clientDeleteTitle']}
+            body={W['settings.google.clientDeleteBody']}
+            confirm={W['settings.key.delete']}
+            cancel={W['settings.key.cancel']}
+            danger
+            busy={busy}
+            triggerClass="btn btn-quiet btn-sm"
+            onConfirm={() => void run()}
+          />
+        </div>
+      )}
+      {notice && (
+        <p
+          id={`${id}-n`}
+          className={notice.alert ? 'note-alert small' : 'muted small'}
+          role={notice.alert ? 'alert' : 'status'}
+        >
+          {W[notice.key]}
+        </p>
+      )}
+    </>
+  )
+}
+
 type SlackView = ConnectionsView['slack']
 
 // Slack の行（6.6 (7)）。トークンは API キーと同じく貼り付けて入れる（オーナー判断 2026-10-25）。下に連携の状態
@@ -511,7 +656,8 @@ function LinkSection({
             </div>
             <span className={`badge ${badge} key-status`}>{W[label]}</span>
           </div>
-          {!g.configured && <p className="note-warn small">{withCode(W['settings.google.unconfiguredNote'])}</p>}
+          {!g.configured && <p className="note-warn small">{W['settings.google.unconfiguredNote']}</p>}
+          <GoogleClient g={g} reload={reload} />
           {g.state === 'connected' && g.email && (
             <p className="muted small key-saved">{w('settings.google.as', { email: g.email })}</p>
           )}

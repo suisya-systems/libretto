@@ -326,6 +326,79 @@ describe('連携（6.4 (2)）', () => {
   })
 })
 
+describe('OAuth クライアントを設定の画面で入れる（6.4 (10)）', () => {
+  const client = (id: string, secret = 'GOCSPX-sec-1') =>
+    JSON.stringify({ installed: { client_id: id, client_secret: secret, redirect_uris: ['http://localhost'] } })
+  const putClient = (json: string) => send('PUT', '/api/connections/google/client', { json })
+
+  it('installed の JSON を 0600 で保存し、値は返さない。再起動せずに連携を始められる。web 型・壊れた JSON は 400', async () => {
+    await setup({ configured: false })
+    expect((await putClient(JSON.stringify({ web: { client_id: 'w', client_secret: 's' } }))).status).toBe(400)
+    expect((await putClient('{"installed":')).status).toBe(400)
+    expect((await putClient(JSON.stringify({ installed: { client_id: 'a' } }))).status).toBe(400)
+    expect((await connections()).google.configured).toBe(false)
+    const res = await putClient(client('A.apps.googleusercontent.com'))
+    expect(res.status).toBe(200)
+    expect(await res.text()).toBe('{"disconnected":false}')
+    const file = join(home, 'api-keys.json')
+    if (process.platform !== 'win32') expect(statSync(file).mode & 0o777).toBe(0o600)
+    expect(readFileSync(file, 'utf-8')).toContain('GOCSPX-sec-1')
+    const view = await (await get('/api/connections')).text()
+    expect(view).not.toContain('GOCSPX')
+    expect(ConnectionsView.parse(JSON.parse(view)).google).toMatchObject({
+      configured: true,
+      clientSavedAt: expect.any(String),
+    })
+    expect((await startUrl()).searchParams.get('client_id')).toBe('A.apps.googleusercontent.com')
+  })
+
+  it('client_id が違えば今の連携を解除する。同じなら（秘密だけ作り直した）連携は残る', async () => {
+    await setup({ configured: false })
+    await putClient(client('A'))
+    await connect()
+    expect(await (await putClient(client('A', 'GOCSPX-sec-2'))).json()).toEqual({ disconnected: false })
+    expect((await connections()).google.state).toBe('connected')
+    expect(g.state.revoked).toEqual([])
+    expect(await (await putClient(client('B'))).json()).toEqual({ disconnected: true })
+    expect(g.state.revoked).toEqual(['rt-1'])
+    expect(readdirSync(home)).not.toContain('google.json')
+    expect((await connections()).google).toMatchObject({ configured: true, state: 'none' })
+  })
+
+  it('入れ直す前に始めた連携の戻りは、入れ直した後に届いても保存しない', async () => {
+    await setup({ configured: false })
+    await putClient(client('A'))
+    const url = await startUrl()
+    await putClient(client('B'))
+    await server.app.request(`/oauth/google/callback?state=${url.searchParams.get('state')}&code=good-code`)
+    expect((await connections()).google.state).toBe('none')
+  })
+
+  it('秘密を直して入れ直すと、切れた連携が戻る（unauthorized_client も連携し直しに分ける）', async () => {
+    await setup({ configured: false })
+    await putClient(client('A'))
+    await connect()
+    g.expireAll()
+    g.state.fail = { status: 400, body: '{"error":"unauthorized_client"}', times: 1, path: /^\/token$/ }
+    await server.poller.run()
+    expect((await connections()).google.state).toBe('expired')
+    await putClient(client('A', 'GOCSPX-sec-2'))
+    await server.poller.run()
+    expect((await connections()).google.state).toBe('connected')
+  })
+
+  it('削除すると連携も解除し、連携を始めない', async () => {
+    await setup({ configured: false })
+    await putClient(client('A'))
+    await connect()
+    expect((await send('DELETE', '/api/connections/google/client')).status).toBe(204)
+    expect(g.state.revoked).toEqual(['rt-1'])
+    expect((await connections()).google).toMatchObject({ configured: false, state: 'none' })
+    expect(readFileSync(join(home, 'api-keys.json'), 'utf-8')).not.toContain('GOCSPX')
+    expect((await send('POST', '/api/connections/google/start')).status).toBe(409)
+  })
+})
+
 describe('拾い上げ（6.4 (3)(4)）', () => {
   it('ラベルの付いた新しいスレッドを 1 回だけ候補にする。本文は保存せず、添付の口は呼ばない', async () => {
     await setup()
