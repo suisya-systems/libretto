@@ -361,13 +361,88 @@ const when = (at: string) => {
 // 文の中の `…` を <code> に（導入のコマンド）
 const withCode = (s: string) => s.split(/`([^`]+)`/).map((part, i) => (i % 2 ? <code key={part}>{part}</code> : part))
 
-// 動作環境の確認（8.10 (6)）。結果は裏で届くので、connections.changed で取り直す
-function EnvSection({ v, tools, reload }: { v: Isolation; tools: ConnectionsView['tools']; reload: () => void }) {
-  const toolsOk = tools.soffice && tools.pdftoppm
+type Env = ConnectionsView['env']
+const AI: Record<Env['ai']['state'], [string, WKey, WKey?, WKey[]?]> = {
+  ok: ['b-done', 'settings.ai.ok'],
+  missing: [
+    'b-alert',
+    'settings.ai.missing',
+    'settings.ai.missingWhy',
+    ['settings.cmd.ai.install', 'settings.cmd.ai.login'],
+  ],
+  old: ['b-alert', 'settings.ai.old', 'settings.ai.oldWhy', ['settings.cmd.ai.update']],
+  signedOut: ['b-alert', 'settings.ai.signedOut', 'settings.ai.signedOutWhy', ['settings.cmd.ai.login']],
+}
+// 道具の直し方はホストの OS ごと（見ている端末の OS ではない。6.13 (2)）。Windows は WSL2 の中で入れる
+const TOOLS: Record<Env['platform'], [WKey, WKey?]> = {
+  linux: ['settings.tools.why', 'settings.cmd.tools.linux'],
+  darwin: ['settings.tools.why', 'settings.cmd.tools.darwin'],
+  win32: ['settings.tools.windows', 'settings.cmd.tools.linux'],
+  other: ['settings.tools.other'],
+}
+const ISOLATION_CMD: Partial<Record<NonNullable<Isolation['cause']>, WKey>> = {
+  tools: 'settings.cmd.isolation.tools',
+  userns: 'settings.cmd.isolation.userns',
+}
+const SLACK_APPS = 'https://api.slack.com/apps'
+const API_PAGE = (api: string) => `https://console.cloud.google.com/apis/library/${api}.googleapis.com`
+
+// 直し方の 1 行とコピーのボタン（6.13 (2)）
+function Command({ cmd }: { cmd: string }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <div className="env-cmd">
+      <output className="device-url">{cmd}</output>
+      <button
+        type="button"
+        className="btn btn-secondary btn-sm"
+        onClick={() =>
+          void navigator.clipboard
+            ?.writeText(cmd)
+            .then(() => setCopied(true))
+            .catch(() => {})
+        }
+      >
+        {copied ? W['settings.env.copied'] : W['settings.env.copy']}
+      </button>
+    </div>
+  )
+}
+
+function Row({
+  label,
+  use,
+  ok,
+  badge,
+  children,
+}: {
+  label: WKey
+  use: WKey
+  ok: boolean
+  badge: [string, WKey]
+  children?: ReactNode
+}) {
+  return (
+    <li className="key-row">
+      <div className="key-head">
+        <div className="grow">
+          <h3 className="key-label">{W[label]}</h3>
+          <p className="muted small">{W[use]}</p>
+        </div>
+        <span className={`badge ${badge[0]} key-status`}>{W[badge[1]]}</span>
+      </div>
+      {!ok && children}
+    </li>
+  )
+}
+
+// 動作環境の確認（8.10 (6)・6.13）。足りないものと何ができなくなるか、直し方の 1 行かリンク、「もう一度確かめる」。
+// 結果は裏で届くので、connections.changed で取り直す
+function EnvSection({ c, reload }: { c: ConnectionsView; reload: () => void }) {
+  const { isolation: v, tools, env, slack, slackDm, google } = c
   const [busy, setBusy] = useState(false)
   const [failed, setFailed] = useState(false)
-  const [badge, label] = LEVEL[v.level]
-  const running = v.running || busy
+  const checking = env.checking || busy
   const run = async () => {
     setBusy(true)
     setFailed(false)
@@ -376,6 +451,24 @@ function EnvSection({ v, tools, reload }: { v: Isolation; tools: ConnectionsView
     setFailed(!ok)
     reload()
   }
+  const cmd = (k: WKey) => w(k, { port: String(env.port) })
+  const toolsOk = tools.soffice && tools.pdftoppm
+  const [toolsWhy, toolsCmd] = TOOLS[env.platform]
+  const [aiBadge, aiLabel, aiWhy, aiCmds] = AI[env.ai.state]
+  const isoCmd = v.cause && ISOLATION_CMD[v.cause]
+  const slackShown = slack.configured || slackDm.state !== 'none'
+  const slackOk = !slack.missingScopes.length && slackDm.state !== 'missingScope'
+  const googleShown = google.state === 'connected'
+  const gmailOff = google.problem === 'api_disabled'
+  const driveOff = google.docsProblem === 'api_disabled' || google.meetProblem === 'api_disabled'
+  const missing = [
+    env.ai.state !== 'ok',
+    v.level !== 'strong',
+    !toolsOk,
+    slackShown && !slackOk,
+    googleShown && (gmailOff || driveOff),
+  ].filter(Boolean).length
+  const [badge, label] = LEVEL[v.level]
   const status = v.running
     ? W['settings.probe.running']
     : v.last
@@ -384,7 +477,35 @@ function EnvSection({ v, tools, reload }: { v: Isolation; tools: ConnectionsView
   return (
     <section aria-labelledby="h-env" className="card pad">
       <h2 id="h-env">{W['settings.envHeading']}</h2>
+      <p className={missing ? 'note-warn small' : 'muted small'} role="status">
+        {missing ? w('settings.env.missing', { n: String(missing) }) : W['settings.env.ok']}
+      </p>
+      <p className="muted small key-saved">{w('settings.env.checkedAt', { at: when(env.checkedAt) })}</p>
+      <div className="key-actions">
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          disabled={checking}
+          aria-busy={checking || undefined}
+          onClick={() => void run()}
+        >
+          {W[checking ? 'settings.env.rechecking' : 'settings.env.recheck']}
+        </button>
+      </div>
+      {failed && (
+        <p className="note-alert small" role="alert">
+          {W['settings.probe.failed']}
+        </p>
+      )}
+      {missing > 0 && <p className="muted small">{W['settings.env.where']}</p>}
       <ul className="key-list">
+        <Row label="settings.ai.label" use="settings.ai.use" ok={env.ai.state === 'ok'} badge={[aiBadge, aiLabel]}>
+          {aiWhy && <p className="note-alert small">{W[aiWhy]}</p>}
+          {aiCmds?.map((k) => (
+            <Command key={k} cmd={cmd(k)} />
+          ))}
+          {env.ai.state === 'missing' && <p className="muted small">{W['settings.env.restart']}</p>}
+        </Row>
         <li className="key-row">
           <div className="key-head">
             <div className="grow">
@@ -398,9 +519,10 @@ function EnvSection({ v, tools, reload }: { v: Isolation; tools: ConnectionsView
               className={v.level === 'broken' ? 'note-alert small' : 'note-warn small'}
               role={v.level === 'broken' ? 'alert' : undefined}
             >
-              {withCode(W[`settings.isolation.why.${v.cause}`])}
+              {W[`settings.isolation.why.${v.cause}`]}
             </p>
           )}
+          {v.level !== 'strong' && isoCmd && <Command cmd={cmd(isoCmd)} />}
           <p
             className={!v.running && v.last?.verdict === 'visible' ? 'note-alert small' : 'muted small key-saved'}
             role="status"
@@ -408,36 +530,98 @@ function EnvSection({ v, tools, reload }: { v: Isolation; tools: ConnectionsView
             {status}
             {!v.running && v.last && `（${w('settings.probe.at', { at: when(v.last.at) })}）`}
           </p>
-          <div className="key-actions">
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              disabled={running}
-              aria-busy={running || undefined}
-              onClick={() => void run()}
-            >
-              {W['settings.probe.run']}
-            </button>
-          </div>
-          {failed && (
-            <p className="note-alert small" role="alert">
-              {W['settings.probe.failed']}
+        </li>
+        {/* ファイルを作る道具（6.10 (5)） */}
+        <Row
+          label="settings.tools.label"
+          use="settings.tools.use"
+          ok={toolsOk}
+          badge={toolsOk ? ['b-done', 'settings.tools.ok'] : ['b-you', 'settings.tools.missing']}
+        >
+          <p className="note-warn small">{W[toolsWhy]}</p>
+          {toolsCmd && <Command cmd={cmd(toolsCmd)} />}
+          <p className="muted small">{W['settings.env.restart']}</p>
+        </Row>
+        {slackShown && (
+          <Row
+            label="settings.envSlack.label"
+            use="settings.envSlack.use"
+            ok={slackOk}
+            badge={slackOk ? ['b-done', 'settings.envSlack.ok'] : ['b-you', 'settings.envSlack.missing']}
+          >
+            {slack.missingScopes.length > 0 && (
+              <p className="note-warn small">
+                {w('settings.envSlack.scopes', { scopes: slack.missingScopes.join(', ') })}
+              </p>
+            )}
+            {slackDm.state === 'missingScope' && <p className="note-warn small">{W['settings.envSlack.bot']}</p>}
+            <p className="small">
+              <a href={SLACK_APPS} target="_blank" rel="noreferrer">
+                {W['settings.envSlack.open']}
+              </a>
             </p>
-          )}
-        </li>
-        {/* ファイルを作る道具（起動時の事前点検。6.10 (5)） */}
-        <li className="key-row">
-          <div className="key-head">
-            <div className="grow">
-              <h3 className="key-label">{W['settings.tools.label']}</h3>
-              <p className="muted small">{W['settings.tools.use']}</p>
-            </div>
-            <span className={`badge ${toolsOk ? 'b-done' : 'b-you'} key-status`}>
-              {W[toolsOk ? 'settings.tools.ok' : 'settings.tools.missing']}
-            </span>
-          </div>
-          {!toolsOk && <p className="note-warn small">{withCode(W['settings.tools.why'])}</p>}
-        </li>
+          </Row>
+        )}
+        {googleShown && (
+          <Row
+            label="settings.envGoogle.label"
+            use="settings.envGoogle.use"
+            ok={!gmailOff && !driveOff}
+            badge={
+              !gmailOff && !driveOff ? ['b-done', 'settings.envGoogle.ok'] : ['b-you', 'settings.envGoogle.missing']
+            }
+          >
+            {gmailOff && <p className="note-warn small">{W['settings.envGoogle.gmail']}</p>}
+            {driveOff && <p className="note-warn small">{W['settings.envGoogle.drive']}</p>}
+            <p className="muted small">{W['settings.envGoogle.how']}</p>
+            <p className="small row-gap">
+              {gmailOff && (
+                <a href={API_PAGE('gmail')} target="_blank" rel="noreferrer">
+                  {W['settings.envGoogle.openGmail']}
+                </a>
+              )}
+              {driveOff && (
+                <a href={API_PAGE('drive')} target="_blank" rel="noreferrer">
+                  {W['settings.envGoogle.openDrive']}
+                </a>
+              )}
+            </p>
+          </Row>
+        )}
+        {/* スマホから開く（任意。足りないものの数に入れない。6.12 (6)） */}
+        <Row
+          label="settings.phone.label"
+          use="settings.phone.use"
+          ok={env.phone}
+          badge={env.phone ? ['b-done', 'settings.phone.ok'] : ['b-off', 'settings.phone.unset']}
+        >
+          <details className="env-steps">
+            <summary className="small">{W['settings.phone.lead']}</summary>
+            <ol className="small">
+              <li>
+                {W['settings.phone.step1']}{' '}
+                <a href="https://tailscale.com/download" target="_blank" rel="noreferrer">
+                  {W['settings.phone.step1Link']}
+                </a>
+              </li>
+              <li>
+                {W['settings.phone.step2']}{' '}
+                <a href="https://login.tailscale.com/admin/dns" target="_blank" rel="noreferrer">
+                  {W['settings.phone.step2Link']}
+                </a>
+              </li>
+              <li>
+                {W['settings.phone.step3']}
+                <Command cmd={cmd('settings.cmd.phone.serve')} />
+              </li>
+              <li>
+                {W['settings.phone.step4']}
+                <Command cmd={cmd('settings.cmd.phone.start')} />
+              </li>
+              <li>{W['settings.phone.step5']}</li>
+            </ol>
+          </details>
+        </Row>
       </ul>
     </section>
   )
@@ -1284,7 +1468,7 @@ export function Settings() {
       <DeviceSection />
       {modes.data && <ModeSection set={modes.data} reload={modes.reload} />}
       {voice.data && <VoiceSection samples={voice.data.samples} reload={voice.reload} />}
-      {env.data && <EnvSection v={env.data.isolation} tools={env.data.tools} reload={env.reload} />}
+      {env.data && <EnvSection c={env.data} reload={env.reload} />}
     </section>
   )
 }

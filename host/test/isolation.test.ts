@@ -5,11 +5,12 @@ import { join } from 'node:path'
 import { ConnectionsView } from '@libretto/shared/api'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { causeOf, checkIsolation, type IsolationRecord, isolationFile, probeDir } from '../src/checks/isolation.ts'
+import type { Tools } from '../src/deliver/render.ts'
 import { initHome } from '../src/ledger/db.ts'
 import type { Ledger } from '../src/ledger/ledger.ts'
 import type { Job, Outcome } from '../src/model/invoke.ts'
 import type { SandboxCheck } from '../src/model/sandbox.ts'
-import { createServer } from '../src/server/app.ts'
+import { createServer, type EnvCheck } from '../src/server/app.ts'
 
 let home: string
 beforeEach(() => {
@@ -206,12 +207,131 @@ describe('POST /api/checks/run と GET /api/connections', () => {
     expect(server.status.storageOk).toBe(false)
   })
 
-  it('すべて停止で切れたら記録しない。止めている間の POST は 409', async () => {
+  it('すべて停止で切れたら記録しない。止めている間の POST は受けるが、隔離の点検は起こさない（6.13 (1)）', async () => {
     expect((await post('/api/checks/run')).status).toBe(202)
     expect((await post('/api/stop')).status).toBe(200)
     await vi.waitFor(async () => expect((await view()).isolation.running).toBe(false))
     expect((await view()).isolation.last).toBeUndefined()
-    expect(await (await post('/api/checks/run')).json()).toEqual({ reason: 'stopped' })
+    expect((await post('/api/checks/run')).status).toBe(202)
+    await vi.waitFor(async () => expect((await view()).env.checking).toBe(false))
     expect(started).toBe(1)
+  })
+})
+
+describe('もう一度確かめる（6.13 (1)）', () => {
+  const ORIGIN = 'http://127.0.0.1:7780'
+  let ledger: Ledger
+  let server: ReturnType<typeof createServer>
+  let cookie: string
+  let next: EnvCheck
+  let rechecks: number
+  let release: () => void
+  const tools: Tools = {}
+  beforeEach(async () => {
+    ledger = initHome(home)
+    const staticDir = join(home, 'dist')
+    mkdirSync(staticDir, { recursive: true })
+    writeFileSync(join(staticDir, 'index.html'), '<div></div>')
+    rechecks = 0
+    delete tools.soffice
+    delete tools.pdftoppm
+    next = { isolation: 'strong', claude: { version: '2.1.310', ok: true, signedIn: true } }
+    let gate = Promise.resolve()
+    release = () => {}
+    server = createServer({
+      home,
+      ledger,
+      origins: [ORIGIN],
+      staticDir,
+      invoke: () => Promise.reject(new Error('no model')),
+      log: () => {},
+      runsWaitMs: 200,
+      isolation: 'weak',
+      cause: 'tools',
+      tools,
+      claude: { ok: false },
+      platform: 'darwin',
+      port: 7790,
+      // 起動時の点検のやり直し（index.ts）は道具のオブジェクトの中身を入れ替える
+      recheck: async () => {
+        rechecks++
+        gate = new Promise((done) => {
+          release = done
+        })
+        await gate
+        Object.assign(tools, { soffice: 'soffice', pdftoppm: 'pdftoppm' })
+        return next
+      },
+    })
+    const { url } = server.issuePairing('テスト')
+    cookie = ((await server.app.request(new URL(url).pathname)).headers.get('set-cookie') ?? '').split(';')[0] as string
+  })
+  afterEach(async () => {
+    await server.runs.abortAll()
+    ledger.close()
+  })
+  const post = (path: string) => server.app.request(path, { method: 'POST', headers: { cookie, origin: ORIGIN } })
+  const view = async () =>
+    ConnectionsView.parse(await (await server.app.request('/api/connections', { headers: { cookie } })).json())
+
+  it('起動し直さずに、道具・隠す仕組み・AI を確かめ直して画面に返す。走っている間は同じ 1 本', async () => {
+    const before = await view()
+    expect(before.env).toMatchObject({ platform: 'darwin', port: 7790, checking: false, ai: { state: 'missing' } })
+    expect(before.tools).toEqual({ soffice: false, pdftoppm: false })
+    const changed: unknown[] = []
+    server.hub.subscribe((m) => m.event === 'host.changed' && changed.push(JSON.parse(m.data)))
+    expect((await post('/api/checks/run')).status).toBe(202)
+    expect((await post('/api/checks/run')).status).toBe(202)
+    expect(rechecks).toBe(1)
+    expect((await view()).env.checking).toBe(true)
+    release()
+    await vi.waitFor(async () => expect((await view()).env.checking).toBe(false))
+    const after = await view()
+    expect(after.tools).toEqual({ soffice: true, pdftoppm: true })
+    expect(after.isolation).toMatchObject({ level: 'strong' })
+    expect(after.isolation.cause).toBeUndefined()
+    expect(after.env.ai).toEqual({ state: 'ok', version: '2.1.310' })
+    expect(after.env.checkedAt >= before.env.checkedAt).toBe(true)
+    expect(server.status.isolation).toBe('strong')
+    expect(changed).toEqual([expect.objectContaining({ isolation: 'strong' })])
+  })
+
+  // 確かめ直しを 1 回通す
+  const recheck = async () => {
+    expect((await post('/api/checks/run')).status).toBe(202)
+    release()
+    await vi.waitFor(async () => expect((await view()).env.checking).toBe(false))
+  }
+
+  it('AI: 古い・ログインしていないを分ける', async () => {
+    next = { isolation: 'strong', claude: { version: '2.0.0', ok: false, signedIn: true } }
+    await recheck()
+    expect((await view()).env.ai).toEqual({ state: 'old', version: '2.0.0' })
+    next = { isolation: 'strong', claude: { version: '2.1.310', ok: true, signedIn: false } }
+    await recheck()
+    expect((await view()).env.ai.state).toBe('signedOut')
+  })
+
+  it('ログインし直し待ち: ログインできていなければ待ちのまま。止めている間は下ろさないが、道具は確かめる', async () => {
+    next = { isolation: 'strong', claude: { version: '2.1.310', ok: true } } // auth status が読めない
+    await recheck()
+    server.runner.onAuthExpired('c1')
+    expect((await view()).env.ai.state).toBe('signedOut')
+    next = { isolation: 'strong', claude: { version: '2.1.310', ok: true, signedIn: false } }
+    await recheck()
+    expect(server.status.signIn).toBe(true)
+    next = { isolation: 'strong', claude: { version: '2.1.310', ok: true, signedIn: true } }
+    expect((await post('/api/stop')).status).toBe(200)
+    delete tools.soffice
+    await recheck()
+    expect(server.status.signIn).toBe(true)
+    expect((await view()).tools).toEqual({ soffice: true, pdftoppm: true })
+  })
+
+  it('ログインし直し待ち: ログインが確かめられれば待ちを下ろす', async () => {
+    server.runner.onAuthExpired('c1')
+    await recheck()
+    expect(server.status.signIn).toBe(false)
+    expect((await view()).env.ai.state).toBe('ok')
   })
 })

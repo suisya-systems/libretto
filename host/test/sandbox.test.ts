@@ -21,6 +21,7 @@ import type { Call } from '../src/model/invoke.ts'
 import { setKey } from '../src/model/keys.ts'
 import {
   checkSandbox,
+  checkSignIn,
   createSandbox,
   denyRules,
   homeNamesOf,
@@ -502,5 +503,16 @@ describe('隔離の点検の対照と、ホームに出てよい名前（8.10 (4
         h,
       ).sort(),
     ).toEqual(['.claude', '.claude.json', '.local'])
+  })
+})
+
+describe('checkSignIn（6.13 (2)）', () => {
+  // claude の代わりに、auth status の JSON を出す node（後ろに付く auth status は -e では読まれない）
+  const say = (out: string) => [process.execPath, '-e', `process.stdout.write(${JSON.stringify(out)})`]
+  it('loggedIn を返し、読めなければ undefined（確かめられない）', async () => {
+    expect(await checkSignIn(say('{"loggedIn":true}'))).toBe(true)
+    expect(await checkSignIn(say('{"loggedIn":false}'))).toBe(false)
+    expect(await checkSignIn(say('error: unknown command'))).toBeUndefined()
+    expect(await checkSignIn(['libretto-no-such-claude'])).toBeUndefined()
   })
 })

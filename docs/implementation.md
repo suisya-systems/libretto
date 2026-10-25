@@ -2952,7 +2952,7 @@ Gmail と Slack の文から「文書づくりを頼まれていそうだ」と 
 
 **(5) 事前点検と `requirements.md`**
 
-- 起動時に 1 回、`soffice --version` と `pdftoppm -v` を流し、通ったものだけを覚える（`preflight`。名前は環境変数 `LIBRETTO_SOFFICE` / `LIBRETTO_PDFTOPPM` で変えられる）。入れた後はホストを起こし直す。理由: `soffice --version` は 1 秒ほどかかり、画面を開くたびに流すと遅い。道具を入れるのはまれ。
+- 起動時に 1 回、`soffice --version` と `pdftoppm -v` を流し、通ったものだけを覚える（`preflight`。名前は環境変数 `LIBRETTO_SOFFICE` / `LIBRETTO_PDFTOPPM` で変えられる）。入れた後は設定の「もう一度確かめる」で流し直す（6.13 (1)。GitHub #63 の前は起こし直していた）。理由: `soffice --version` は 1 秒ほどかかり、画面を開くたびに流すと遅い。道具を入れるのはまれ。
 - `requirements.md`（リポジトリの直下。オーナー向け）に、Node・Claude Code・隠す道具・LibreOffice と poppler（OS ごとの入れ方と `npm run verify:files` での確かめ方）・連携と鍵を 1 枚にまとめた。
 - 6.3 の表の `preflightDeps()`（`requirements.md` を機械的に読む）は改める: **点検する道具の一覧はコードに持ち、`requirements.md` に全部が載っていることをテストで確かめる**。理由: 実行時に Markdown を読むと、本人が手元の文書を書き換えただけで点検が変わる。鍵と `srt` の点検は今までどおりそれぞれの場所（設定の面・8.9）にある。
 - `ConnectionsView.tools`（`{ soffice, pdftoppm }`）を足し、設定の「動作環境の確認」に行「ファイルを作る道具」を出す。無ければ入れ方と、入れるまでは何が保存先に出ないかを書く。
@@ -3106,6 +3106,56 @@ Gmail と Slack の文から「文書づくりを頼まれていそうだ」と 
 - 手順: Tailscale を PC とスマホに入れて同じアカウントでログイン → 管理画面で MagicDNS と HTTPS Certificates を有効にする → PC で `tailscale serve --bg 7780`（`https://<PC の名前>.<tailnet の名前>.ts.net` で受けて、PC の中の `127.0.0.1:7780` へ渡す）→ `LIBRETTO_ORIGIN=http://127.0.0.1:7780,https://<PC の名前>.<tailnet の名前>.ts.net` で libretto を起動 → 設定の面の「別の端末を追加する」で出たアドレスをスマホで開く。
 - `LIBRETTO_BIND` は `127.0.0.1` のまま（5.4 の「Tailscale の IP を入れる」を改めた）。理由: `tailscale serve` は PC の中のポートへ転送するので、libretto を Tailscale の IP で待ち受けなくてよい。待ち受けを手元だけにしておけば、HTTPS を通らない `http://<Tailscale の IP>:7780` の入口ができない。
 - 操作は `Origin` が `LIBRETTO_ORIGIN` と完全一致しないと `403`（5.4）。`GET /api/host` が `origins` を返し、画面は今のアドレスが入っていなければ帯（`band.origin`）で「このアドレスを起動の設定に足してください」と出す。理由: 足し忘れると、画面は開けるのに押したボタンが全部「送れませんでした」になり、何が足りないか分からない。
+
+
+### 6.13 動作環境の確認の決め事（GitHub #63 の着手前の設計レビューで決めたこと）
+
+足りない道具や権限を、設定の「動作環境の確認」で **見つける**（何ができなくなるか）・**直し方を示す**（貼る 1 行か、足す権限の名前と管理画面へのリンク）・**確かめる**（起動し直さずに点検し直す）。オーナー判断（2026-10-26）: アプリは道具を勝手に入れない（管理者の権限が要る）。「何をすればいいかを調べにターミナルへ行く」はなくし、「画面に示された 1 行を貼る」は許す。起動時の点検は残す。
+
+**(1) 確かめ直し（`POST /api/checks/run`）**
+
+決めたこと:
+- 8.10 (4) の「今すぐ確認」（隔離の点検だけ）を、節の頭の「もう一度確かめる」1 本に広げた。中身は起動時の点検と同じものを順に:
+  1. `claude` の場所を引き直し（`resolveClaude`）、`checkSandbox`（Claude Code の版・隠す道具・userns・srt・網）、`checkSignIn`（(2)）、`preflight`（LibreOffice・poppler）。`index.ts` が持つ結果を入れ替える。`claude` の命令は同じ配列の中身を、`sandboxCheck` は変数を替える（`createSandbox` と `claude-cli` の `blocked` は呼ぶたびに読むので、次の呼び出しから効く。動いている作り手は前の起こし方のまま）。道具は共有している `Tools` のオブジェクトの中身を入れ替える（runner・判定・保存先の選択肢 `ready()` は呼ぶたびに読む）。`HostStatus.isolation` が変われば `host.changed`（入口・承認の帯）。
+  2. ログインし直し待ち（`HostStatus.signIn`）で、`claude auth status` がログインしていないと言わなければ、帯の「続ける」と同じく待っていた案件を起こし直す（まだ切れていればまた待ちに戻る）。
+  3. Slack の DM の確かめ（`slackDm.check()`）と、拾い上げの 1 回（`poller.recheck()`）。Slack の権限と Gmail・Drive の API はこの回で確かめ直される。
+  4. 隔離の点検（8.10 (4)。haiku 2 回）。
+- 同時に 1 本（走っている間の `POST` は同じ 1 本に乗る。`ConnectionsView.env.checking`）。終われば `env.checkedAt` を更新して SSE `connections.changed`。
+- **止めている間（STOP）も受ける**。1 だけして、2〜4（案件を起こす・拾い上げ・モデルを呼ぶ点検）はしない。理由: 道具を入れたかどうかは止めていても確かめたい。8.10 (4) の `409` をやめた。
+- `poller.recheck()`: 走っている回があれば終わるのを待ち、Drive の「確かめた」印を捨ててから新しい回を始める。理由（設計レビュー）: ふだんの回は Drive API の確かめを連携の世代ごとに 1 回にしているので、そのままでは有効にし直したこと（逆に無効にしたこと）が分からない。走っている回に乗ると、直す前に始まった回の結果を返してしまう。
+- Gmail API は、ラベルの一覧が読めた時点で「有効でない」を下ろす。理由（設計レビュー）: 前はラベルが見つからない回では下ろさず、有効にしても「有効でない」が残った。
+- 採らなかった案: 画面を開くたびに点検する（`soffice --version` が 1 秒かかる。6.10 (5) の理由のまま）／道具の置き場を監視する（OS ごとに違う）。
+
+**(2) 見つける（`ConnectionsView.env`）**
+
+決めたこと:
+- 足した欄: `env: { platform, port, checking, checkedAt, ai: { state, version? }, phone }`。`platform` はホストの OS（`linux` / `darwin` / `win32` / `other`）。直し方の 1 行は**ホストの OS のもの**だけを出す（入れる先はホストの PC で、見ている端末ではない）。`port` はスマホの手順の 1 行に入れる。`phone` は `LIBRETTO_ORIGIN` に `https://` の起点があるか。
+- `ai.state`: `missing`（`claude --version` が通らない）→ `old`（`MIN_CLAUDE` より古い）→ `signedOut`（ログインし直し待ち、または `claude auth status` の `loggedIn` が偽）→ `ok` の順に決める。欄の名前を `claude` にしないのは 11.2 の出さない語のため。
+- ログインは **`claude auth status`**（JSON の `loggedIn`）で起動時と確かめ直しのときに確かめる（`checkSignIn`。作り手と同じ環境変数の許可一覧で起こす）。読めなければ `undefined`（確かめられない）で、`signedOut` にしない。理由（設計レビュー）: 前はログイン切れが案件の仕事の失敗でしか分からず、入れたばかりでログインしていない PC では画面に何も出なかった。`loggedIn` が真でも期限切れはありうるので、案件の仕事で見つけた待ち（6.2.3 (7)）も `signedOut` に数える。待ちが立った・下りたときも `connections.changed` を出す（設定の面がその SSE で取り直すため）。
+- 画面の行（`page/src/faces/Settings.tsx` の `EnvSection`）: AI・チェック項目をライターから隠す仕組み・ファイルを作る道具・Slack の権限（ユーザーかボットのトークンを入れていれば）・Google の API（連携していれば）・スマホから開く。節の頭に「足りないものが N 件あります」か「必要なものはそろっています」と、確かめた日時と「もう一度確かめる」。スマホから開くのは任意なので N に数えない。直った行は消さずに済みの印（緑の印）にする。理由: 何を確かめたかが残り、直したものが直ったと見える。
+- 行ごとに、足りないときは「何ができなくなるか」の 1 文（例: 道具は「表とスライドの見た目を確かめられません」と保存先に出ないこと）と直し方を出す。
+
+**(3) 直し方を示す**
+
+決めたこと:
+- コマンドはコピーのボタン付きの 1 行（`settings.cmd.*`）。どこに貼るか（ホストの PC のターミナル・`sudo` のパスワード）は節に 1 回だけ書く。
+  - AI: 入っていない → `npm install -g @anthropic-ai/claude-code` と `claude auth login` の 2 行、古い → `claude update`、ログインが切れた → `claude auth login`。
+  - 隠す仕組み（Linux）: `sudo apt install bubblewrap socat ripgrep`・`sudo sysctl kernel.apparmor_restrict_unprivileged_userns=0`。srt・網の失敗は「もう一度確かめる」を先に案内し、だめなら起動し直し。
+  - ファイルを作る道具: Linux（WSL2 を含む）`sudo apt install libreoffice poppler-utils`、macOS `brew install --cask libreoffice && brew install poppler`。素の Windows は winget の 1 行を出さず、WSL2 の中で動かして apt の 1 行を案内する。理由: Windows の LibreOffice は `soffice` を PATH に入れず、動いているホストには PATH の変更が届かないので、確かめ直しで直ったと分からない。隠す仕組みも WSL2 を勧めている（8.5）。
+  - 入れたのに「入っていません」のままなら起動し直す、の 1 文を AI と道具の行に添える。理由（設計レビュー）: 新しく入れた場所が PATH に足されたときは、動いているホストの PATH に届かない。
+- Slack: 足りない権限の名前（`missingScopes`。ボットは `chat:write`）と、「OAuth & Permissions」のどの欄に足すかと、Slack アプリの設定画面（`https://api.slack.com/apps`）へのリンク。
+- Google: 有効でない API の名前と、Google Cloud のコンソールの API のページ（`https://console.cloud.google.com/apis/library/gmail.googleapis.com` / `drive.googleapis.com`）へのリンク。開いた先で連携に使っているプロジェクトを選ぶことを添える。
+- Tailscale: `requirements.md` の 5 手順をそのまま画面の番号付きの手順にする（開閉式）。`tailscale serve --bg <ポート>` と起動の 1 行は、動いているホストのポートで組む（設計レビュー: 7780 に決め打ちすると `LIBRETTO_PORT` を変えた環境で別のところへ渡す）。起動の 1 行は `<PC の名前>` を置き換えて使う。**この手順だけは起動し直しが残る**（`LIBRETTO_ORIGIN` は起動の設定）。
+- 文言は `ui-wording.md` に先に足した。製品の名前は画面に出さず「AI」と言う。コマンドの中の `claude` だけは、貼って動かなければ意味がないので名前を変えない（出さない語の検査の例外 3 つ。`page/test/wording.test.ts`）。
+
+**(4) オーナーに確かめること（おすすめで実装した。窓口経由で仰ぐ）**
+
+| # | 問い | おすすめ（実装したもの） | 理由 |
+|---|---|---|---|
+| 1 | 直し方のコマンドに製品の名前（`claude`・`@anthropic-ai/claude-code`）が出るのを許すか | **許す**（コマンドの 3 行だけ。欄の名前・説明は「AI」） | 貼って動く 1 行でなければ「ターミナルへ調べに行く」をなくせない |
+| 2 | 素の Windows で道具の winget の 1 行を出すか | **出さない**。WSL2 で動かす案内 | 入れても PATH に入らず、確かめ直しで直ったと分からない |
+| 3 | スマホの手順 4（`LIBRETTO_ORIGIN` を足して起動し直す）を画面から入れられるようにするか | **この Issue ではしない**。別の Issue で、設定の画面から https の起点を足せるようにするのがよい | 許す起点を画面から変えると、Origin の検査（5.4）の考え直しが要る |
+| 4 | 「今すぐ確認」（隔離の点検）を「もう一度確かめる」に畳んでよいか | **畳む**（点検はモデルを 2 回呼ぶが、起動時にも毎回流しているもの） | 節にボタンが 2 つあると、どちらを押せばよいか迷う |
 
 ---
 
@@ -3607,7 +3657,7 @@ CI（ubuntu-latest は 24.04 で userns が制限されている）と、名前�
 - **対照**は同じ頼みを、`checks/` を開け直した起こし方で 1 回。`createSandbox` に `reopen: string[]` を足し、strong は srt の `allowRead` にそのディレクトリを足し、**どの水準でも** CLI の拒否規則（`--settings`）を渡さない（strong でも拒否規則は `checks/**` を拒むので、片方だけ開けると対照が読めない）。
 - 結果（`isolation.json`。token は書かない）: `session`（本番が `ok`）、`reached`（本番の返答に届いた印の語がある = 作業場を実際に読んだ）、`hidden`（本番の**全回の**返答（言い直しの前の回も。`onReply`）と、**対照を流す前の**作業場の全ファイルに token が無い。対照は同じ作業場で語を読めるので、後で見ると対照が書いたものを本番の漏れに数える）、`homeOk`（返答のホームの名前が、その呼び出しの srt の `allowRead` のうちホームの下にあるものの一番上の名前と `.claude.json` だけ。`createSandbox().homeNames()`）、`control`（対照の**どの回の**返答にも token がある。出力の形が通らなくても語が出れば検出の経路は生きているので、`ok` は問わない。実機で haiku が JSON を前置き付きの ``` で包み、2 回とも形が通らずに `unknown` になった）、`extraHome`（許していないのに見えた名前。画面には出さない）。
 - **判定** `verdict` は見えた証拠を先にする: `session` で token が見えた（`hidden` が偽）→ `visible`。`session`・`reached` でホームに許していない名前があった → `visible`。それ以外で `session`・`reached`・`control` のどれかが偽 → `unknown`（確かめられなかった）。全部そろって → `hidden`。`broken` のときと Claude の版が足りないときは呼ばずに `unknown`。
-- いつ: 起動時（`runner.resume()` の後に裏で 1 回。待たない）と `POST /api/checks/run`（`202 {}`）。同時に 1 本（走っている間の `POST` は同じ 1 本に乗る）。`runs.open('点検')`・`runs.watch`・`runs.close` で包み、「すべて停止」で切る（切れたら `isolation.json` を書かない）。止めている間の `POST` は `409 { reason: 'stopped' }`。始まりと終わりに SSE `connections.changed`。裏の失敗は log に出して `running` を下ろす。
+- いつ: 起動時（`runner.resume()` の後に裏で 1 回。待たない）と `POST /api/checks/run`（`202 {}`）。同時に 1 本（走っている間の `POST` は同じ 1 本に乗る）。`runs.open('点検')`・`runs.watch`・`runs.close` で包み、「すべて停止」で切る（切れたら `isolation.json` を書かない）。止めている間の `POST` は `409 { reason: 'stopped' }`（GitHub #63 で改めた: `POST` は 6.13 (1) の確かめ直しになり、止めている間も受けて、隔離の点検だけを起こさない）。始まりと終わりに SSE `connections.changed`。裏の失敗は log に出して `running` を下ろす。
 - 点検で `visible` が出ても**作り手は止めない**（表示だけ）。理由: 点検はモデルの返答に頼るので誤りうる。案件ごとの canary（(1)）が実害の手前で止める。**オーナー判断（2026-10-24）: 表示だけにする（作り手は止めない）**。
 
 **(5) `GET /api/connections`**

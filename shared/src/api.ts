@@ -460,6 +460,16 @@ export const ConnectionsView = z.object({
   slackDm: z.object({ state: z.enum(['none', 'unchecked', 'on', 'noUser', 'missingScope', 'rejected']) }),
   // ファイルを作る道具（起動時の事前点検。6.10 (5)）。LibreOffice（soffice）と poppler（pdftoppm）
   tools: z.object({ soffice: z.boolean(), pdftoppm: z.boolean() }),
+  // 動作環境の確認（6.13）。platform はホストの OS（直し方の 1 行を選ぶ）、checking は「もう一度確かめる」の最中、
+  // ai は AI（Claude Code）の有無・版・ログイン、phone は LIBRETTO_ORIGIN に https の起点（Tailscale）があるか
+  env: z.object({
+    platform: z.enum(['linux', 'darwin', 'win32', 'other']),
+    port: z.number().int(),
+    checking: z.boolean(),
+    checkedAt: z.string(),
+    ai: z.object({ state: z.enum(['ok', 'missing', 'old', 'signedOut']), version: z.string().optional() }),
+    phone: z.boolean(),
+  }),
   // 自動検出（6.9 (6)(8)(10)）。recall は直近 30 日の合図のうち、自動検出が先に見つけていた数
   inference: z.object({
     classifiedToday: z.number().int(),

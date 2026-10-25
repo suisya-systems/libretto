@@ -49,7 +49,8 @@ libretto の画面に出す言葉の正本。設計書（[`docs/design.md`](./de
 | 決まっていないこと | 確認したいこと | 内部の言い方。相手に何をしてほしいかが伝わる言い方にする |
 | 完成した依頼 | 完了した依頼 | 依頼は「完了」と言う |
 | 全部止める・この依頼を止める | すべて停止・この依頼を中止 | ボタンの言葉として普段そう言う |
-| 作れるものの点検・いま点検する | 動作環境の確認・今すぐ確認 | 設計書の内部の言葉。アプリの画面では普段そう言う |
+| 作れるものの点検・いま点検する・点検し直す | 動作環境の確認・もう一度確かめる | 設計書の内部の言葉。アプリの画面では普段そう言う。直した後に押すボタンなので「もう一度」と言う（GitHub #63。前は「今すぐ確認」） |
+| Claude Code・作り手と判定役の CLI | AI（入れ方とログインのコマンドの中だけは `claude` のまま） | 画面には製品の名前を出さない（11.2 の出さない語）。コマンドは貼り付けて動かなければ意味がないので、名前を変えない（GitHub #63） |
 | 隔離・作り手から確認項目を隠す仕組み | チェック項目をライターから隠す仕組み | 「隔離」「サンドボックス」は技術の言葉。何を何から隠すかを言う（作り手は画面では「ライター」。オーナー判断 2026-10-24） |
 | 隔離が強い・弱い・壊れている（strong / weak / broken） | しっかり隠せています・弱い・動きません | 英語の段階名は出さない。状態をふだんの言い方で言う |
 | 隔離の点検の結果（見えない・見えた・確かめられない） | ライターからチェック項目は見えませんでした・見えました・チェックできませんでした | 何を確かめて何が分かったかを 1 文で言う |
@@ -669,29 +670,85 @@ Slack の DM は、2 分のあいだに出たお知らせの 1 行を改行で�
 | `settings.voice.invalid` | 題と、http か https で始まる URL を入れてください。 |
 | `settings.voice.failed` | 保存できませんでした。もう一度お試しください。 |
 | `settings.envHeading` | 動作環境の確認 |
+| `settings.env.missing` | 足りないものが {n} 件あります |
+| `settings.env.ok` | 必要なものはそろっています |
+| `settings.env.checkedAt` | {at} に確かめました |
+| `settings.env.recheck` | もう一度確かめる |
+| `settings.env.rechecking` | 確かめています |
+| `settings.env.where` | コマンドは、libretto を動かしている PC のターミナルに貼り付けて Enter で実行します。パスワードを聞かれたら、PC にログインするときのパスワードを入れます。 |
+| `settings.env.copy` | コピー |
+| `settings.env.copied` | コピーしました |
+| `settings.env.restart` | 入れたのに「入っていません」のままなら、libretto を起動し直してください。 |
+| `settings.ai.label` | AI |
+| `settings.ai.use` | ライターとチェックに使う AI です。libretto を動かしている PC に入れて、ログインしておきます。 |
+| `settings.ai.ok` | 使えます |
+| `settings.ai.missing` | 入っていません |
+| `settings.ai.missingWhy` | AI が入っていないので、依頼が進みません。PC で次の 2 行を順に実行して入れてログインし、「もう一度確かめる」を押してください。 |
+| `settings.ai.old` | バージョンが古いです |
+| `settings.ai.oldWhy` | AI のバージョンが古いので、依頼が進みません。PC で次の 1 行を実行して新しくしてから、「もう一度確かめる」を押してください。 |
+| `settings.ai.signedOut` | ログインが切れています |
+| `settings.ai.signedOutWhy` | AI のログインが切れているので、依頼が止まっています。PC で次の 1 行を実行してログインし直してから、「もう一度確かめる」を押してください。止まっていた依頼は続きから進みます。 |
 | `settings.isolation.label` | チェック項目をライターから隠す仕組み |
 | `settings.isolation.use` | ライターには、チェック項目のファイルが見えない場所で下書きを書かせます。 |
 | `settings.isolation.strong` | しっかり隠せています |
 | `settings.isolation.weak` | 弱い |
 | `settings.isolation.broken` | 動きません |
 | `settings.isolation.why.windows` | Windows には OS の仕切りがありません。WSL2 で動かすと、しっかり隠せます。 |
-| `settings.isolation.why.tools` | 必要なソフトが入っていません。PC で `apt install bubblewrap socat ripgrep` を実行すると、しっかり隠せます。 |
-| `settings.isolation.why.userns` | OS の設定が仕切りを止めています。PC で `sudo sysctl kernel.apparmor_restrict_unprivileged_userns=0` を実行すると、しっかり隠せます。 |
-| `settings.isolation.why.srt` | 仕切りの道具を起こせませんでした。libretto を再起動してください。直るまで下書きは始まりません。 |
-| `settings.isolation.why.network` | 仕切りの中から AI につながりませんでした。libretto を再起動してください。直るまで下書きは始まりません。 |
+| `settings.isolation.why.tools` | 必要なソフトが入っていません。PC で次の 1 行を実行してから「もう一度確かめる」を押すと、しっかり隠せます。 |
+| `settings.isolation.why.userns` | OS の設定が仕切りを止めています。PC で次の 1 行を実行してから「もう一度確かめる」を押すと、しっかり隠せます。 |
+| `settings.isolation.why.srt` | 仕切りの道具を起こせませんでした。「もう一度確かめる」を押してください。直らなければ libretto を起動し直してください。直るまで下書きは始まりません。 |
+| `settings.isolation.why.network` | 仕切りの中から AI につながりませんでした。ネットワークを確かめてから「もう一度確かめる」を押してください。直るまで下書きは始まりません。 |
 | `settings.probe.hidden` | ライターからチェック項目は見えませんでした |
-| `settings.probe.visible` | ライターからチェック項目が見えました。libretto を再起動して、もう一度確認してください |
-| `settings.probe.unknown` | チェックできませんでした。もう一度「今すぐ確認」を押してください |
+| `settings.probe.visible` | ライターからチェック項目が見えました。「もう一度確かめる」を押してください。それでも見えるときは libretto を起動し直してください |
+| `settings.probe.unknown` | チェックできませんでした。「もう一度確かめる」を押してください |
 | `settings.probe.never` | まだ確認していません |
 | `settings.probe.running` | 確認しています。1〜2 分かかります |
 | `settings.probe.at` | {at} に確認 |
-| `settings.probe.run` | 今すぐ確認 |
 | `settings.probe.failed` | 確認を始められませんでした。もう一度お試しください。 |
 | `settings.tools.label` | ファイルを作る道具 |
 | `settings.tools.use` | PowerPoint・Excel・Word のファイルと Google スライドを作るとき、できあがりを画像にして見た目を確かめ、表の式を計算し直します。 |
 | `settings.tools.ok` | 入っています |
 | `settings.tools.missing` | 入っていません |
-| `settings.tools.why` | LibreOffice と poppler が要ります。PC で `sudo apt install libreoffice poppler-utils`（Mac は `brew install --cask libreoffice` と `brew install poppler`）を実行してから、libretto を再起動してください。入れるまでは、PowerPoint・Excel・Word のファイルと Google スライドは保存先に出ません。 |
+| `settings.tools.why` | LibreOffice と poppler が入っていないので、表とスライドの見た目を確かめられません。入れるまでは、PowerPoint・Excel・Word のファイルと Google スライドは保存先に出ません。PC で次の 1 行を実行してから「もう一度確かめる」を押してください。 |
+| `settings.tools.windows` | LibreOffice と poppler が入っていないので、表とスライドの見た目を確かめられません。入れるまでは、PowerPoint・Excel・Word のファイルと Google スライドは保存先に出ません。Windows では libretto を WSL2 の中で動かし、WSL2 で次の 1 行を実行してください。 |
+| `settings.tools.other` | LibreOffice と poppler が入っていないので、表とスライドの見た目を確かめられません。入れるまでは、PowerPoint・Excel・Word のファイルと Google スライドは保存先に出ません。この PC に LibreOffice と poppler を入れてから「もう一度確かめる」を押してください。 |
+| `settings.envSlack.label` | Slack の権限 |
+| `settings.envSlack.use` | Slack から取り込むときと、Slack に通知するときに使います。 |
+| `settings.envSlack.ok` | そろっています |
+| `settings.envSlack.missing` | 足りません |
+| `settings.envSlack.scopes` | 権限 {scopes} が無いので、Slack から取り込めません。Slack アプリの設定画面の「OAuth & Permissions」で「User Token Scopes」に足し、アプリをワークスペースに入れ直してください。トークンが変わったら、「連携」の Slack の欄から貼り直してください。 |
+| `settings.envSlack.bot` | 権限 chat:write が無いので、Slack に通知できません。Slack アプリの設定画面の「OAuth & Permissions」で「Bot Token Scopes」に足し、アプリをワークスペースに入れ直してください。トークンが変わったら、「お知らせ」の Slack の欄から貼り直してください。 |
+| `settings.envSlack.open` | Slack アプリの設定画面を開く |
+| `settings.envGoogle.label` | Google の API |
+| `settings.envGoogle.use` | メールと会議メモの取り込みと、Google ドキュメントなどへの保存に使います。 |
+| `settings.envGoogle.ok` | 有効です |
+| `settings.envGoogle.missing` | 有効になっていません |
+| `settings.envGoogle.gmail` | Gmail API が有効になっていないので、メールを取り込めません。 |
+| `settings.envGoogle.drive` | Google Drive API が有効になっていないので、Google ドキュメント・スプレッドシート・スライドに保存できず、会議メモも読めません。 |
+| `settings.envGoogle.how` | 開いたページで、連携に使っているプロジェクトを選んでから「有効にする」を押し、「もう一度確かめる」を押してください。反映に数分かかることがあります。 |
+| `settings.envGoogle.openGmail` | Gmail API のページを開く |
+| `settings.envGoogle.openDrive` | Google Drive API のページを開く |
+| `settings.phone.label` | スマホから開く |
+| `settings.phone.use` | 外出先のスマホで承認するときに使います。PC だけで使うなら要りません。 |
+| `settings.phone.ok` | 設定済み |
+| `settings.phone.unset` | 未設定 |
+| `settings.phone.lead` | PC とスマホを Tailscale でつなぎ、Tailscale の HTTPS のアドレスで開きます。 |
+| `settings.phone.step1` | PC とスマホに Tailscale を入れ、同じアカウントでログインします。WSL2 で動かしているときは、Windows の側に入れます。 |
+| `settings.phone.step1Link` | Tailscale を入れる |
+| `settings.phone.step2` | Tailscale の管理画面で「MagicDNS」と「HTTPS Certificates」を有効にします。 |
+| `settings.phone.step2Link` | 管理画面を開く |
+| `settings.phone.step3` | PC で次の 1 行を実行し、出た https:// で始まるアドレスを控えます（WSL2 なら Windows の PowerShell で）。 |
+| `settings.phone.step4` | 控えたアドレスを足して、libretto を起動し直します。< > の中は手順 3 で出たアドレスに置き換えます。この手順だけは起動し直しが要ります。 |
+| `settings.phone.step5` | 起動し直したら、「端末」の「別の端末を追加する」で出たアドレスをスマホで開きます。 |
+| `settings.cmd.ai.install` | npm install -g @anthropic-ai/claude-code |
+| `settings.cmd.ai.update` | claude update |
+| `settings.cmd.ai.login` | claude auth login |
+| `settings.cmd.tools.linux` | sudo apt install libreoffice poppler-utils |
+| `settings.cmd.tools.darwin` | brew install --cask libreoffice && brew install poppler |
+| `settings.cmd.isolation.tools` | sudo apt install bubblewrap socat ripgrep |
+| `settings.cmd.isolation.userns` | sudo sysctl kernel.apparmor_restrict_unprivileged_userns=0 |
+| `settings.cmd.phone.serve` | tailscale serve --bg {port} |
+| `settings.cmd.phone.start` | LIBRETTO_ORIGIN=http://127.0.0.1:{port},https://<PC の名前>.<tailnet の名前>.ts.net npm start |
 
 **ホームの依頼の候補（ラベルを付けたメールと、リアクションを付けた Slack の投稿のカード。実装設計書 6.4 (7)・6.6 (7)）**
 

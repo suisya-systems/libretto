@@ -61,7 +61,7 @@ import {
   setGoogleClient,
   setKey,
 } from '../model/keys.ts'
-import type { Isolation } from '../model/sandbox.ts'
+import { type Isolation, MIN_CLAUDE } from '../model/sandbox.ts'
 import { createConversation, destChoices, TARGET } from '../roles/conversation.ts'
 import { createEntrance, currentSet, entranceView, writeApproval, writeAtomic } from '../roles/entrance.ts'
 import { currentMarks, OUTPUT_FILES, reviewsOf } from '../roles/judge.ts'
@@ -118,10 +118,20 @@ export type ServerOptions = {
   slack?: Slack // Slack の連携（6.6 (2)）。無ければ設定の画面で入れたトークンで
   slackEmoji?: string // 取り込みの目印（設定の Issue までは既定の memo）
   slackBot?: Slack // お知らせの Slack の DM（6.8 (8)）。無ければ設定の画面で入れたボットトークンで
-  tools?: Tools // 起動時の事前点検で見つけた LibreOffice と poppler（6.10 (5)）
+  tools?: Tools // 起動時の事前点検で見つけた LibreOffice と poppler（6.10 (5)）。確かめ直すと中身が入れ替わる（6.13 (1)）
+  claude?: Claude // 起動時の Claude Code の版とログイン（6.13 (2)）
+  recheck?: () => Promise<EnvCheck> // 起動時の点検のやり直し（隔離の自己点検・道具・Claude Code。6.13 (1)）
+  platform?: NodeJS.Platform
+  port?: number
   senders?: Record<string, Sender> // お知らせの画面の外の送り手（6.8 (5)）。Slack の DM は slackBot から作る
   pushFetch?: typeof fetch // Web Push の配信元へ送る口（テストは偽の配信元へ向ける。6.8 (13)）
 }
+
+// Claude Code の版とログイン（6.13 (2)）。signedIn は `claude auth status`（読めなければ undefined）
+export type Claude = { version?: string; ok: boolean; signedIn?: boolean }
+export type EnvCheck = { isolation: Isolation; cause?: IsolationCause; claude: Claude }
+
+const PLATFORMS = ['linux', 'darwin', 'win32'] as const
 
 export function createServer(o: ServerOptions) {
   const now = o.now ?? (() => new Date())
@@ -150,6 +160,10 @@ export function createServer(o: ServerOptions) {
     log,
   })
   const changed = () => hub.emit('host.changed', { ...status })
+  // 動作環境の確認（6.13）。確かめ直しで変わる
+  let cause = o.cause
+  let claude: Claude = o.claude ?? { version: MIN_CLAUDE, ok: true }
+  let checkedAt = jst(now())
   const storage = (written: boolean) => {
     const ok = written && !stop.unsaved()
     if (status.storageOk === ok) return
@@ -277,6 +291,7 @@ export function createServer(o: ServerOptions) {
     signInChanged: (waiting) => {
       status.signIn = waiting
       changed()
+      hub.emit('connections.changed', {}) // 設定の Claude Code の行（6.13 (2)）
     },
     log,
     google,
@@ -457,7 +472,7 @@ export function createServer(o: ServerOptions) {
     const view: ConnectionsView = {
       isolation: {
         level: status.isolation,
-        ...(o.cause && { cause: o.cause }),
+        ...(cause && { cause }),
         running: !!probing,
         ...(last && { last: { at: last.at, verdict: last.verdict } }),
       },
@@ -472,6 +487,23 @@ export function createServer(o: ServerOptions) {
       slack: slackView(),
       slackDm: { state: slackDm.state() },
       tools: { soffice: !!tools.soffice, pdftoppm: !!tools.pdftoppm },
+      env: {
+        platform: PLATFORMS.find((p) => p === (o.platform ?? process.platform)) ?? 'other',
+        port: o.port ?? 7780,
+        checking: !!checking,
+        checkedAt,
+        ai: {
+          state: !claude.version
+            ? 'missing'
+            : !claude.ok
+              ? 'old'
+              : status.signIn || claude.signedIn === false
+                ? 'signedOut'
+                : 'ok',
+          ...(claude.version && { version: claude.version }),
+        },
+        phone: o.origins.some((x) => x.startsWith('https://')),
+      },
       inference: {
         classifiedToday: ledger.classifiedCount(now()),
         dailyLimit: inferenceSettings(home).dailyLimit,
@@ -650,14 +682,46 @@ export function createServer(o: ServerOptions) {
     return c.body(null, 204)
   })
 
-  app.post('/api/checks/run', (c) => {
-    if (!o.probe) return c.json({ reason: 'not_found' }, 404)
+  // 「もう一度確かめる」（6.13 (1)）。起動時と同じ点検を順に。同時に 1 本。止めている間も道具と Claude Code は確かめる
+  let checking: Promise<void> | undefined
+  function checkEnv(): Promise<void> {
+    if (checking) return checking
+    // 後始末は .finally で（中で待つものが無くても、checking を入れた後に走る）
+    checking = recheckAll()
+      .catch((e) => log(`env check: ${e instanceof Error ? e.stack : String(e)}`))
+      .finally(() => {
+        checkedAt = jst(now())
+        checking = undefined
+        hub.emit('connections.changed', {})
+      })
+    hub.emit('connections.changed', {})
+    return checking
+  }
+  async function recheckAll() {
+    if (o.recheck) {
+      const r = await o.recheck()
+      cause = r.cause
+      claude = r.claude
+      if (status.isolation !== r.isolation) {
+        status.isolation = r.isolation
+        changed()
+      }
+    }
+    if (stop.isStopped()) return
+    // ログインし直し待ちは、ログインが確かめられなければ起こし直す（まだ切れていればまた待ちに戻る）
+    if (status.signIn && claude.signedIn !== false) runner.retrySignIn()
+    void slackDm.check()
+    poller.recheck().catch((e) => log(`env check intake: ${e instanceof Error ? e.stack : String(e)}`))
     try {
       void checkIsolation()
     } catch (e) {
-      if (e instanceof Stopped) return c.json({ reason: 'stopped' }, 409)
-      throw e
+      if (!(e instanceof Stopped)) throw e
     }
+  }
+
+  app.post('/api/checks/run', (c) => {
+    if (!o.probe && !o.recheck) return c.json({ reason: 'not_found' }, 404)
+    void checkEnv()
     return c.json({}, 202)
   })
 
