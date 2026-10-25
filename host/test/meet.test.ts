@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { createGoogle, DRIVE_SCOPE, GMAIL_SCOPE, MEET_SCOPE } from '../src/intake/google.ts'
 import {
   actionItems,
+  assigneeOf,
   confidenceOf,
   MEET_EXAMPLE,
   MEET_INSTRUCTION,
@@ -154,10 +155,45 @@ describe('会議メモの読み取り（6.7 (2)(3)）', () => {
       '2026-10-22T03:59:00.000+09:00',
     )
     expect(parseTitle('Gemini によるメモ の使い方', '2026-10-21T02:59:00Z')).toBeUndefined()
+    // 略号の無い時間帯は createdTime から
+    expect(parseTitle('Sync - 2026/10/21 11:59 GMT+05:30 - Notes by Gemini', '2026-10-21T06:29:00Z')?.heldAt).toBe(
+      '2026-10-21T15:29:00.000+09:00',
+    )
+  })
+  it('書き出しの崩れ: チェックリストの印・全角の括弧・入れ子の点・BOM・別の言い回しの注意書きと「見つかりませんでした」', () => {
+    const text = [
+      '\uFEFF📝 メモ',
+      'アクション\u00A0アイテム',
+      '* ☐ [岩間 涼] 資料を作る',
+      '* [ ] [山田 花子] 予約する',
+      '    ○ 【チーム】 共有する',
+      '  [ ] [佐藤 一] 点の無い字下げのチェック',
+      'Gemini で作成されたメモは不正確な場合があります。',
+    ].join('\n')
+    const items = actionItems(text)?.items ?? []
+    expect(items).toEqual([
+      '[岩間 涼] 資料を作る',
+      '[山田 花子] 予約する',
+      '【チーム】 共有する',
+      '[佐藤 一] 点の無い字下げのチェック',
+    ])
+    expect(items.map(assigneeOf)).toEqual(['岩間 涼', '山田 花子', 'チーム', '佐藤 一'])
+    // 「Gemini で」「Gemini の」で始まる項目では切らず、注意書きの言い回しで切る
+    const lead = ['Gemini で資料の下書きを作る', 'Gemini で作成した資料を共有する', 'Gemini の評価を書く']
+    expect(
+      actionItems(['Next steps', ...lead, 'Gemini can make mistakes, so double-check it'].join('\n'))?.items,
+    ).toEqual(lead)
+    expect(actionItems('推奨される次のステップ\nこの会議では推奨される次のステップは見つかりませんでした。')).toEqual({
+      items: [],
+      truncated: false,
+    })
   })
   it('節が無ければ undefined、節が空・「ありません」だけなら []、項目は節の中だけ', () => {
     expect(actionItems('まとめ\n話しました')).toBeUndefined()
-    expect(actionItems('推奨される次のステップ\n\nGemini が作成したメモ')).toEqual({ items: [], truncated: false })
+    expect(actionItems('推奨される次のステップ\n\nGemini が作成したメモは不正確な場合があります。')).toEqual({
+      items: [],
+      truncated: false,
+    })
     expect(actionItems('次のステップ:\n* ありません\n')).toEqual({ items: [], truncated: false })
     expect(actionItems(NOTE_TEXT([MINE, OTHERS]))).toEqual({ items: [MINE, OTHERS], truncated: false })
     expect(actionItems(`Suggested next steps\n${'- x\n'.repeat(51)}`)?.truncated).toBe(true)
