@@ -630,6 +630,15 @@ export const W = {
   'settings.notices.kind.auto_started': '自動で開始した',
   'settings.notices.kind.candidates': '依頼の候補が届いた',
   'settings.notices.kind.started': '下書きに取りかかった',
+  'settings.notices.quiet': '通知を止める時間帯',
+  'settings.notices.quietNote':
+    'この時間帯は通知を出さず、明けたときに 1 通にまとめて知らせます。お知らせ欄にはその間も残ります。時刻は libretto を動かしている PC の時計で決まります。',
+  'settings.notices.quietNow': '{from}〜{to} は通知を止めます',
+  'settings.notices.quietNone': '通知を止める時間帯はありません',
+  'settings.notices.quietFrom': '始まり',
+  'settings.notices.quietTo': '終わり',
+  'settings.notices.quietSave': 'この時間帯で止める',
+  'settings.notices.quietOff': '止めない',
   'settings.notices.saved': '保存しました。',
   'settings.notices.failed': '保存できませんでした。もう一度お試しください。',
 } as const

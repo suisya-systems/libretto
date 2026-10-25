@@ -2756,6 +2756,19 @@ GitHub #29 は、本物のモデルで依頼を流したオーナーの所感（
 - **`POST /api/devices/presence` は (9) の 2 で足す**。読むのはホストが Web Push を送るかを決めるときだけで、この Issue には送り先が無い。
 - **設定の「お知らせ」の節**: この端末の状態（「この端末に通知します」/「許可されていません」/「この開き方では使えません」）と「この端末に通知する」（押したときだけ許可を求める）、ブラウザで拒んだとき・`http://` の開き方のときの (7) の文、出来事ごとの入り切り。画面を閉じていても届く通知はまだ無いので、(7) の「このブラウザでは、画面を開いているあいだだけ通知します」を常に出す。iPhone の「ホーム画面に追加」の文は、マニフェストを置く (9) の 2 で出す（今は追加しても通知を受け取れないため）。
 
+**(12) 実装の決め事（GitHub #53。(9) の 4）**
+
+(9) の 4 を作るときに決めたこと。設計を Codex の設計レビューに 1 回かけ、出た指摘を反映した。
+
+- **時間帯は `settings.json` の `quietHours`**（`{ from: "HH:MM", to: "HH:MM" }` か `null`。既定は `null` = 止めない）。GET / PUT `/api/settings/quiet-hours`（本文は `{ quietHours }`）。区間は [from, to) で、from > to は日をまたぐ（22:00〜07:00）。from と to が同じものは受け付けない。`NoticePrefs`（出来事ごとの入り切り）には入れない。理由: `NoticePrefs` は出来事ごとの真偽だけで、画面はそのキーを並べてチェックボックスにしている。
+- **時刻はホストの OS の時間帯の時・分で比べる**（`quietAt(at, q, timeZone)`。`host/src/server/notices.ts`）。時間帯は既定で OS のもの、テストは引数で渡す（CI の UTC に依らない）。
+- **出すかどうかは出す時刻で決め、出さなかったものに印を残す**（`notices.held`。マイグレーション 0010）。送り出しの仕事が SSE の `notice` を出すとき、今が時間帯の中なら `outside: false` で出して `held` を立てる（お知らせ欄には残る）。画面の外の送り先は、時間帯の中は何も送らない（送り直し待ちのものも残す）。送り先ごとに送る直前にも確かめ、送っているうちに時間帯に入れば残りは明けまで残す。明けたら、`held` の行の `pending` は送らずに `dropped`（明けの 1 通にまとめたので）。理由（設計レビュー）: 書いた時刻で決めると、時間帯の直前に書いて直後に出したものが鳴る。時刻だけで後から判定すると、本人が時間帯を変えたときに、止めていたものが数えられずに消える・止めていなかったものを数える。印を残せば、時間帯を後から変えても数えるものは変わらない。
+- **明けの 1 通**（`quiet`）: 時間帯の外で送り出しの仕事が動くたびに、前の明けの 1 通が数えたところ（event_id の `quiet:<seq>`）より後の `held` の行を数え、1 件以上なら書く。案件ごとに最後の 1 行の種類で 1 件と数え、確認待ちは今もその revision のまま（まだ確認待ち）のものだけ。候補は、止めていた候補の知らせ 1 通ずつについて、直前の候補の知らせからそれまでに出た候補のうち、今も出したままで可能性「低」でないものを数える（候補の知らせを切っていたあいだの分は数えない）。0 件なら書かない。文は `NOTICE.quietEnd`（ui-wording.md）で、内訳は確認待ち・中止・完了・自動で開始・下書きに取りかかった・依頼の候補の順に、0 件を省いて並べる。開く面は `/`。
+- **自動で開始と下書きに取りかかったも内訳に入れる**。理由（設計レビュー）: 本人が画面の外へ出すと決めた出来事が、時間帯の中に起きたというだけで画面の外へ一度も出ないことになる。ui-wording.md の型（確認待ち・中止・完了・依頼の候補）にこの 2 つを足した。
+- **明けの 1 通は出来事ごとの入り切りに関わらず画面の外へ出す**（`noticeRoute.on('quiet')` は常に真）。時間帯を入れたこと自体が、明けに知らせてほしいという選択なので。
+- **ホストが止まっていたとき**: 明けを過ぎてから起動したら、起動の後の最初の見回りで明けの 1 通を書く。書いた直後に落ちた明けの 1 通は、ほかのお知らせと同じく SSE では出し直さない（送り先の `pending` は起動の後に送る。(11)）。止めていたあいだに SSE を出す前に落ちた行は印が立たないので、送り先へは明けの後にそのまま送る。
+- **時間帯を消したとき**（`null`）: もう `held` の行は増えない。前に止めていた分は、次に時間帯の外で動いたときに明けの 1 通にまとめる。
+
 ### 6.9 推測の分類と抑え方の決め事（Issue 24 の着手前の設計レビューで決めたこと）
 
 Gmail と Slack の文から「文書づくりを頼まれていそうだ」と libretto が見つけたものを、可能性（高・中・低）と見つけた理由付きの候補にし、見送りの学習・1 日の上限・見落としの自己測定を動かすまでを決める（設計書 4.2.2・5.7.3・10.1〜10.3）。中身は `host/src/intake/classify.ts`（`prefilter`・`classifyCandidate`・合成の `combine`）と `infer.ts`（読む範囲と回）、`poller.ts`（回の順）、設定の「自動検出」の欄。画面の言葉は ui-wording.md の対応表のとおり（推測 → 自動検出、確信度 → 可能性、拾った理由 → 見つけた理由、拾い漏れ → 見落とし、拾わないようにする → 除外する）。作らないもの: Slack の DM の推測（(13) A）、低の「やっぱり残す」（`keep`。(13) D）、過去 30 日に遡って分類し直すスクリプト（(13) C）。
@@ -3687,10 +3700,12 @@ CREATE TABLE sessions (
 );
 CREATE INDEX sessions_by_id ON sessions(session_id, seq);
 
--- お知らせ 1 行（6.8）。event_id は <遷移の event_id>#notice・candidates:<数えた候補の出来事の seq>。revision は書いた時点の案件の revision
+-- お知らせ 1 行（6.8）。event_id は <遷移の event_id>#notice・candidates:<数えた候補の出来事の seq>・quiet:<まとめた最後の seq>。
+-- revision は書いた時点の案件の revision。held は通知を止める時間帯に出さなかった印（6.8 (12)）
 CREATE TABLE notices (
   seq INTEGER PRIMARY KEY AUTOINCREMENT, case_id TEXT, kind TEXT NOT NULL, text TEXT NOT NULL, at TEXT NOT NULL,
-  event_id TEXT, path TEXT NOT NULL DEFAULT '/', outside INTEGER NOT NULL DEFAULT 0, revision INTEGER
+  event_id TEXT, path TEXT NOT NULL DEFAULT '/', outside INTEGER NOT NULL DEFAULT 0, revision INTEGER,
+  held INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX notices_by_at ON notices(at);
 CREATE UNIQUE INDEX notices_by_event ON notices(event_id);

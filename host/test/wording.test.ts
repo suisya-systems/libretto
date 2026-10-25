@@ -21,11 +21,11 @@ describe('ui-wording.md のホストが作る文', () => {
     expect(Object.keys(SAY)).toHaveLength(8)
     expect(table('**会話欄に足す 1 行')).toEqual(SAY)
   })
-  it('NOTICE の 13 個（出来事・キー・文・開く面の表）', () => {
+  it('NOTICE の 14 個（出来事・キー・文・開く面の表）', () => {
     const rest = md.slice(md.indexOf('**お知らせの 1 行'))
     const body = rest.slice(0, rest.indexOf('\n\n', rest.indexOf('|')))
     const rows = [...body.matchAll(/^\| [^|]+ \| `([^`]+)` \| ([^|]+) \| [^|]+ \|$/gm)]
-    expect(Object.keys(NOTICE)).toHaveLength(13)
+    expect(Object.keys(NOTICE)).toHaveLength(14)
     expect(Object.fromEntries(rows.map((m) => [m[1], m[2]]))).toEqual(NOTICE)
   })
   it('TALK の 7 個', () => {

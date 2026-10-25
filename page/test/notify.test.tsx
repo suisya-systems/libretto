@@ -201,6 +201,7 @@ describe('画面からサービスワーカーへ渡す', () => {
 describe('設定の「お知らせ」の節', () => {
   let prefs: Record<string, boolean>
   let sent: unknown[]
+  let quiet: unknown
   const conn: ConnectionsView = {
     isolation: { level: 'strong', running: false },
     google: { configured: false, state: 'none', label: 'libretto', docs: false, meet: false },
@@ -211,7 +212,15 @@ describe('設定の「お知らせ」の節', () => {
   beforeEach(() => {
     prefs = { your_turn: true, stopped: true, done: true, auto_started: true, candidates: true, started: false }
     sent = []
+    quiet = { quietHours: null }
     vi.stubGlobal('fetch', async (path: string, init: RequestInit = {}) => {
+      if (path === '/api/settings/quiet-hours') {
+        if (init.method === 'PUT') {
+          quiet = JSON.parse(String(init.body))
+          sent.push(quiet)
+        }
+        return new Response(JSON.stringify(quiet))
+      }
       if (path === '/api/settings/notices') {
         if (init.method === 'PUT') {
           prefs = JSON.parse(String(init.body))
@@ -245,6 +254,7 @@ describe('設定の「お知らせ」の節', () => {
     const section = () => el.querySelector('[aria-labelledby="h-notices"]') as HTMLElement
     return {
       text: () => section().textContent ?? '',
+      el: section,
       button: () =>
         [...section().querySelectorAll('button')].find((b) => b.textContent === W['settings.notices.enable']),
       box: (label: string) =>
@@ -299,6 +309,36 @@ describe('設定の「お知らせ」の節', () => {
     expect(sent).toEqual([{ ...prefs, started: true }])
     expect(p.box(W['settings.notices.kind.started'])?.checked).toBe(true)
     expect(p.text()).toContain(W['settings.notices.saved'])
+    p.done()
+  })
+
+  it('通知を止める時間帯は既定で無し。入れて保存し、「止めない」で外す（6.8 (12)）', async () => {
+    permission = 'granted'
+    stubBrowser()
+    const p = await render()
+    const button = (label: string) => [...p.el().querySelectorAll('button')].find((b) => b.textContent === label)
+    expect(p.text()).toContain(W['settings.notices.quietNone'])
+    expect(button(W['settings.notices.quietSave'])?.disabled).toBe(true)
+    expect(button(W['settings.notices.quietOff'])).toBeUndefined()
+    const time = (label: string, value: string) => {
+      const input = [...p.el().querySelectorAll('label')]
+        .find((l) => l.textContent === label)
+        ?.querySelector('input') as HTMLInputElement
+      act(() => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(input, value)
+        input.dispatchEvent(new Event('input', { bubbles: true }))
+      })
+    }
+    time(W['settings.notices.quietFrom'], '22:00')
+    time(W['settings.notices.quietTo'], '22:00')
+    expect(button(W['settings.notices.quietSave'])?.disabled).toBe(true) // 始まりと終わりが同じ
+    time(W['settings.notices.quietTo'], '07:00')
+    await act(async () => button(W['settings.notices.quietSave'])?.click())
+    expect(sent).toEqual([{ quietHours: { from: '22:00', to: '07:00' } }])
+    expect(p.text()).toContain('22:00〜07:00 は通知を止めます')
+    await act(async () => button(W['settings.notices.quietOff'])?.click())
+    expect(sent.at(-1)).toEqual({ quietHours: null })
+    expect(p.text()).toContain(W['settings.notices.quietNone'])
     p.done()
   })
 })
