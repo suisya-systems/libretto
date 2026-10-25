@@ -85,9 +85,28 @@ export const NOTICE = {
   autoStarted: '『{題}』を自動で開始しました。止めたいときは取り消せます',
   candidates: '依頼の候補が {n} 件届きました。進めるか見送るかを選べます',
   started: '『{題}』の下書きを書き始めました',
+  quietEnd: '通知を止めていたあいだに、{内訳}がありました',
 } as const
 const fill = (t: string, v: Record<string, string | number>) =>
-  t.replace(/\{(題|n|理由)\}/g, (_, k: string) => String(v[k]))
+  t.replace(/\{(題|n|理由|内訳)\}/g, (_, k: string) => String(v[k]))
+
+// 明けの 1 通の内訳（ui-wording.md の「お知らせの 1 行」の注記）。この順に並べ、0 件の項目は省く
+const QUIET_PARTS = {
+  your_turn: '確認待ち',
+  stopped: '中止',
+  done: '完了',
+  auto_started: '自動で開始',
+  started: '下書きに取りかかった',
+  candidates: '依頼の候補',
+} as const
+export type QuietCounts = Partial<Record<keyof typeof QUIET_PARTS, number>>
+export function quietEndText(c: QuietCounts): string | undefined {
+  const parts = Object.entries(QUIET_PARTS).flatMap(([k, label]) => {
+    const n = c[k as keyof QuietCounts] ?? 0
+    return n ? [`${label} ${n} 件`] : []
+  })
+  return parts.length ? fill(NOTICE.quietEnd, { 内訳: parts.join('・') }) : undefined
+}
 
 const LIMIT_SAY = { 往復上限: SAY.roundLimit, 直らない: SAY.stuck, 判定できない: SAY.unjudgeable } as const
 // 停止の理由 → 会話欄に書いた 1 行（decide の say と同じ対応）

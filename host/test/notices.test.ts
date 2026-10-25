@@ -8,7 +8,7 @@ import { type Ctx, type Input, noticeCandidates, planFingerprint, SAY, transitio
 import { initHome, openDb } from '../src/ledger/db.ts'
 import { Ledger } from '../src/ledger/ledger.ts'
 import { createServer } from '../src/server/app.ts'
-import { createNotices, type Sender } from '../src/server/notices.ts'
+import { createNotices, quietAt, type Sender } from '../src/server/notices.ts'
 import { createHub, type SseMessage } from '../src/server/sse.ts'
 
 let ledger: Ledger
@@ -424,6 +424,154 @@ describe('送り出し（6.8 (2)(5)）', () => {
     expect(seen).toEqual([]) // 起動より前のお知らせは SSE で出し直さない
     expect(calls).toEqual([['push:s1', [1]]])
   })
+
+  describe('通知を止める時間帯（6.8 (14)）', () => {
+    // 時計は 12:00（JST）。11:00〜13:00 を止める。時間帯は引数で渡す（CI の UTC に依らない）
+    const quiet = { from: '11:00', to: '13:00' }
+    const opened = () => {
+      clock = new Date('2026-10-23T04:00:00Z') // 13:00（JST）。明けた
+    }
+    const make = () =>
+      createNotices({ ledger, hub, senders: { push }, now: () => clock, quiet: () => quiet, timeZone: 'Asia/Tokyo' })
+    const sse = () => seen.filter((m) => m.event === 'notice').map((m) => JSON.parse(m.data) as Notice)
+    const candidate = (candidateId: string) =>
+      transition(ledger, {
+        type: 'candidate.presented',
+        candidate: { candidateId, source: 'gmail', origin: '合図', aiInstructionFlag: false, senderKey: 'a@x' },
+        card: {
+          subject: '件名',
+          from: 'A',
+          receivedAt: '2026-10-22',
+          link: 'https://mail.example/t',
+          summary: '要約',
+          proposal: { docType: '記事', destination: [paste] },
+          attachmentsNeeded: [],
+          attachments: [],
+        },
+      } as Input)
+
+    it('時刻は [from, to) を渡した時間帯で比べる。from > to は日をまたぐ', () => {
+      const night = { from: '22:00', to: '07:00' }
+      const at = (iso: string) => new Date(iso)
+      expect(quietAt(at('2026-10-23T13:30:00Z'), night, 'Asia/Tokyo')).toBe(true) // 22:30
+      expect(quietAt(at('2026-10-23T13:30:00Z'), night, 'UTC')).toBe(false) // 13:30
+      expect(quietAt(at('2026-10-23T21:59:00Z'), night, 'Asia/Tokyo')).toBe(true) // 06:59
+      expect(quietAt(at('2026-10-23T22:00:00Z'), night, 'Asia/Tokyo')).toBe(false) // 07:00
+      expect(quietAt(at('2026-10-23T03:00:00Z'), quiet, 'Asia/Tokyo')).toBe(true)
+      expect(quietAt(at('2026-10-23T04:00:00Z'), quiet, 'Asia/Tokyo')).toBe(false)
+      expect(quietAt(at('2026-10-23T03:00:00Z'), null, 'Asia/Tokyo')).toBe(false)
+    })
+
+    it('その間は出さず（お知らせ欄には残る）、明けに 1 通。止めていた分は送らない', async () => {
+      const out = make()
+      stop()
+      await out.flush()
+      expect(sse().map((x) => [x.kind, x.outside])).toEqual([['stopped', false]])
+      expect(calls).toEqual([])
+      clock = new Date(clock.getTime() + 30 * MIN) // 送り直しの時が来ても、時間帯の中は送らない
+      await out.flush()
+      expect(calls).toEqual([])
+
+      opened()
+      await out.flush()
+      await out.flush() // 同じ分を二度まとめない
+      expect(sse().map((x) => [x.kind, x.outside, x.text, x.path])).toEqual([
+        ['stopped', false, expect.any(String), '/cases/c1'],
+        ['quiet', true, '通知を止めていたあいだに、中止 1 件がありました', '/'],
+      ])
+      expect(calls).toEqual([['push:s1', [2]]])
+      expect(status()).toEqual([])
+      expect(notices().map((x) => x.kind)).toEqual(['stopped', 'quiet'])
+    })
+
+    it('案件ごとに最後の 1 行で数え、確認待ちはまだ確認待ちのもの、候補はまだ出したままのものだけ', async () => {
+      const out = make()
+      drafted() // c1 確認待ち → 本人が答える
+      run({
+        type: 'conversation.request',
+        eventId: id(),
+        caseId: 'c2',
+        title: '月報',
+        mode: '確認しながら',
+        docType: '記事',
+        destination: [paste],
+      })
+      run({
+        type: 'entrance.drafted',
+        caseId: 'c2',
+        by: 'libretto',
+        eventId: id(),
+        expectedRevision: ledger.getCase('c2')?.revision,
+        setFingerprint: 's',
+      })
+      run({ type: 'cost.cap', by: '費用', caseId: 'c2', eventId: 'c2:cost.cap:k', scope: '案件', callId: 'k' }) // c2 は確認待ち → 中止
+      candidate('gmail:a')
+      noticeCandidates(ledger)
+      await out.flush()
+      // 候補の知らせを切っていたあいだの分は数えない
+      ledger.noticeRoute = { on: (k) => k !== 'candidates', targets: () => ['push:s1'] }
+      candidate('gmail:b')
+      noticeCandidates(ledger)
+      ledger.noticeRoute = { on: () => true, targets: () => ['push:s1'] }
+      candidate('gmail:c')
+      candidate('gmail:d')
+      transition(ledger, { type: 'candidate.dismiss', candidateId: 'gmail:d', reason: 'もう済んだ' })
+      noticeCandidates(ledger)
+      await out.flush()
+      approve()
+      await out.flush()
+
+      opened()
+      await out.flush()
+      expect(lastNotice()).toMatchObject({
+        kind: 'quiet',
+        text: '通知を止めていたあいだに、中止 1 件・依頼の候補 2 件がありました',
+      })
+    })
+
+    it('止めていたあいだの知らせが、明けた時点でもう済んでいれば書かない', async () => {
+      const out = make()
+      drafted()
+      await out.flush()
+      approve()
+      opened()
+      await out.flush()
+      expect(notices().map((x) => x.kind)).toEqual(['your_turn'])
+      expect(calls).toEqual([])
+    })
+
+    it('送っているうちに時間帯に入ったら、残りの送り先は明けまで残す', async () => {
+      clock = new Date('2026-10-23T01:59:00Z') // 10:59（JST）
+      ledger.noticeRoute = { on: () => true, targets: () => ['push:s1', 'slack'] }
+      const slack: Sender = async (target, ns) => {
+        calls.push([target, ns.map((x) => x.id)])
+        return 'sent'
+      }
+      const out = createNotices({
+        ledger,
+        hub,
+        senders: {
+          push: async (t, ns) => {
+            clock = new Date('2026-10-23T02:00:00Z') // 送っているうちに 11:00
+            return push(t, ns)
+          },
+          slack,
+        },
+        now: () => clock,
+        quiet: () => quiet,
+        timeZone: 'Asia/Tokyo',
+      })
+      stop()
+      await out.flush()
+      expect(calls).toEqual([['push:s1', [1]]])
+      opened()
+      await out.flush()
+      expect(calls).toEqual([
+        ['push:s1', [1]],
+        ['slack', [1]],
+      ])
+    })
+  })
 })
 
 describe('設定の入り切り（6.8 (6)）', () => {
@@ -469,6 +617,32 @@ describe('設定の入り切り（6.8 (6)）', () => {
     approve()
     host('materials.ready')
     expect(lastNotice()).toMatchObject({ kind: 'started', outside: true })
+
+    // 通知を止める時間帯（6.8 (14)）。既定は止めない。始まりと終わりが同じは入れられない
+    expect(await (await server.app.request('/api/settings/quiet-hours', { headers })).json()).toEqual({
+      quietHours: null,
+    })
+    for (const quietHours of [{ from: '22:00', to: '22:00' }, { from: '24:00', to: '07:00' }, { from: '22:00' }])
+      expect(
+        (
+          await server.app.request('/api/settings/quiet-hours', {
+            method: 'PUT',
+            headers,
+            body: JSON.stringify({ quietHours }),
+          })
+        ).status,
+      ).toBe(400)
+    const quietHours = { from: '22:00', to: '07:00' }
+    const q = await server.app.request('/api/settings/quiet-hours', {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ quietHours }),
+    })
+    expect(await q.json()).toEqual({ quietHours })
+    expect(await (await server.app.request('/api/settings/quiet-hours', { headers })).json()).toEqual({ quietHours })
+    expect(await (await server.app.request('/api/settings/notices', { headers })).json()).toMatchObject({
+      started: true,
+    })
     ledger.close()
   })
 })

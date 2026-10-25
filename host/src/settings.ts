@@ -1,9 +1,9 @@
-// settings.json（docs/implementation.md 9.2）。今は「あなたの文体の見本」（6.3.2 (10)）と自動検出（6.9 (10)）と、お知らせの出来事ごとの入り切り（6.8 (6)）と、入口の既定（6.11 (1)）。
+// settings.json（docs/implementation.md 9.2）。今は「あなたの文体の見本」（6.3.2 (10)）と自動検出（6.9 (10)）と、お知らせの出来事ごとの入り切り（6.8 (6)）と通知を止める時間帯（6.8 (14)）と、入口の既定（6.11 (1)）。
 // 置き換えで書き、前の版を settings.prev.json に残す。読めない・欄が無いときは既定
 import { randomBytes } from 'node:crypto'
 import { copyFileSync, existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { EntranceDefaults, InferenceSettings, MaterialRef, NoticePrefs } from '@libretto/shared/api'
+import { EntranceDefaults, InferenceSettings, MaterialRef, NoticePrefs, QuietHours } from '@libretto/shared/api'
 import { z } from 'zod'
 
 // 自動検出の既定は設計書 4.2.2・10.3 のとおり（Gmail は直近 7 日、Slack はチャンネル指定なし＋メンション、1 日 300 件）
@@ -40,6 +40,7 @@ const File = z
     entranceDefaults: EntranceDefaults.catch(ENTRANCE_DEFAULTS).default(ENTRANCE_DEFAULTS),
     // おまかせにした時刻。これ以後に出た合図の候補だけを自動で入口へ入れる（6.11 (2)）
     autoSince: z.partialRecord(Source, z.string()).catch({}).default({}),
+    quietHours: QuietHours.nullable().catch(null).default(null), // 既定は止めない（6.8 (10) の C）
   })
   .loose()
 type File = z.infer<typeof File>
@@ -51,6 +52,7 @@ function read(home: string): File {
     voiceSamples: [],
     inference: INFERENCE_DEFAULTS,
     notices: NOTICE_DEFAULTS,
+    quietHours: null,
     entranceDefaults: ENTRANCE_DEFAULTS,
     autoSince: {},
   }
@@ -81,6 +83,11 @@ export const noticePrefs = (home: string) => read(home).notices
 export function saveNoticePrefs(home: string, notices: NoticePrefs) {
   write(home, { ...read(home), notices })
   return notices
+}
+export const quietHours = (home: string) => read(home).quietHours
+export function saveQuietHours(home: string, quietHours: QuietHours | null) {
+  write(home, { ...read(home), quietHours })
+  return quietHours
 }
 
 export const entranceDefaults = (home: string) => read(home).entranceDefaults

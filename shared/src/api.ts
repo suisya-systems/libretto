@@ -353,7 +353,16 @@ export const ActionResult = z.object({
 export const ActionRejected = z.object({ reason: z.enum(['stale', 'invalid_transition']), current: CaseCard })
 
 // お知らせの 1 行（6.8 (1)(3)）。id は notices.seq、path は押すと開く面。outside は画面の外へも出すか（本人の操作でなく、本人が切っていない）
-export const NoticeKind = z.enum(['your_turn', 'stopped', 'done', 'auto_started', 'candidates', 'started', 'info'])
+export const NoticeKind = z.enum([
+  'your_turn',
+  'stopped',
+  'done',
+  'auto_started',
+  'candidates',
+  'started',
+  'info',
+  'quiet',
+])
 export type NoticeKind = z.infer<typeof NoticeKind>
 export const Notice = z.object({
   id: z.number().int(),
@@ -385,6 +394,12 @@ export const PushStatus = z.object({ publicKey: z.string(), subscribed: z.boolea
 export type PushStatus = z.infer<typeof PushStatus>
 // n はタブの中の通し番号（遅れて届いた前の POST で上書きしない）
 export const Presence = z.object({ tab: z.string().min(1).max(64), n: z.number().int(), visible: z.boolean() })
+// 通知を止める時間帯（6.8 (4)(14)）。[from, to) をホストの OS の時刻で。from > to は日をまたぐ。GET / PUT /api/settings/quiet-hours
+const HhMm = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/)
+export const QuietHours = z.object({ from: HhMm, to: HhMm }).refine((q) => q.from !== q.to)
+export type QuietHours = z.infer<typeof QuietHours>
+export const QuietHoursInput = z.object({ quietHours: QuietHours.nullable() })
+export type QuietHoursInput = z.infer<typeof QuietHoursInput>
 
 // 止めたのは本人、保存できないのはホスト。別の欄（5.7 (8)）。signIn は Claude のログインし直し待ち（6.2.3 (7)）
 // isolation は作り手の隔離（8.9 (5)）。入口・承認の帯と設定の面が読む（8.10 (6)）

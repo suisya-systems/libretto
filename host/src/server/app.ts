@@ -28,6 +28,7 @@ import {
   NoticePrefs,
   Presence,
   PushSubscriptionInput,
+  QuietHoursInput,
   SuppressionInput,
 } from '@libretto/shared/api'
 import { type Context, Hono } from 'hono'
@@ -71,9 +72,11 @@ import {
   entranceDefaults,
   inferenceSettings,
   noticePrefs,
+  quietHours,
   saveEntranceDefaults,
   saveInference,
   saveNoticePrefs,
+  saveQuietHours,
   saveVoiceSamples,
   VoiceSamplesInput,
   voiceSamples,
@@ -132,8 +135,9 @@ export function createServer(o: ServerOptions) {
     return !!at && now().getTime() - Date.parse(at) < SESSION_MS
   }
   const push = createPush({ home, ledger, valid, ...(o.pushFetch && { fetch: o.pushFetch }), log })
+  // 明けの 1 通（quiet）は時間帯を入れた本人が求めたものなので、入り切りに関わらず出す（6.8 (14)）
   ledger.noticeRoute = {
-    on: (kind) => kind !== 'info' && noticePrefs(home)[kind],
+    on: (kind) => kind === 'quiet' || (kind !== 'info' && noticePrefs(home)[kind]),
     targets: () => [...ledger.pushSessions().map((s) => `push:${s}`), ...(readKey(home, 'slackBot') ? ['slack'] : [])],
   }
   const notices = createNotices({
@@ -142,6 +146,7 @@ export function createServer(o: ServerOptions) {
     senders: { push: push.sender, slack: (target, ns) => slackDm.send(target, ns), ...o.senders },
     holdMs: { slack: SLACK_DM_HOLD_MS },
     now,
+    quiet: () => quietHours(home),
     log,
   })
   const changed = () => hub.emit('host.changed', { ...status })
@@ -997,6 +1002,16 @@ export function createServer(o: ServerOptions) {
     if (r instanceof Response) return r
     hub.emit('settings.changed', {})
     return c.json(r)
+  })
+  // 通知を止める時間帯（6.8 (14)）。null は止めない
+  app.get('/api/settings/quiet-hours', (c) => c.json({ quietHours: quietHours(home) }))
+  app.put('/api/settings/quiet-hours', async (c) => {
+    const body = QuietHoursInput.safeParse(await c.req.json().catch(() => undefined))
+    if (!body.success) return c.json({ reason: 'invalid' }, 400)
+    const r = writing(c, () => saveQuietHours(home, body.data.quietHours))
+    if (r instanceof Response) return r
+    hub.emit('settings.changed', {})
+    return c.json({ quietHours: r })
   })
 
   app.post('/api/devices', async (c) => {
