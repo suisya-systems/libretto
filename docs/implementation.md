@@ -2407,7 +2407,8 @@ Slack で本人がリアクション `:memo:` を付けた投稿が「依頼の�
 - 足りない権限（`x-oauth-scopes`）が設定の面に出る。`invalid_auth` で `expired`。`429` で `rate_limited`。
 - 他人の投稿の印。「進める」の `intake.json`。候補の中の会話の読み直し（本人が違えば読まない）。
 - `.env.local` の場所が `srt` の `denyRead` と CLI の拒否規則に入る。作り手の環境変数に `LIBRETTO_SLACK_USER_TOKEN` が入らない。
-- 本物の Slack での確かめ（`reactions.list` の並び順・`x-oauth-scopes` の見出し・権限を足して入れ直した後のトークン）は、窓口が実機で行う。
+- スレッドの返信に付けた印の読み直し: `conversations.replies` は返信の `ts` でもスレッドを返す（公式文書「親の投稿か、スレッドの中の投稿」）ので、候補 id の `ts` のままで引く。偽の Slack もそのとおりに答える。
+- 本物の Slack での確かめ（`reactions.list` の並び順・`x-oauth-scopes` の見出し・権限を足して入れ直した後のトークン・返信の `ts` での `conversations.replies`）は、窓口が実機で行う。
 
 **(9) オーナーが用意すること**
 

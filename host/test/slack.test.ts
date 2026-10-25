@@ -334,6 +334,27 @@ describe('候補の操作（6.6 (6)）', () => {
     for (const f of allFiles(home)) expect(readFileSync(f).includes(Buffer.from(SECRET)), f).toBe(false)
   })
 
+  it('内容を修正: スレッドの返信に付けた印でも、読み直した本文に印の投稿が入る', async () => {
+    await setup()
+    const parent = ts(1)
+    const reply = ts(2)
+    s.state.threads.set(`C1:${parent}`, [
+      { ts: parent, user: 'U0ALICE', text: '親の投稿', thread_ts: parent },
+      { ts: reply, user: 'U0ALICE', text: `返信の依頼${SECRET}`, thread_ts: parent },
+    ])
+    s.state.items = [reacted('C1', { ts: reply, user: 'U0ALICE', text: `返信の依頼${SECRET}`, thread_ts: parent })]
+    await server.poller.run()
+    const seen: Call[] = []
+    talkReply = (call) => {
+      seen.push(call)
+      return say({ text: 'どう変えたいかを教えてください。' })
+    }
+    await talk(`slack:C1:${reply}`, '短く')
+    const body = material(seen[0], '外部資料（Slack の投稿）')?.text ?? ''
+    expect(body.startsWith(`（印を付けた投稿）\n佐藤 アリス: 返信の依頼${SECRET}`)).toBe(true)
+    expect(body).toContain('親の投稿')
+  })
+
   it('見送る: リアクションのカードは 3 つの理由だけ', async () => {
     await setup()
     s.state.items = [reacted('C1', { ts: ts(1), user: ME, text: 'x' })]

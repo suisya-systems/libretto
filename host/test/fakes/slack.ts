@@ -61,7 +61,12 @@ export async function startFakeSlack() {
       })
     }
     if (method === 'conversations.replies') {
-      const t = state.threads.get(`${params.channel}:${params.ts}`)
+      // ts は親の投稿でも、スレッドの中の投稿でもよい（公式文書のとおり）
+      const t = [...state.threads].find(
+        ([k, m]) =>
+          k === `${params.channel}:${params.ts}` ||
+          (k.startsWith(`${params.channel}:`) && m.some((x) => x.ts === params.ts)),
+      )?.[1]
       return t
         ? json({ ok: true, messages: t.slice(0, Number(params.limit ?? 1000)) })
         : json({ ok: false, error: 'thread_not_found' })

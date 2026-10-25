@@ -204,6 +204,7 @@ export async function readPost(
   marked: RawMessage | undefined,
   signal: AbortSignal,
 ): Promise<{ ok: true; post: Post } | SlackFail> {
+  // 読み直しは投稿の ts で引く。conversations.replies の ts は「親の投稿かスレッドの中の投稿」のどちらでもよい（公式文書）
   const threadTs = marked ? marked.thread_ts : ts
   let thread: RawMessage[] = []
   if (threadTs) {
