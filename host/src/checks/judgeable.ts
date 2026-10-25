@@ -160,10 +160,10 @@ const NAME_SHAPES = [
   /(?<![\w./-])[\w-]+\.(?:json|ya?ml|toml|md|sh|py|tsx?|env|ini|cfg|lock)(?![\w.])/g, // settings.json（Node.js は拾わない）
   /(?<!\w)[A-Z][A-Z0-9]*_[A-Z0-9_]+(?!\w)/g, // ANTHROPIC_API_KEY
 ]
-const FENCE = /^(`{3,}|~{3,})[^\n]*\n[\s\S]*?^\1[^\n]*$/gm
+const FENCE = /^ {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?^ {0,3}\1[^\n]*$/gm
 export function unmarkedNames(text: string): string[] {
   const t = text
-    .replace(/`[^`\n]*`/g, ' ')
+    .replace(/(`+)(?!`)[\s\S]*?(?<!`)\1(?!`)/g, ' ') // ``a.json`` のような複数のバッククォートも
     .replace(/\]\([^)]*\)/g, ']')
     .replace(/https?:\/\/\S+/g, ' ')
   return NAME_SHAPES.flatMap((re) => [...t.matchAll(re)].map((m) => m[0]))

@@ -283,8 +283,8 @@ describe('機械判定（6.2.5 (2)）', () => {
     expect(bad.told).toEqual([
       'コード書式（`）になっていない名前: /review、--dry-run、-p、/stop、settings.json、ANTHROPIC_API_KEY',
     ])
-    const ok = await names('`--dry-run` を付けます。')
-    expect([ok.units, ok.told]).toEqual([[false], undefined])
+    const ok = await names('`--dry-run` を付けます。\n\n``settings.json`` も。\n\n  ```sh\n  claude --dry-run\n  ```')
+    expect([ok.units, ok.told]).toEqual([[false, false], undefined])
     // 同じ段落の名前を直した分が gap で測れる
     expect((await names('--a --b --c')).measured?.gap).toBe(3)
     expect((await names('`--a` `--b` --c')).measured?.gap).toBe(1)
