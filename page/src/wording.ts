@@ -180,6 +180,8 @@ export const W = {
   'band.isolationBroken':
     'ライターからチェック項目を隠す仕組みが動きません。下書きは始まりません。libretto を再起動してください',
   'band.isolationLink': '設定を開く',
+  'band.envMissing': '動作環境で足りないものが {n} 件あります',
+  'band.envLink': '直し方を見る',
   'progress.now': 'いま',
   'progress.round': '{n} 回目のチェック（最大 {max} 回）',
   'progress.lead': 'このページを閉じても進みます。',

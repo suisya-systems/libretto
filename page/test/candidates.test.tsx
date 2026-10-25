@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 // ホームの「依頼の候補」の欄（docs/implementation.md 6.4 (5)(7)）
-import type { CandidateCard, HomeView } from '@libretto/shared/api'
+import type { CandidateCard, ConnectionsView, HomeView } from '@libretto/shared/api'
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -40,9 +40,11 @@ const view = (over: Partial<HomeView> = {}): HomeView => ({
 let home: HomeView
 const sent: { method: string; path: string; body?: unknown }[] = []
 let answer: (path: string) => Response
+let connections: ConnectionsView | undefined
 beforeEach(() => {
   sent.length = 0
   home = view()
+  connections = undefined
   answer = () => new Response('{}')
   window.history.replaceState(null, '', '/')
   vi.stubGlobal('fetch', async (path: string, init: RequestInit = {}) => {
@@ -52,6 +54,7 @@ beforeEach(() => {
     }
     if (path === '/api/host') return new Response(JSON.stringify(host))
     if (path === '/api/home') return new Response(JSON.stringify(home))
+    if (path === '/api/connections' && connections) return new Response(JSON.stringify(connections))
     if (path.startsWith('/api/conversation')) return new Response(JSON.stringify({ messages: [], pending: false }))
     if (path.startsWith('/api/cases/')) return new Response('{}', { status: 404 })
     throw new Error(`unexpected ${path}`)
@@ -80,6 +83,35 @@ async function render() {
     done: () => act(() => root.unmount()),
   }
 }
+
+describe('動作環境の帯（6.13 (2)）', () => {
+  it('足りないものがあれば、ホームの先頭に数と設定の節へのリンクを出す。読めなければ出さない', async () => {
+    let r = await render()
+    expect(r.text()).not.toContain(W['band.envLink'])
+    r.done()
+    connections = {
+      isolation: { level: 'strong', running: false },
+      google: { configured: false, state: 'none', label: 'libretto', docs: false, meet: false },
+      slack: { configured: false, state: 'none', emoji: 'memo', missingScopes: [] },
+      slackDm: { state: 'none' },
+      tools: { soffice: false, pdftoppm: false },
+      env: {
+        platform: 'linux',
+        port: 7780,
+        checking: false,
+        checkedAt: '2026-10-24T05:03:00Z',
+        ai: { state: 'signedOut' },
+        phone: false,
+      },
+      inference: { classifiedToday: 0, dailyLimit: 300, recall: { hit: 0, total: 0 }, suppressions: [] },
+    }
+    r = await render()
+    await vi.waitFor(() => expect(r.text()).toContain(w('band.envMissing', { n: 2 })))
+    const a = [...r.el.querySelectorAll('a')].find((x) => x.textContent === W['band.envLink'])
+    expect(a?.getAttribute('href')).toBe('/settings#h-env')
+    r.done()
+  })
+})
 
 describe('依頼の候補（6.4 (7)）', () => {
   it('カード: ラベルのしるし・差出人・件名・頼まれていそうなこと・作るものと保存先・添付と AI への指示の注記・メールへのリンク', async () => {

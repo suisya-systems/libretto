@@ -18,6 +18,7 @@ import { z } from 'zod'
 import { send, useLoad } from '../load.ts'
 import { type DeviceState, deviceState, enable, pushable, syncPush } from '../notify.ts'
 import { Confirm } from '../parts/Dialog.tsx'
+import { EnvBand, envMissing } from '../parts/EnvBand.tsx'
 import { W, type WKey, w } from '../wording.ts'
 import { DeviceSection } from './Devices.tsx'
 import { ProblemView } from './Pending.tsx'
@@ -461,13 +462,7 @@ function EnvSection({ c, reload }: { c: ConnectionsView; reload: () => void }) {
   const googleShown = google.state === 'connected'
   const gmailOff = google.problem === 'api_disabled'
   const driveOff = google.docsProblem === 'api_disabled' || google.meetProblem === 'api_disabled'
-  const missing = [
-    env.ai.state !== 'ok',
-    v.level !== 'strong',
-    !toolsOk,
-    slackShown && !slackOk,
-    googleShown && (gmailOff || driveOff),
-  ].filter(Boolean).length
+  const missing = envMissing(c)
   const [badge, label] = LEVEL[v.level]
   const status = v.running
     ? W['settings.probe.running']
@@ -1413,9 +1408,15 @@ export function Settings() {
   const notices = useLoad('/api/settings/notices', NoticePrefs, (s) => s.event === 'settings.changed')
   const modes = useLoad('/api/settings/entrance-defaults', EntranceDefaults, (s) => s.event === 'settings.changed')
   const quiet = useLoad('/api/settings/quiet-hours', QuietHoursInput, (s) => s.event === 'settings.changed')
+  // ホームの帯から来たら（/settings#h-env）、読み込めたところで節まで送る
+  const envLoaded = !!env.data
+  useEffect(() => {
+    if (envLoaded && window.location.hash === '#h-env') document.getElementById('h-env')?.scrollIntoView()
+  }, [envLoaded])
   return (
     <section className="face">
       <h1 className="face-title">{W['nav.settings']}</h1>
+      <EnvBand c={env.data} here />
       {env.data && (
         <LinkSection
           g={env.data.google}

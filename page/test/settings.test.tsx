@@ -228,6 +228,7 @@ describe('動作環境の確認（8.10 (6)）', () => {
     expect(r.text()).toContain(W['settings.envHeading'])
     expect(r.text()).toContain(W['settings.env.ok'])
     expect(r.text()).not.toContain(W['settings.env.where'])
+    expect(r.text()).not.toContain(W['band.envLink'])
     expect(r.text()).toContain(W['settings.isolation.strong'])
     expect(r.text()).toContain(W['settings.probe.never'])
     expect(r.el.querySelector('#h-env')?.parentElement?.querySelector('.note-warn, .note-alert')).toBeNull()
@@ -296,6 +297,10 @@ describe('動作環境の確認（8.10 (6)）', () => {
     expect(r.text()).toContain(W['settings.tools.missing'])
     expect(r.text()).toContain(W['settings.env.where'])
     expect(cmds(r.el)).toEqual(['sudo apt install libreoffice poppler-utils'])
+    // 節はページの下にあるので、先頭の帯から同じページの節へ飛べる
+    const band = [...r.el.querySelectorAll('a')].find((a) => a.textContent === W['band.envLink'])
+    expect(band?.getAttribute('href')).toBe('#h-env')
+    expect(r.text()).toContain(w('band.envMissing', { n: 1 }))
     r.done()
     conn = { ...conn, env: { ...conn.env, platform: 'darwin' } }
     r = await render()
