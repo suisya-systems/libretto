@@ -367,7 +367,10 @@ const OUTLINE_MD = [
   '## まとめ',
   '- 3 つの方針を 1 行ずつで振り返る',
 ].join('\n\n')
-const outlined: Row = ['作り手', { text: '構成案を書きました', write: { 'outline.md': OUTLINE_MD, 'outline.done': 'done' } }]
+const outlined: Row = [
+  '作り手',
+  { text: '構成案を書きました', write: { 'outline.md': OUTLINE_MD, 'outline.done': 'done' } },
+]
 // mark の項目数・件数と合わせる（Approval.tsx は本文と形式の判定を足して出す）
 const verdictOf = (v: CaseView) => ({
   passed: (v.review?.passed ?? 0) + (v.formatReview?.passed ?? 0),
