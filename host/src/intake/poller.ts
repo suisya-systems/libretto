@@ -10,6 +10,7 @@ import { labelId, readThread, threadIds } from './gmail.ts'
 import type { Google, GoogleFail } from './google.ts'
 import {
   markedBy,
+  type Names,
   type RawMessage,
   reactionsPage,
   readPost,
@@ -149,10 +150,11 @@ export function createPoller(d: Deps) {
       if (!found.has(id) && fresh(id, 'slack_emoji')) found.set(id, { channel: it.channel, message: it.message })
     }
     // 古い順に PER_RUN 件まで（ts の小さい順）
+    const names: Names = new Map() // 同じ人を回の中で何度も引かない（6.6 (4)）
     const queue = [...found.values()].sort((a, b) => Number(a.message.ts) - Number(b.message.ts)).slice(0, PER_RUN)
     for (const { channel, message } of queue) {
       if (signal.aborted) return
-      const r = await readPost(s, me, channel, message.ts, message, signal)
+      const r = await readPost(s, me, channel, message.ts, message, signal, names)
       if (!r.ok) return slackFailed(r)
       const p = r.post
       const deps = { home: d.home, invoke: d.invoke, signal, gdoc: d.google.status().docs }

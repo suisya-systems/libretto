@@ -217,6 +217,17 @@ describe('拾い上げ（6.6 (4)(5)）', () => {
     expect((await home_()).candidates.signal).toHaveLength(23)
   })
 
+  it('名前は 1 回の取り込みの中で 1 人 1 回だけ引く', async () => {
+    await setup()
+    s.state.items = Array.from({ length: 3 }, (_, i) =>
+      reacted('C1', { ts: ts(i + 1), user: 'U0ALICE', text: `<@${ME}> t${i}` }),
+    )
+    await server.poller.run()
+    expect((await home_()).candidates.signal).toHaveLength(3)
+    const looked = s.seen.filter((x) => x.method === 'users.info').map((x) => x.params.user)
+    expect(looked.sort()).toEqual(['U0ALICE', ME].sort())
+  })
+
   it('推測で先に出ていた候補に :memo: が付いたら、1 件のまま由来を合図にする', async () => {
     await setup()
     const id = `slack:C1:${ts(1)}`

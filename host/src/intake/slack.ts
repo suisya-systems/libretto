@@ -152,7 +152,7 @@ export const markedBy = (m: RawMessage | undefined, emoji: string, userId: strin
   !!m?.reactions?.some((r) => r.name === emoji && r.users?.includes(userId))
 
 // 1 回の中で名前を覚えておく（同じ人を何度も引かない）。fatal は回を止める失敗
-type Names = Map<string, string>
+export type Names = Map<string, string>
 async function nameOf(s: Slack, id: string, names: Names, signal: AbortSignal): Promise<string | SlackFail> {
   const known = names.get(id)
   if (known) return known
@@ -195,7 +195,7 @@ export function plain(text: string, names: Names): string {
 }
 
 // 投稿とスレッドを読み、カードと材料の形に。印を付けた投稿を先頭に置き、字数で落とさない（6.6 (4)）。
-// marked が無ければ（読み直し）スレッドの中から ts で探す
+// marked が無ければ（読み直し）スレッドの中から ts で探す。names は 1 回の取り込みで共有する名前の覚え
 export async function readPost(
   s: Slack,
   me: Me,
@@ -203,6 +203,7 @@ export async function readPost(
   ts: string,
   marked: RawMessage | undefined,
   signal: AbortSignal,
+  names: Names = new Map(),
 ): Promise<{ ok: true; post: Post } | SlackFail> {
   // 読み直しは投稿の ts で引く。conversations.replies の ts は「親の投稿かスレッドの中の投稿」のどちらでもよい（公式文書）
   const threadTs = marked ? marked.thread_ts : ts
@@ -219,7 +220,6 @@ export async function readPost(
   }
   const m = marked ?? thread.find((x) => x.ts === ts)
   const all = [...(m ? [m] : []), ...thread.filter((x) => x.ts !== ts)]
-  const names: Names = new Map()
   const ids = new Set<string>()
   for (const x of all) {
     if (x.user) ids.add(x.user)
