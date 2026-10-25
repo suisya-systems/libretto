@@ -268,7 +268,9 @@ describe('もう一度確かめる（6.13 (1)）', () => {
       },
     })
     const { url } = server.issuePairing('テスト')
-    cookie = ((await server.app.request(new URL(url).pathname)).headers.get('set-cookie') ?? '').split(';')[0] as string
+    cookie = (
+      (await server.app.request(new URL(url).pathname, { method: 'POST' })).headers.get('set-cookie') ?? ''
+    ).split(';')[0] as string
   })
   afterEach(async () => {
     await server.runs.abortAll()
