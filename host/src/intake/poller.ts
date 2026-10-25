@@ -41,6 +41,7 @@ type Deps = {
   inference: () => InferenceSettings
   candidatesChanged: () => void
   connectionsChanged: () => void
+  roundDone?: () => void // 回の終わり。おまかせの自動入口（T4。6.11 (2)）
   log: (line: string) => void
   now?: () => Date
   destChoices: () => DestChoice[] // 今選べる保存先（6.10 (3)）
@@ -282,6 +283,7 @@ export function createPoller(d: Deps) {
           }
         d.runs.close(RUN_KEY, ac)
         running = undefined
+        if (!ac.signal.aborted) d.roundDone?.()
         d.connectionsChanged()
         d.candidatesChanged()
       })

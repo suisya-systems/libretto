@@ -32,7 +32,7 @@ const OPEN: Record<CandidateCard['source'], WKey> = {
 
 const dest = (t: DeliveryTarget) => (t.kind === 'page' || t.kind === 'paste' ? W[`dest.${t.kind}`] : '')
 const pad = (n: number) => String(n).padStart(2, '0')
-const when = (at: string) => {
+export const when = (at: string) => {
   const d = new Date(at)
   return `${d.getMonth() + 1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }

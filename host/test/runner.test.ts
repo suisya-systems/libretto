@@ -1730,3 +1730,100 @@ describe.skipIf(process.platform === 'win32')('手元のファイル（6.10 (4)�
     }
   }, 30_000)
 })
+
+describe('おまかせ（6.11）', () => {
+  const put = (path: string, body: unknown) =>
+    server.app.request(path, {
+      method: 'PUT',
+      headers: { cookie, origin: ORIGIN, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+  const modes = (gmail: '確認しながら' | 'おまかせ') =>
+    put('/api/settings/entrance-defaults', { 会話: '確認しながら', gmail, slack: '確認しながら', meet: '確認しながら' })
+  // ラベルの付いたメールの候補（T1）
+  const present = (candidateId: string, aiInstructionFlag = false) =>
+    transition(ledger, {
+      type: 'candidate.presented',
+      candidate: { candidateId, source: 'gmail', origin: '合図', aiInstructionFlag, senderKey: 'a@example.com' },
+      card: {
+        subject: '来週の記事',
+        from: 'A',
+        receivedAt: '2026-10-22',
+        link: 'https://mail.example/t1',
+        summary: '記事を書いてほしい',
+        proposal: { docType: '記事', destination: [{ kind: 'page', shared: false }] },
+      },
+    })
+  const toSave = (md = BODY) =>
+    setup(
+      script(
+        ['下書き役・依頼書', say(briefDraft)],
+        ['下書き役・確認項目', say({ checks: runnerChecks })],
+        ['事実係・分類', say(classified)],
+        ['作り手', draft(1, md)],
+        ['判定役・文章', verdicts(true)],
+      ),
+      real,
+    )
+
+  it('T4 → T6 → T8（自動）→ … → T20 → T22（自動）→ 完了。承認は「自動」、ホームの「自動で開始した依頼」に残る', async () => {
+    await toSave()
+    present('gmail:old') // おまかせにする前から出ていた候補は動かさない
+    expect((await modes('おまかせ')).status).toBe(200)
+    present('gmail:t1')
+    present('gmail:flag', true) // AI への指示の印があるものは自動で入れない
+    server.enterAuto()
+    const id = ledger.getCandidate('gmail:t1')?.caseId as string
+    expect(ledger.getCase(id)).toMatchObject({ auto: true, mode: 'おまかせ' })
+    expect(ledger.getCandidate('gmail:old')?.status).toBe('presented')
+    expect(ledger.getCandidate('gmail:flag')?.status).toBe('presented')
+    await waitState(id, '完了')
+    expect(ledger.listApprovals(id).map((a) => [a.gate, a.by])).toEqual([
+      ['入口', '自動'],
+      ['送付', '自動'],
+    ])
+    // Undecided は全部「任せる」
+    expect(ledger.listDecisions(id)[0]?.text).toContain('任せる')
+    expect(ledger.listConversation(id)).toEqual([SAY.autoStarted])
+    const home1 = HomeView.parse(await (await get('/api/home')).json())
+    expect(home1.defaults.gmail).toBe('おまかせ')
+    expect(home1.autoStarted).toMatchObject([{ id, state: '完了', startedAt: expect.any(String) }])
+    // 同じ候補で 2 回目は作らない
+    server.enterAuto()
+    expect(ledger.listCases()).toHaveLength(1)
+  })
+
+  it('取り込み元の案件でかぎ括弧の引用があれば、送付の確認で止めて会話欄に 1 行。本人が押せば保存する', async () => {
+    await toSave(BODY.replace('本文。', '返事は「よろしくお願いします」でした。'))
+    await modes('おまかせ')
+    present('gmail:t1')
+    server.enterAuto()
+    const id = ledger.getCandidate('gmail:t1')?.caseId as string
+    await vi.waitFor(() => expect(ledger.getCase(id)).toMatchObject({ state: '送付確認待ち', turn: '本人' }), {
+      timeout: 3000,
+      interval: 5,
+    })
+    await idle()
+    expect(ledger.listConversation(id)).toEqual([SAY.autoStarted, SAY.heldQuote])
+    const v = await caseView(id)
+    expect(v.deliveryPlan.quotesOthers).toBe(true)
+    // 起こし直しても勝手には送らない
+    server.runner.resume()
+    expect(ledger.getCase(id)?.state).toBe('送付確認待ち')
+    await act(id, { type: 'delivery.send', planFingerprint: v.deliveryPlan.fingerprint })
+    await waitState(id, '完了')
+    expect(ledger.listApprovals(id).at(-1)).toMatchObject({ gate: '送付', by: '本人' })
+  })
+
+  it('既定が確認しながらなら自動では入れない。止めている間も入れない', async () => {
+    await toSave()
+    present('gmail:t1')
+    server.enterAuto()
+    expect(ledger.listCases()).toEqual([])
+    await modes('おまかせ')
+    present('gmail:t2')
+    await server.stop.stop()
+    server.enterAuto()
+    expect(ledger.listCases()).toEqual([])
+  })
+})

@@ -22,6 +22,7 @@ let samples: { id: string; kind: '声の見本'; title: string; where: string }[
 let infer: InferenceSettings
 let inferStatus: number
 let voiceStatus: number
+let modes: Record<string, string>
 
 beforeEach(() => {
   sent.length = 0
@@ -40,6 +41,7 @@ beforeEach(() => {
   respond = () => new Response('{}')
   samples = []
   voiceStatus = 200
+  modes = { 会話: '確認しながら', gmail: '確認しながら', slack: '確認しながら', meet: '確認しながら' }
   vi.stubGlobal('fetch', async (path: string, init: RequestInit = {}) => {
     if (path === '/api/settings/keys')
       return new Response(
@@ -73,6 +75,13 @@ beforeEach(() => {
         infer = body
       }
       return new Response(JSON.stringify(infer))
+    }
+    if (path === '/api/settings/entrance-defaults') {
+      if (init.method === 'PUT') {
+        modes = JSON.parse(String(init.body))
+        sent.push({ method: 'PUT', path, body: modes })
+      }
+      return new Response(JSON.stringify(modes))
     }
     if (path === '/api/connections/slack/channels')
       return new Response(
@@ -561,6 +570,28 @@ describe('自動検出の節（6.9 (10)）', () => {
   it('Slack と連携していなければチャンネルの欄を出さない', async () => {
     const r = await render()
     expect(r.text()).not.toContain(W['settings.infer.slackChannels'])
+    r.done()
+  })
+})
+
+describe('進め方の初期設定の節（6.11 (1)）', () => {
+  it('取り込み元ごとに 2 択で、保存すると全部を PUT する', async () => {
+    const r = await render()
+    const scope = '[aria-labelledby="h-modes"]'
+    const sec = r.el.querySelector(scope) as HTMLElement
+    expect(sec.textContent).toContain(W['settings.modes.lead'])
+    const selects = [...sec.querySelectorAll('select')] as HTMLSelectElement[]
+    expect(selects).toHaveLength(4)
+    const gmail = selects[1] as HTMLSelectElement
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set?.call(gmail, 'おまかせ')
+    await act(async () => gmail.dispatchEvent(new Event('change', { bubbles: true })))
+    await r.click(r.button(W['settings.modes.save'], scope))
+    expect(sent.at(-1)).toEqual({
+      method: 'PUT',
+      path: '/api/settings/entrance-defaults',
+      body: { 会話: '確認しながら', gmail: 'おまかせ', slack: '確認しながら', meet: '確認しながら' },
+    })
+    expect(sec.textContent).toContain(W['settings.modes.saved'])
     r.done()
   })
 })

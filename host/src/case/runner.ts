@@ -18,6 +18,7 @@ import { judgeBody, judgeFormat } from '../roles/judge.ts'
 import { make, nn, workDir } from '../roles/maker.ts'
 import type { Runs } from '../runs.ts'
 import { isStorageError } from '../server/stop.ts'
+import { autoStep, holdOf } from './auto.ts'
 import { currentSend, transition } from './transition.ts'
 
 // 取り寄せる URL（6.3.1 (5)）。閉じ括弧・句読点で切る
@@ -157,6 +158,7 @@ export function createRunner(d: Deps) {
     emit,
     onAuthExpired,
     log: d.log,
+    hold: (c: CaseRecord) => holdOf(home, c),
     ...(d.now && { now: d.now }),
     ...(d.fetch && { fetch: d.fetch }),
     ...(d.tools && { tools: d.tools }),
@@ -229,6 +231,9 @@ export function createRunner(d: Deps) {
       return
     }
     const c = ledger.getCase(caseId)
+    // おまかせでホストが本人の代わりに出す入口の承認と送付（6.11 (2)）。遷移したら続きを起こす
+    const auto = c && autoStep(home, ledger, c)
+    if (auto && emit(caseId, auto)) return kick(caseId)
     if (c?.turn !== 'libretto') return
     if (c.state === '入口待ち') return d.entrance.kick(caseId) // 入口は自分の 1 本を持ち、同じ関門を通る
     const job = JOBS[c.state]
@@ -260,9 +265,10 @@ export function createRunner(d: Deps) {
     kick,
     blocked,
     onAuthExpired,
-    // 起動時: 非終端で libretto の番の案件を全部（4.4 の再起動）
+    // 起動時: 非終端で libretto の番の案件を全部（4.4 の再起動）と、おまかせで送付を待つ案件（6.11 (2)）
     resume() {
-      for (const c of ledger.listCases(WORKING)) if (c.turn === 'libretto') kick(c.caseId)
+      for (const c of ledger.listCases(WORKING))
+        if (c.turn === 'libretto' || (c.state === '送付確認待ち' && c.mode === 'おまかせ')) kick(c.caseId)
     },
     signIn: () => signIn,
     // 「続ける」: 待ちを下ろして、待っていた案件を起こし直す。まだ切れていればまた待ちに戻る

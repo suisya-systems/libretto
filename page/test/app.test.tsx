@@ -94,6 +94,44 @@ describe('ホーム', () => {
     p.done()
   })
 
+  it('自動で開始した依頼: どこから・取り消す。取り消しは確かめてから cancel を送る（6.11 (5)）', async () => {
+    const card = {
+      id: 'c1',
+      title: '来週の記事',
+      state: '下書き中' as const,
+      turn: 'libretto' as const,
+      step: '下書きを書いています',
+      mode: 'おまかせ' as const,
+      origin: { kind: '合図' as const, source: 'gmail' as const },
+      auto: true,
+      version: 0,
+      revision: 3,
+      costYen: 120,
+      costCapYen: 1500,
+      startedAt: '2026-10-25T09:00:00+09:00',
+    }
+    replies = {
+      '/api/host': json(host),
+      '/api/home': json({ ...empty, autoStarted: [card], active: [card] }),
+      '/api/cases/c1/actions': json({ state: '取り消し', turn: '本人', revision: 4, replayed: false }),
+    }
+    const p = await render()
+    const sec = p.el.querySelector('[aria-labelledby="h-auto"]') as HTMLElement
+    expect(sec.textContent).toContain(W['home.auto.from.gmail'])
+    await act(async () => (sec.querySelector('button') as HTMLButtonElement).click())
+    expect(document.body.textContent).toContain(W['entrance.cancelTitle'])
+    const dialog = document.querySelector('[role="dialog"], [role="alertdialog"]') as HTMLElement
+    await act(async () =>
+      (
+        [...dialog.querySelectorAll('button')].find(
+          (b) => b.textContent?.trim() === W['entrance.cancel'],
+        ) as HTMLButtonElement
+      ).click(),
+    )
+    expect(sent).toContainEqual({ method: 'POST', path: '/api/cases/c1/actions' })
+    p.done()
+  })
+
   it('つながっていない端末: ナビも空の一覧も出さず、つなぎ方を出す', async () => {
     replies = { '/api/host': json({ reason: 'not_paired' }, 401), '/api/home': json({ reason: 'not_paired' }, 401) }
     const p = await render()

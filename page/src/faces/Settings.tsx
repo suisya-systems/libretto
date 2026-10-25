@@ -1,10 +1,12 @@
 // 設定の面（画面 7）。連携の節（Google と Slack。docs/implementation.md 6.4 (7)・6.6 (7)）、API キーの節（6.1.3 (6)。値は画面のどこにも出さない。設計書 D17）と
-// 自動検出の節（6.9 (10)）と動作環境の確認の節（8.10 (6)）、お知らせの節（6.8 (6)）
+// 自動検出の節（6.9 (10)）と動作環境の確認の節（8.10 (6)）、お知らせの節（6.8 (6)）、進め方の初期設定の節（6.11 (1)）
 import {
   type ApiKeyStatus,
   ConnectionsView,
+  EntranceDefaults,
   InferenceSettings,
   MaterialRef,
+  type Mode,
   NoticePrefs,
   PushStatus,
   Settings as SettingsSchema,
@@ -1078,12 +1080,78 @@ function NoticeSection({
   )
 }
 
+// 進め方の初期設定（docs/implementation.md 6.11 (1)）。取り込み元ごとに 2 択
+const SOURCES = ['会話', 'gmail', 'slack', 'meet'] as const
+function ModeSection({ set: loaded, reload }: { set: EntranceDefaults; reload: () => void }) {
+  const [set, setSet] = useState(loaded)
+  useEffect(() => setSet(loaded), [loaded])
+  const [busy, setBusy] = useState(false)
+  const [notice, setNotice] = useState<'saved' | 'failed'>()
+  const save = async () => {
+    setBusy(true)
+    setNotice(undefined)
+    let ok = false
+    try {
+      ok = (
+        await fetch('/api/settings/entrance-defaults', {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json', accept: 'application/json' },
+          body: JSON.stringify(set),
+        })
+      ).ok
+    } catch {}
+    setBusy(false)
+    setNotice(ok ? 'saved' : 'failed')
+    if (ok) reload()
+  }
+  return (
+    <section aria-labelledby="h-modes" className="card pad stack">
+      <h2 id="h-modes">{W['settings.modes.heading']}</h2>
+      <p className="muted small">{W['settings.modes.lead']}</p>
+      <form
+        className="stack"
+        onSubmit={(e) => {
+          e.preventDefault()
+          void save()
+        }}
+      >
+        {SOURCES.map((k) => (
+          <label key={k} className="voice-field">
+            <span className="small strong">{W[`home.src.${k}`]}</span>
+            <select value={set[k]} onChange={(e) => setSet({ ...set, [k]: e.target.value as Mode })}>
+              {(['確認しながら', 'おまかせ'] as const).map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+          </label>
+        ))}
+        <div>
+          <button type="submit" className="btn btn-primary" disabled={busy} aria-busy={busy || undefined}>
+            {W['settings.modes.save']}
+          </button>
+        </div>
+        {notice && (
+          <p
+            className={notice === 'saved' ? 'muted small' : 'note-alert small'}
+            role={notice === 'saved' ? 'status' : 'alert'}
+          >
+            {W[`settings.modes.${notice}`]}
+          </p>
+        )}
+      </form>
+    </section>
+  )
+}
+
 export function Settings() {
   const keys = useLoad('/api/settings/keys', Keys, (s) => s.event === 'settings.changed')
   const env = useLoad('/api/connections', ConnectionsView, (s) => s.event === 'connections.changed')
   const voice = useLoad('/api/settings/voice-samples', Samples, (s) => s.event === 'settings.changed')
   const infer = useLoad('/api/settings/inference', InferenceSettings, (s) => s.event === 'settings.changed')
   const notices = useLoad('/api/settings/notices', NoticePrefs, (s) => s.event === 'settings.changed')
+  const modes = useLoad('/api/settings/entrance-defaults', EntranceDefaults, (s) => s.event === 'settings.changed')
   return (
     <section className="face">
       <h1 className="face-title">{W['nav.settings']}</h1>
@@ -1134,6 +1202,7 @@ export function Settings() {
           }}
         />
       )}
+      {modes.data && <ModeSection set={modes.data} reload={modes.reload} />}
       {voice.data && <VoiceSection samples={voice.data.samples} reload={voice.reload} />}
       {env.data && <EnvSection v={env.data.isolation} tools={env.data.tools} reload={env.reload} />}
     </section>

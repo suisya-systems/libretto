@@ -1,6 +1,6 @@
 // hono のルート（docs/implementation.md 5.2・5.4・5.7）。経路の順は 5.7 (6): 公開 → /api/* → /cases/:id/page → 静的 → 画面の殻
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { serveStatic } from '@hono/node-server/serve-static'
 import {
@@ -17,6 +17,7 @@ import {
   type DeliveryTarget,
   DismissLow,
   DraftDiff,
+  EntranceDefaults,
   GoogleClientInput,
   type HostStatus,
   InferenceSettings,
@@ -29,11 +30,11 @@ import {
   PushSubscriptionInput,
   SuppressionInput,
 } from '@libretto/shared/api'
-import type { Intake } from '@libretto/shared/ledger'
 import { type Context, Hono } from 'hono'
 import { getCookie, setCookie } from 'hono/cookie'
 import { streamSSE } from 'hono/streaming'
 import { z } from 'zod'
+import { autoEnter, quotesOthers, writeIntake } from '../case/auto.ts'
 import { createRunner } from '../case/runner.ts'
 import { transition } from '../case/transition.ts'
 import { type IsolationRecord, readIsolation, writeIsolation } from '../checks/isolation.ts'
@@ -45,10 +46,9 @@ import { type Fetch, fetchedSources, materialsDir } from '../facts/inventory.ts'
 import { CLOSED, purge } from '../facts/purge.ts'
 import { readThread } from '../intake/gmail.ts'
 import { createGoogle, type Google, parseClientJson } from '../intake/google.ts'
-import { MEET_WINDOW_DAYS, meetFileId, rereadNote } from '../intake/meet.ts'
+import { MEET_WINDOW_DAYS, rereadNote } from '../intake/meet.ts'
 import { createPoller, RUN_KEY } from '../intake/poller.ts'
 import { channelList, createSlack, parseCandidateId, readPost, type Slack } from '../intake/slack.ts'
-import { caseDir } from '../ledger/db.ts'
 import { jst, type Ledger } from '../ledger/ledger.ts'
 import type { Job, Outcome } from '../model/invoke.ts'
 import {
@@ -67,8 +67,11 @@ import { currentMarks, OUTPUT_FILES, reviewsOf } from '../roles/judge.ts'
 import { draftNames, pastedCount, pastedName, versionDir, versionsOf } from '../roles/maker.ts'
 import { createRuns, Stopped } from '../runs.ts'
 import {
+  autoSince,
+  entranceDefaults,
   inferenceSettings,
   noticePrefs,
+  saveEntranceDefaults,
   saveInference,
   saveNoticePrefs,
   saveVoiceSamples,
@@ -80,7 +83,7 @@ import { createPush, vapidKeys } from './push.ts'
 import { createSlackDm, SLACK_DM_HOLD_MS } from './slack-dm.ts'
 import { createHub, type SseMessage } from './sse.ts'
 import { createStop, isStorageError } from './stop.ts'
-import { caseView, DEFAULTS, homeView, toCard } from './views.ts'
+import { caseView, homeView, toCard } from './views.ts'
 
 export const COOKIE = 'libretto_session'
 // Cookie の Max-Age とサーバーの寿命は同じ定数から（5.7 (1)）
@@ -97,7 +100,8 @@ export type ServerOptions = {
   origins: readonly string[] // Origin の許す起点（完全一致。5.4）。先頭がペアリング URL の起点
   staticDir: string // page/dist
   invoke: (job: Job) => Promise<Outcome> // モデル呼び出しのアダプタ（6.1）
-  mode?: () => Mode // 会話の初期設定（設定の Issue までは既定。6.2.1 (6)）
+  mode?: () => Mode // 会話の初期設定（無ければ設定の入口の既定。6.11 (1)）
+  monthCapYen?: number | null // 全体の費用上限。達していれば自動入口を止める（4.5）
   now?: () => Date
   log?: (line: string) => void
   runsWaitMs?: number
@@ -234,6 +238,7 @@ export function createServer(o: ServerOptions) {
     inference: () => inferenceSettings(home),
     candidatesChanged,
     connectionsChanged: () => hub.emit('connections.changed', {}),
+    roundDone: () => enterAuto(),
     log,
     now,
     destChoices: choices,
@@ -253,6 +258,7 @@ export function createServer(o: ServerOptions) {
     ...(o.fetch && { fetch: o.fetch }),
     // 連携の本人が取り込んだときと同じときだけ読み直す（6.4 (6)・6.6 (6)）
     external: (src, signal) => reread(src.candidateId, src.account, signal),
+    entered: (caseId) => runner.kick(caseId),
   })
   // 状態ごとの仕事を起こす（6.2.3 (1)）。入口待ちは entrance に任せる
   const runner = createRunner({
@@ -280,7 +286,7 @@ export function createServer(o: ServerOptions) {
     invoke: o.invoke,
     runs,
     isStopped: () => stop.isStopped(),
-    mode: o.mode ?? (() => DEFAULTS.会話),
+    mode: o.mode ?? (() => entranceDefaults(home).会話),
     messageChanged: (m) => hub.emit('conversation.message', m),
     caseChanged,
     requested: (caseId) => runner.kick(caseId),
@@ -296,6 +302,32 @@ export function createServer(o: ServerOptions) {
     storage,
     log,
   })
+
+  // おまかせの自動入口（T4。6.11 (2)）。拾い上げの回の終わりと起動のとき。STOP の間は動かさない
+  function enterAuto() {
+    if (stop.isStopped()) return
+    let made: string[]
+    try {
+      made = autoEnter({
+        home,
+        ledger,
+        defaults: entranceDefaults(home),
+        since: autoSince(home),
+        monthCapYen: o.monthCapYen ?? null,
+        now: now(),
+      })
+      storage(true)
+    } catch (e) {
+      log(`auto enter: ${e instanceof Error ? e.stack : String(e)}`)
+      if (isStorageError(e)) storage(false)
+      return
+    }
+    for (const id of made) {
+      caseChanged(id)
+      runner.kick(id)
+    }
+    if (made.length) candidatesChanged()
+  }
 
   // --- ペアリング（5.4）。トークンはメモリだけ。起こし直すと前の URL は使えない
   const pairings = new Map<string, { expiresAt: number; label: string; file: boolean }>()
@@ -541,11 +573,16 @@ export function createServer(o: ServerOptions) {
       const caseId = randomUUID()
       // intake.json はトランザクションの前に新しい案件フォルダへ（4.2 T2）
       if (cand.status === 'presented' && card) {
-        const w = writing(c, () => writeIntake(caseId, cand, card))
+        const w = writing(c, () => writeIntake(home, caseId, cand, card))
         if (w instanceof Response) return w
       }
       const r = writing(c, () =>
-        transition(ledger, { type: 'candidate.proceed', candidateId, caseId, mode: DEFAULTS[cand.source] }),
+        transition(ledger, {
+          type: 'candidate.proceed',
+          candidateId,
+          caseId,
+          mode: entranceDefaults(home)[cand.source],
+        }),
       )
       if (r instanceof Response) return r
       if (!r.ok || !r.case) return refused(r.ok ? { reason: 'invalid_transition' } : r)
@@ -605,38 +642,6 @@ export function createServer(o: ServerOptions) {
     return c.body(null, 204)
   })
 
-  // 候補から作る案件の intake.json（6.4 (5)・6.6 (6)・6.7 (4)）。Slack の threadId は <channelId>:<ts>、会議メモはファイルの id
-  function writeIntake(
-    caseId: string,
-    cand: NonNullable<ReturnType<Ledger['getCandidate']>>,
-    card: NonNullable<ReturnType<Ledger['getCandidateCard']>>,
-  ) {
-    const { candidateId, source, confidence = '低' } = cand
-    const dir = caseDir(home, caseId)
-    mkdirSync(dir, { recursive: true, mode: 0o700 })
-    // 由来は候補のとおり（transition.ts の originOf と同じ写し方）
-    const origin: Intake['origin'] =
-      cand.origin === '合図'
-        ? { kind: '合図', source }
-        : cand.origin === '会議'
-          ? { kind: '会議', confidence }
-          : { kind: '推測', source, confidence, reason: card.reason ?? '' }
-    const intake: Intake = {
-      origin,
-      summary: card.summary,
-      materials: [{ id: candidateId, kind: '元データ', title: card.subject, where: card.link }],
-      source: {
-        candidateId,
-        threadId: meetFileId(candidateId) ?? candidateId.replace(/^(gmail|slack):/, ''),
-        account: card.account ?? '',
-        subject: card.subject,
-        from: card.from,
-        attachments: card.attachments ?? [],
-        attachmentsNeeded: card.attachmentsNeeded ?? [],
-      },
-    }
-    writeAtomic(join(dir, 'intake.json'), `${JSON.stringify(intake, null, 2)}\n`)
-  }
   app.post('/api/checks/run', (c) => {
     if (!o.probe) return c.json({ reason: 'not_found' }, 404)
     try {
@@ -679,6 +684,8 @@ export function createServer(o: ServerOptions) {
         { connected, running, ...(lastAt && { lastAt }) },
         meetNotes,
         inferenceSettings(home).showLow,
+        entranceDefaults(home),
+        jst(new Date(now().getTime() - 7 * 86_400_000)),
       ),
     )
   })
@@ -708,6 +715,7 @@ export function createServer(o: ServerOptions) {
         fetchedSources(home, rec.caseId).map((s) => ({ ...s, gathered: gathered.has(s.url) })),
         g?.state === '集められなかった',
         caseChoices(rec.destination),
+        quotesOthers(home, rec),
       ),
     )
   })
@@ -956,6 +964,17 @@ export function createServer(o: ServerOptions) {
     return c.json(r)
   })
 
+  // 進め方の初期設定（6.11 (1)）
+  app.get('/api/settings/entrance-defaults', (c) => c.json(entranceDefaults(home)))
+  app.put('/api/settings/entrance-defaults', async (c) => {
+    const body = EntranceDefaults.safeParse(await c.req.json().catch(() => undefined))
+    if (!body.success) return c.json({ reason: 'invalid' }, 400)
+    const r = writing(c, () => saveEntranceDefaults(home, body.data, jst(now())))
+    if (r instanceof Response) return r
+    hub.emit('settings.changed', {})
+    return c.json(r)
+  })
+
   // あなたの文体の見本（6.3.2 (10)）。GET /api/settings ができたらその voiceSamples に移す
   app.get('/api/settings/voice-samples', (c) => c.json({ samples: voiceSamples(home) }))
   app.put('/api/settings/voice-samples', async (c) => {
@@ -1085,6 +1104,7 @@ export function createServer(o: ServerOptions) {
     poller,
     google,
     notices,
+    enterAuto,
   }
 }
 

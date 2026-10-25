@@ -107,7 +107,7 @@ libretto の画面に出す言葉の正本。設計書（[`docs/design.md`](./de
 | `stopped` | 中止しました |
 | `cancelled` | 取り消しました |
 
-**会話欄に足す 1 行（`SAY` の 8 個）**
+**会話欄に足す 1 行（`SAY` の 10 個）**
 
 | キー | 文 |
 |---|---|
@@ -119,6 +119,8 @@ libretto の画面に出す言葉の正本。設計書（[`docs/design.md`](./de
 | `toolFailed` | 動作環境の不具合で中止しました |
 | `costCap` | 費用の上限に達したので中止しました |
 | `isolationLeaked` | ライターにチェック項目が見えたおそれがあるので中止しました |
+| `heldShared` | ほかの人にも見えるかもしれない保存先なので、保存の前に確認を待っています |
+| `heldQuote` | ほかの人の言葉を引用しているので、保存の前に確認を待っています |
 
 **お知らせの 1 行（`NOTICE`。実装設計書 6.8 (3)）**
 
@@ -242,6 +244,10 @@ Slack の DM は、2 分のあいだに出たお知らせの 1 行を改行で�
 | `chat.stopped` | すべて停止しているあいだは送れません |
 | `home.autoHeading` | 自動で開始した依頼 |
 | `home.autoEmpty` | 自動で開始した依頼はありません |
+| `home.auto.from.gmail` | メールのラベルから |
+| `home.auto.from.slack` | Slack のリアクションから |
+| `home.auto.from.meet` | 会議メモから |
+| `home.auto.at` | {at} に開始 |
 | `home.activeHeading` | 進行中の依頼 |
 | `home.activeEmpty` | 進行中の依頼はありません |
 | `home.colCase` | 依頼 |
@@ -561,6 +567,12 @@ Slack の DM は、2 分のあいだに出たお知らせの 1 行を改行で�
 | `deliver.gslideNote` | 保存すると、あなたの Google ドライブの「libretto」フォルダに「{title}（第 {n} 版）」という Google スライドを作ります。フォルダが無ければ作ります。共有はしません。ほかの人に渡すときは、あなたがドライブで共有してください。 |
 | `deliver.fileNote` | 保存すると、このファイルをダウンロードできます。ほかの人に渡すときは、ダウンロードしたファイルを渡してください。 |
 | `deliver.pasteFailed` | 貼り付け用の文を読み込めませんでした |
+| `deliver.held.見える` | ほかの人にも見えるかもしれない保存先なので、自動では保存しませんでした。確かめてから保存してください |
+| `deliver.held.引用` | ほかの人の言葉を引用しているので、自動では保存しませんでした。確かめてから保存してください |
+| `deliver.undoHeading` | 取り消したいとき |
+| `deliver.undo.page` | このページは libretto の画面の中だけで見られます。消さなくても、ほかの人には見えません |
+| `deliver.undo.paste` | 貼り付け用の文は libretto の外には保存していません |
+| `deliver.undo.gdoc` | 要らなければ、Google ドライブでこのファイルを削除してください |
 
 **成果の面（完了。実装設計書 6.2.8 (7)）**
 
@@ -822,6 +834,11 @@ Slack の行は API キーの行と同じ形（貼り付け・「入れ直す」
 | `settings.infer.recallNone` | 見落としの割合はまだありません。自動検出の範囲のメールや投稿にラベル・リアクションを付けると、ここに出ます。 |
 | `settings.infer.excluded` | 除外した差出人・チャンネル |
 | `settings.infer.excludedNone` | 除外したものはありません。 |
+| `settings.modes.heading` | 進め方の初期設定 |
+| `settings.modes.lead` | おまかせにした取り込み元では、ラベルやリアクションを付けたもの（会議メモはあなたの担当の項目）を、確認を求めずに自動で始めます。ほかの人に見える保存の前には確認します。おまかせに変える前に届いていた依頼の候補は、自動では始めません。 |
+| `settings.modes.save` | 保存 |
+| `settings.modes.saved` | 保存しました。 |
+| `settings.modes.failed` | 保存できませんでした。もう一度お試しください。 |
 | `settings.infer.restore` | 戻す |
 | `settings.infer.restoreLabel` | {label} を戻す |
 | `settings.infer.lastAt` | {at} に自動検出 |

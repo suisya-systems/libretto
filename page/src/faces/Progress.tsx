@@ -23,6 +23,48 @@ const AT: Partial<Record<CaseState, Step>> = {
   送付中: 'save',
 }
 
+// 自動で入った案件は、動いている間も依頼内容を直して出し直せる（T7b。6.11 (5)）
+function AutoRevise({ locked, send }: { locked: boolean; send: (note: string) => Promise<boolean> }) {
+  const [open, setOpen] = useState(false)
+  const [note, setNote] = useState('')
+  if (!open)
+    return (
+      <button type="button" className="btn btn-secondary" disabled={locked} onClick={() => setOpen(true)}>
+        {W['entrance.revise']}
+      </button>
+    )
+  return (
+    <div className="card pad revise">
+      <label htmlFor="auto-revise-note" className="strong small">
+        {W['entrance.reviseLabel']}
+      </label>
+      <textarea
+        id="auto-revise-note"
+        rows={3}
+        value={note}
+        maxLength={2000}
+        onChange={(ev) => setNote(ev.target.value)}
+        disabled={locked}
+      />
+      <div className="row-gap">
+        <button
+          type="button"
+          className="btn btn-primary btn-sm"
+          disabled={locked || !note.trim()}
+          onClick={async () => {
+            if (await send(note.trim())) setOpen(false)
+          }}
+        >
+          {W['entrance.reviseSend']}
+        </button>
+        <button type="button" className="btn btn-secondary btn-sm" onClick={() => setOpen(false)}>
+          {W['entrance.reviseCancel']}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 const yen = (n: number) => n.toLocaleString('ja-JP')
 const time = (at: string) =>
   new Intl.DateTimeFormat('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(
@@ -153,6 +195,12 @@ export function ProgressFace({ c, reload, stopped }: { c: CaseView; reload: () =
             {(c.state === '下書き中' || c.state === '検品中') && <p className="muted">{W['progress.redoLater']}</p>}
           </div>
           <div className="now-actions">
+            {c.auto && ['材料待ち', '下書き中', '検品中'].includes(c.state) && (
+              <AutoRevise
+                locked={action.busy || stopped}
+                send={(note) => action.run({ type: 'entrance.revise', expectedRevision: c.revision, note })}
+              />
+            )}
             <Confirm
               trigger={W['progress.stop']}
               title={W['progress.stopTitle']}

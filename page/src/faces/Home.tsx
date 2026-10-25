@@ -1,9 +1,11 @@
 // ホーム（画面案 1。docs/implementation.md 5.8 (3)・6.2.1 (9)・6.4 (7)）。候補の欄は連携しているか候補があるときだけ
 import { type CaseCard, HomeView } from '@libretto/shared/api'
 import { Link } from 'wouter'
+import { useCaseAction } from '../action.ts'
 import { useLoad } from '../load.ts'
+import { Confirm } from '../parts/Dialog.tsx'
 import { STATE, W, w } from '../wording.ts'
-import { Candidates } from './Candidates.tsx'
+import { Candidates, when } from './Candidates.tsx'
 import { Chat } from './Chat.tsx'
 import { ProblemView } from './Pending.tsx'
 
@@ -24,6 +26,49 @@ function Meta({ c }: { c: CaseCard }) {
       {c.version > 0 && w('card.version', { n: c.version })}
       {c.deadline && <> ・ {w('card.deadline', { d: c.deadline })}</>}
       {c.auto && <span className="badge b-run badge-sm">{W['card.auto']}</span>}
+    </div>
+  )
+}
+
+// 自動で開始した依頼の 1 枚（6.11 (5)）。どこから・いつ・今の段階・費用・取り消す（送付中と終わったものは取り消せない）
+const CANCELABLE: readonly CaseCard['state'][] = [
+  '入口待ち',
+  '材料待ち',
+  '下書き中',
+  '検品中',
+  '承認待ち',
+  '送付確認待ち',
+]
+function AutoCard({ c, reload, stopped }: { c: CaseCard; reload: () => void; stopped: boolean }) {
+  const action = useCaseAction(c.id, reload)
+  const from = c.origin.kind === '会議' ? 'meet' : c.origin.kind === '合図' ? c.origin.source : undefined
+  return (
+    <div className="card pad">
+      <Link href={`/cases/${c.id}`} className="strong">
+        {c.title}
+      </Link>
+      <div className="muted small">
+        {from && W[`home.auto.from.${from}`]}
+        {c.startedAt && <> ・ {w('home.auto.at', { at: when(c.startedAt) })}</>}
+      </div>
+      <div className="row-gap">
+        <span className={`badge ${tone(c)}`}>{STATE[c.state]}</span>
+        <span className="muted small">{c.step}</span>
+      </div>
+      <div className="muted small">{w('card.cost', { yen: yen(c.costYen), cap: yen(c.costCapYen) })}</div>
+      {CANCELABLE.includes(c.state) && !stopped && (
+        <Confirm
+          trigger={W['entrance.cancel']}
+          title={W['entrance.cancelTitle']}
+          body={W['entrance.cancelBody']}
+          confirm={W['entrance.cancel']}
+          cancel={W['entrance.cancelNo']}
+          danger
+          busy={action.busy}
+          triggerClass="btn btn-quiet btn-sm"
+          onConfirm={() => void action.run({ type: 'cancel', expectedRevision: c.revision })}
+        />
+      )}
     </div>
   )
 }
@@ -82,18 +127,7 @@ export function Home({ stopped = false }: { stopped?: boolean }) {
             {W['home.autoHeading']} <span className="count">{w('count', { n: v.autoStarted.length })}</span>
           </h2>
           {v.autoStarted.length ? (
-            v.autoStarted.map((c) => (
-              <div key={c.id} className="card pad">
-                <Link href={`/cases/${c.id}`} className="strong">
-                  {c.title}
-                </Link>
-                <div className="row-gap">
-                  <span className={`badge ${tone(c)}`}>{STATE[c.state]}</span>
-                  <span className="muted small">{c.step}</span>
-                </div>
-                <div className="muted small">{w('card.cost', { yen: yen(c.costYen), cap: yen(c.costCapYen) })}</div>
-              </div>
-            ))
+            v.autoStarted.map((c) => <AutoCard key={c.id} c={c} reload={home.reload} stopped={stopped} />)
           ) : (
             <Empty text={W['home.autoEmpty']} />
           )}
