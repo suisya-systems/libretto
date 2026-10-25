@@ -104,6 +104,8 @@ export async function startFakeGoogle() {
     createThenFail: 0, // 作成を受けてファイルを作った上で 500 を返す回数（作られたか分からない場面）
     dropParagraph: false, // 書き出しで最初の段落を落とす（読み戻しの不一致）
     exportFail: 0, // 書き出しを 500 にする回数
+    // xlsx / pptx の書き出し（6.8 (4)）。既定は上げた中身のまま。変えると Google の変換で崩れた場面を作れる
+    exportBytes: (media: Buffer, _mime: string) => media,
     displayName: '岩間 涼', // about の user.displayName
     notesPageSize: 100,
   }
@@ -239,6 +241,11 @@ export async function startFakeGoogle() {
       if (state.exportFail > 0) {
         state.exportFail -= 1
         return json(500, { error: { code: 500 } })
+      }
+      const mime = url.searchParams.get('mimeType') ?? ''
+      if (mime !== 'text/html') {
+        res.writeHead(200, { 'content-type': mime })
+        return res.end(state.exportBytes(f.docx, mime))
       }
       // Google の書き出しに似せる: 段落ごとの p と span、リンクは google.com/url の転送、空の段落（リンクは字の無い段落に寄せる）
       const t = docxText(f.docx)

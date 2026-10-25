@@ -9,6 +9,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SAY, transition } from '../src/case/transition.ts'
 import { charCount, headingCount, renderHtml } from '../src/checks/text.ts'
 import { GDOC_SAY, libFolder } from '../src/deliver/gdoc.ts'
+import type { Tools } from '../src/deliver/render.ts'
+import { htmlTables, xlsxOf } from '../src/deliver/xlsx.ts'
 import type { Fetched, FetchFailure } from '../src/facts/fetch.ts'
 import { createGoogle, DRIVE_SCOPE, GMAIL_SCOPE, type Google } from '../src/intake/google.ts'
 import { caseDir, initHome } from '../src/ledger/db.ts'
@@ -19,6 +21,7 @@ import { OUTPUT_FILES } from '../src/roles/judge.ts'
 import { MAKER_LIMITS } from '../src/roles/maker.ts'
 import { createServer } from '../src/server/app.ts'
 import { type DriveFile, startFakeGoogle } from './fakes/google.ts'
+import { fakeOffice } from './fakes/office-bin.ts'
 import { briefDraft, classified, goodChecks } from './fixtures/entrance.ts'
 
 const ORIGIN = 'http://127.0.0.1:7780'
@@ -29,6 +32,7 @@ let server: ReturnType<typeof createServer>
 let fake: ReturnType<typeof createFake>
 let cookie: string
 let google: Google | undefined // Google ドキュメントの届け先の節だけ（6.5）
+let tools: Tools | undefined // 表・スライド・手元のファイルの節だけ（6.8）
 let n = 0
 const uuid = () => `00000000-0000-4000-8000-${String(++n).padStart(12, '0')}`
 
@@ -143,6 +147,7 @@ async function setup(entries: ScriptEntry[], wrap: (b: Backend) => Backend = han
     token: () => TOKEN,
     fetch: fakeFetch,
     ...(google && { google }),
+    ...(tools && { tools }),
   })
   const { url } = server.issuePairing('テスト')
   const res = await server.app.request(new URL(url).pathname)
@@ -762,6 +767,20 @@ const verdicts = (ok: boolean): ScriptReply =>
 const judgeCalls = () => fake.calls.filter((c) => c.role === '判定役・文章')
 const reviewPath = (id: string, name: string) => join(caseDir(home, id), name)
 const real = (b: Backend) => b
+// 判定役の Claude（文章・画像）は聞かれた単位に全部「はい」と答える（表の段落やページの数が台本に依らない）
+const answerYes =
+  (b: Backend): Backend =>
+  async (call) => {
+    if (call.role !== '判定役・文章' && call.role !== '判定役・画像') return b(call)
+    const m = call.materials.find((x) => x.name === '確かめること') as { text: string }
+    const asked = JSON.parse(m.text) as { id: string; units: number[] }[]
+    const results = asked.map((a) => ({
+      id: a.id,
+      units: a.units.map((index) => ({ index, yes: true })),
+      reason: '確かめました。',
+    }))
+    return { text: JSON.stringify({ results }), costYen: 0 }
+  }
 
 describe('判定役', () => {
   it('T15: 全部通れば承認待ち。判定のファイルは .md → .reasons.md → .json の順、画面には review が出る', async () => {
@@ -1519,6 +1538,61 @@ describe('Google ドキュメントの届け先（6.5）', () => {
     expect(sent.map((x) => x.target.kind)).toEqual(['page', 'gdoc'])
     expect(docs()).toHaveLength(1)
   })
+
+  // --- 表とスライド（6.8 (4)）
+  // 判定役・文章の節（section）を増やさないよう、表は最後の節の中に置く
+  const TABLE = '\n| 地域 | 売上 |\n| --- | --- |\n| 東 | 120 |\n| 西 | 80 |\n'
+  const TABLE_HTML =
+    '<table><tr><th>地域</th><th>売上</th></tr><tr><td>東</td><td>120</td></tr><tr><td>西</td><td>80</td></tr></table>'
+  const tableDraft: ScriptReply = {
+    text: '書きました',
+    write: {
+      'draft-01.md': BODY + TABLE,
+      'draft-01.html': renderHtml(BODY) + TABLE_HTML,
+      'draft-01.done': 'done',
+    },
+  }
+  const toSheet = () =>
+    toConfirm(['gsheet'], [], (b) => (call) => (call.role === '作り手' ? tableDraftBackend(call) : answerYes(b)(call)))
+  const tableDraftBackend: Backend = async (call) => {
+    for (const [name, body] of Object.entries(tableDraft.write ?? {}))
+      writeFileSync(join(call.workdir as string, name), body)
+    return { text: tableDraft.text, costYen: 0, files: Object.keys(tableDraft.write ?? {}) }
+  }
+  const sheets = () => [...g.files.values()].filter((f) => f.mimeType === 'application/vnd.google-apps.spreadsheet')
+
+  it('T24（表）: xlsx を Google スプレッドシートに変換付きで作り、書き出した xlsx のセルが本文の表と合えば保存済み', async () => {
+    const id = await toSheet()
+    const v = await caseView(id)
+    expect(v.destinationChoices).toEqual(['gsheet']) // 表の依頼は表だけ（道具が無いので xlsx も出ない）
+    expect(v.formatReview?.failed).toEqual([])
+    expect(v.formatReview?.passed).toBe(2) // sheetsRoundTrip と xlsxNoFormulaErrors（式が無いので道具なしで通る）
+    await send(id)
+    await waitState(id, '完了')
+    expect(sheets()).toHaveLength(1)
+    expect(sheets()[0]?.name).toBe('ブレストのまとめ（第 1 版）')
+    const row = ledger.listDeliveries(id).at(-1)
+    expect(row).toMatchObject({ status: '送付済', receiptId: `gsheet:${sheets()[0]?.id}` })
+    expect(g.seen.some((x) => x.path.includes('export?mimeType=application%2Fvnd.openxmlformats'))).toBe(true)
+  })
+
+  it('T24b（表）: 書き出しのセルが食い違えば書き直しに戻し、食い違ったセルの数を作り手に返す', async () => {
+    const id = await toSheet()
+    g.state.exportBytes = () => xlsxOf(htmlTables(TABLE_HTML.replace('120', '999')))
+    await send(id)
+    await vi.waitFor(() => expect(ledger.listDeliveries(id).some((x) => x.status === '失敗')).toBe(true))
+    expect(ledger.listCaseEvents(id).some((e) => e.type === 'transition' && e.event === 'delivery.mismatch')).toBe(true)
+    const failed = ledger.listDeliveries(id).find((x) => x.status === '失敗')
+    expect(failed?.reason).toContain('食い違ったセル 1')
+    expect(failed?.link).toBeTruthy()
+  })
+
+  it('表とほかの保存先は混ぜられない（保存先を変える・足すも）', async () => {
+    const id = await toSheet()
+    await send(id)
+    await waitState(id, '完了')
+    expect((await act(id, { type: 'delivery.add', target: { kind: 'page', shared: false } })).status).toBe(409)
+  })
 })
 
 describe('libretto のフォルダ（6.5 (3)）', () => {
@@ -1580,4 +1654,79 @@ describe('libretto のフォルダ（6.5 (3)）', () => {
       await g.close()
     }
   })
+})
+
+// 偽の soffice / pdftoppm は /bin/sh の起動口なので Windows では飛ばす
+describe.skipIf(process.platform === 'win32')('手元のファイル（6.8 (4)）', () => {
+  afterEach(() => {
+    tools = undefined
+  })
+
+  it('pptx: 描き出して空白と見た目を判定し、保存したらその版をダウンロードできる。保存していない形式・版は 404', async () => {
+    tools = fakeOffice()
+    const dests = { ...intake, intake: { ...intake.intake, destinations: ['pptx', 'docx'] } }
+    await setup(
+      script(
+        ['話し相手', say(dests)],
+        ...upToEntrance.slice(1),
+        ['作り手', draft(1)],
+        ['判定役・文章', verdicts(true)],
+      ),
+      answerYes,
+    )
+    const id = await approved()
+    await waitState(id, '承認待ち')
+    await act(id, { type: 'approval.ok', marks: {}, versionFingerprint: (await caseView(id)).versions[0]?.fingerprint })
+    await vi.waitFor(() => expect(ledger.getCase(id)).toMatchObject({ state: '送付確認待ち', turn: '本人' }), {
+      timeout: 15_000,
+    })
+    const v = await caseView(id)
+    expect(v.formatReview?.failed).toEqual([])
+    expect(v.formatReview?.passed).toBe(4) // スライドの照合・空白・見た目（pptx と docx で 1 件）・文書の照合
+    expect((await get(`/api/cases/${id}/files/1?format=pptx`)).status).toBe(404) // まだ保存していない
+    await act(id, { type: 'delivery.send', planFingerprint: v.deliveryPlan.fingerprint })
+    await waitState(id, '完了')
+    const row = ledger.listDeliveries(id).findLast((x) => x.target.kind === 'file' && x.target.format === 'pptx')
+    expect(row).toMatchObject({ status: '送付済', link: `/api/cases/${id}/files/1?format=pptx` })
+    const res = await get(row?.link as string)
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toContain('presentationml')
+    expect(res.headers.get('content-disposition')).toContain('.pptx')
+    expect(
+      Buffer.from(await res.arrayBuffer())
+        .subarray(0, 2)
+        .toString(),
+    ).toBe('PK')
+    expect((await get(`/api/cases/${id}/files/1?format=xlsx`)).status).toBe(404)
+    expect((await get(`/api/cases/${id}/files/2?format=pptx`)).status).toBe(404)
+  }, 30_000)
+
+  it('道具が無いのに描き出しが要る保存先なら、判定せずに道具の失敗で止める', async () => {
+    const dests = { ...intake, intake: { ...intake.intake, destinations: ['pptx'] } }
+    tools = fakeOffice()
+    await setup(
+      script(
+        ['話し相手', say(dests)],
+        ...upToEntrance.slice(1),
+        ['作り手', draft(1)],
+        ['判定役・文章', verdicts(true)],
+      ),
+      answerYes,
+    )
+    const id = await approved()
+    await waitState(id, '承認待ち')
+    // 承認の後に道具が使えなくなった（壊れた soffice）
+    process.env.FAKE_OFFICE_FAIL = '1'
+    try {
+      await act(id, {
+        type: 'approval.ok',
+        marks: {},
+        versionFingerprint: (await caseView(id)).versions[0]?.fingerprint,
+      })
+      await waitState(id, '停止')
+      expect((await caseView(id)).stopReason).toBe('道具の失敗')
+    } finally {
+      delete process.env.FAKE_OFFICE_FAIL
+    }
+  }, 30_000)
 })
