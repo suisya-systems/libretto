@@ -322,7 +322,7 @@ Slack の DM は、2 分のあいだに出たお知らせの 1 行を改行で�
 | `entrance.brief.deadline` | 期限 |
 | `entrance.brief.mustNot` | してはいけないこと |
 | `entrance.none` | なし |
-| `entrance.wantedNote` | 進めると、次にこれを貼り付けてもらいます。 |
+| `entrance.wantedNote` | 「これで進める」を押した後、次の画面でこの資料を貼り付けてください。 |
 | `entrance.gatherNote` | 「これで進める」を押すと、libretto がウェブで探して資料に加えます。見つからなかったときは、出典の無いところに【要確認】を付けて書きます。 |
 | `entrance.voice.合わせる` | あなたの文体に合わせる |
 | `entrance.voice.合わせない` | 合わせない |
