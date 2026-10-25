@@ -35,7 +35,10 @@ const Saved = z.object({
 })
 type Saved = z.infer<typeof Saved>
 
-export type GoogleFail = { ok: false; why: 'not_connected' | 'auth_expired' | 'rate_limited' | 'network' | 'rejected' }
+export type GoogleFail =
+  | { ok: false; why: 'not_connected' | 'auth_expired' | 'rate_limited' | 'network' | 'rejected' }
+  // 403 accessNotConfigured: Google Cloud のプロジェクトでその API が有効でない。api は呼んだ先
+  | { ok: false; why: 'api_disabled'; api: 'gmail' | 'drive' }
 export type Google = ReturnType<typeof createGoogle>
 
 const STATE_MS = 10 * 60_000
@@ -298,6 +301,8 @@ export function createGoogle(o: {
       }
       const reason = res.status === 403 ? await res.text().catch(() => '') : ''
       log(`google ${new URL(url).pathname}: ${res.status}`)
+      if (/accessNotConfigured|SERVICE_DISABLED/.test(reason))
+        return { ok: false, why: 'api_disabled', api: url.startsWith(ep.gmail) ? 'gmail' : 'drive' }
       if (res.status === 429 || /rateLimitExceeded/i.test(reason)) return { ok: false, why: 'rate_limited' }
       return { ok: false, why: res.status >= 500 ? 'network' : 'rejected' }
     }

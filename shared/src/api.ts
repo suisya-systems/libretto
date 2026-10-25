@@ -369,7 +369,8 @@ export const ConnectionsView = z.object({
     labelFound: z.boolean().optional(),
     docs: z.boolean(), // Google ドキュメントに保存できる権限があるか（無ければ連携し直しを促す。6.5 (2)）
     lastAt: z.string().optional(),
-    problem: z.enum(['rate_limited', 'network']).optional(),
+    problem: z.enum(['rate_limited', 'network', 'api_disabled']).optional(),
+    docsProblem: z.literal('api_disabled').optional(), // Google Drive API が有効でない（連携のときに先に問い合わせる。6.5）
   }),
 })
 export type ConnectionsView = z.infer<typeof ConnectionsView>

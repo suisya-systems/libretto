@@ -34,11 +34,14 @@ export function createPoller(d: Deps) {
   let lastAt: string | undefined
   let startedAt = 0
   let labelFound: boolean | undefined
-  let problem: 'rate_limited' | 'network' | undefined
+  let problem: 'rate_limited' | 'network' | 'api_disabled' | undefined
+  // Drive は連携のたびに 1 度だけ先に問い合わせ、無効と分かったあいだは毎回見直す（直したら消える）
+  let docsProblem: 'api_disabled' | undefined
+  let docsCheckedAt = -1
 
   // 失敗は連携の欄に出す。auth_expired は google の側が覚える
   const failed = (f: GoogleFail) => {
-    if (f.why === 'rate_limited' || f.why === 'network') problem = f.why
+    if (f.why === 'rate_limited' || f.why === 'network' || f.why === 'api_disabled') problem = f.why
     else if (f.why === 'rejected') problem = 'network'
   }
 
@@ -46,6 +49,15 @@ export function createPoller(d: Deps) {
     const g = d.google
     const generation = g.generation()
     const account = g.status().email ?? ''
+    if (g.status().docs && (docsCheckedAt !== generation || docsProblem)) {
+      const r = await g.drive('/drive/v3/about?fields=kind', {}, signal)
+      if (g.generation() !== generation) return
+      // 届かないなど決め手の無い失敗では、前の判断も「確かめた」印も変えない（次の回にもう一度）
+      if (r.ok || r.why === 'api_disabled') {
+        docsCheckedAt = generation
+        docsProblem = r.ok ? undefined : 'api_disabled'
+      }
+    }
     const label = await labelId(g, d.label(), signal)
     if (!label.ok) return failed(label)
     labelFound = !!label.id
@@ -136,6 +148,7 @@ export function createPoller(d: Deps) {
       ...(lastAt && { lastAt }),
       ...(labelFound !== undefined && { labelFound }),
       ...(problem && { problem }),
+      ...(docsProblem && { docsProblem }),
     }),
   }
 }
