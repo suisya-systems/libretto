@@ -167,11 +167,17 @@ describe('会議メモの読み取り（6.7 (2)(3)）', () => {
       '* ☐ [岩間 涼] 資料を作る',
       '* [ ] [山田 花子] 予約する',
       '    ○ 【チーム】 共有する',
+      '  [ ] [佐藤 一] 点の無い字下げのチェック',
       'Gemini で作成されたメモは不正確な場合があります。',
     ].join('\n')
     const items = actionItems(text)?.items ?? []
-    expect(items).toEqual(['[岩間 涼] 資料を作る', '[山田 花子] 予約する', '【チーム】 共有する'])
-    expect(items.map(assigneeOf)).toEqual(['岩間 涼', '山田 花子', 'チーム'])
+    expect(items).toEqual([
+      '[岩間 涼] 資料を作る',
+      '[山田 花子] 予約する',
+      '【チーム】 共有する',
+      '[佐藤 一] 点の無い字下げのチェック',
+    ])
+    expect(items.map(assigneeOf)).toEqual(['岩間 涼', '山田 花子', 'チーム', '佐藤 一'])
     // 「Gemini で」「Gemini の」で始まる項目では切らず、注意書きの言い回しで切る
     const lead = ['Gemini で資料の下書きを作る', 'Gemini で作成した資料を共有する', 'Gemini の評価を書く']
     expect(

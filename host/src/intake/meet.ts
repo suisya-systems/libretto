@@ -39,7 +39,7 @@ const START =
 const END = /^(まとめ|概要|詳細|Summary|Details)$/i
 const BULLET = /^\s*(?:[*\-•・●○◦▪■]|\d+[.)．])\s*/
 // チェックリストの印（書き出しで `☐` か `[ ]` になる）。残すと `[ ]` を担当と読み、後ろの `[担当]` を取りこぼす
-const CHECK = /^(?:[☐☑☒]|\[[ xX]?\])\s*/
+const CHECK = /^\s*(?:[☐☑☒]|\[[ xX]?\])\s*/
 // 末尾の注意書き（「Gemini が作成したメモは…」「You should review Gemini's notes…」）。「Gemini で…」で始まる項目では切らないよう、
 // 注意書きの言い回しそのものに当てる（ponytail: 本物の注意書きの文が分かれば、その文に合わせる）
 const FOOTER =
