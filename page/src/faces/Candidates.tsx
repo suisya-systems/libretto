@@ -37,7 +37,7 @@ const when = (at: string) => {
   return `${d.getMonth() + 1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
-// JSON を送って、届いたか（503 は届いている。load.ts の send と同じ）
+// JSON を送って、保存できたか（503 は保存できていないので失敗。除外は止めると違い、メモリだけでは効かない）
 async function post(path: string, body: unknown): Promise<boolean> {
   try {
     const res = await fetch(path, {
@@ -45,7 +45,7 @@ async function post(path: string, body: unknown): Promise<boolean> {
       headers: { 'content-type': 'application/json', accept: 'application/json' },
       body: JSON.stringify(body),
     })
-    return res.ok || res.status === 503
+    return res.ok
   } catch {
     return false
   }

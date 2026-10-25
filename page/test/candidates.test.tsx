@@ -319,6 +319,24 @@ describe('自動検出の候補（6.9 (7)(10)）', () => {
     r.done()
   })
 
+  it('除外が保存できなかった（503）ときは除外したと出さず、もう一度押せる', async () => {
+    const ask = { kind: 'sender', value: 'a@example.com', label: 'a@example.com', count: 3 }
+    answer = (path) =>
+      path.endsWith('/actions')
+        ? new Response(JSON.stringify({ askSuppress: ask }))
+        : new Response('{"reason":"storage"}', { status: 503 })
+    const r = await render()
+    await r.click(r.button(W['cand.dismiss'], r.el.querySelector('.cand') as HTMLElement))
+    const dialog = document.querySelector('.dialog') as HTMLElement
+    await r.click(dialog.querySelectorAll('[role=radio]')[0])
+    await r.click(r.button(W['cand.dismiss'], dialog))
+    await r.click(r.button(W['home.askSuppressYes']))
+    expect(r.text()).not.toContain(w('home.askSuppressDone', { label: 'a@example.com' }))
+    expect(r.text()).toContain(W['band.sendFailed'])
+    expect(r.button(W['home.askSuppressYes'])).toBeTruthy()
+    r.done()
+  })
+
   it('除外しないで閉じる', async () => {
     answer = () =>
       new Response(JSON.stringify({ askSuppress: { kind: 'channel', value: 'C1', label: '#general', count: 3 } }))
