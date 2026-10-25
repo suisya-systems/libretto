@@ -140,9 +140,11 @@ export const INVENTORY_INSTRUCTION = `あなたは libretto の「事実係」�
 - 比較: 「〜より多い」「最大の」などの比べた言い方
 - 断定: 確かめられる事実として言い切っている文
 意見・感想・予定・呼びかけは入れません。
+文書そのものについての文（何をもとに書いたか・何をどの順で扱うか。例「以下はすべて公式の更新履歴をもとにしています」）も入れません。ただし、その文の中に確かめられる事実が混ざっていれば、その部分は入れます。
+本文のほかの場所で書いた事実をまとめ直した文も、確かめられる事実を述べていれば入れます。
 
 text には本文の文字を 1 字も変えずにそのまま写します（Markdown の記号やリンクの書き方も、本文にあるとおり）。1 つの text は 300 字以内で、主張の部分だけにします。同じ主張が何度出ても 1 回だけ書きます。主張が無ければ claims は [] にします。
-数字を含む文のうち、事実の主張を含まない文（予定・意見・手順の番号など）は、文をそのまま notClaims に写します。数字を含む文は、claims か notClaims のどちらかに必ず入れます。
+数字を含む文のうち、事実の主張を含まない文（予定・意見・手順の番号・文書そのものについての文など）は、文をそのまま notClaims に写します。数字を含む文は、claims か notClaims のどちらかに必ず入れます。
 
 出力は次の形の JSON だけにしてください（形だけの例）。
 ${JSON.stringify(EXAMPLE)}`
@@ -295,6 +297,23 @@ export type Facts = { file: FactsFile; excerpts: Map<string, string> } // claimI
 export type Sources = Map<string, Fetched | FetchFailure>
 export const sourceRef = (url: string) => sha256(url).slice(0, 16)
 
+// 主張の文の出典。リンクも印も無い文の主張が、本文の出典付きの文（出典付きの文を 2 つ繋いだものも）の 2-gram を
+// 6 割以上含めば、その文の出典を引き継ぐ（まとめの文。6.2.12 (2)）。合っているかは引き継いだ出典の該当箇所と支持の判定が決める。
+// ponytail: 言い換えの強いまとめは当たらず出典なしのまま（作り手に文が返る）。困ったら出典付きの文を Haiku に選ばせる
+function linksOf(sentences: readonly Sentence[], c: Claim): string[] {
+  const s = sentences.find((x) => x.start <= c.range[0] && c.range[0] < x.end)
+  if (!s || s.links.length || s.marked) return s?.links ?? []
+  const sourced = sentences.filter((x) => x.links.length)
+  const groups = [...sourced.map((x) => [x]), ...sourced.slice(1).map((x, i) => [sourced[i] as Sentence, x])]
+  const text = cleanText(c.text)
+  let top: { group: Sentence[]; score: number } | undefined
+  for (const group of groups) {
+    const score = containment(text, group.map((x) => cleanText(x.text)).join('\n'))
+    if (!top || score > top.score) top = { group, score }
+  }
+  return top && top.score >= MATERIAL_MIN ? [...new Set(top.group.flatMap((x) => x.links))] : []
+}
+
 export function buildFacts(
   version: number,
   md: string,
@@ -309,7 +328,7 @@ export function buildFacts(
     const text = cleanText(c.text)
     const mark = s?.marked ? { mark: true as const } : {}
     // 文に出典が複数あれば、主張に一番当たる出典を相手にする
-    const links = s?.links ?? []
+    const links = linksOf(sentences, c)
     if (links.length) {
       const scored = links.map((url) => {
         const src = sources.get(url)
@@ -427,9 +446,7 @@ export async function collectFacts(
   const inv = await inventoryClaims(md, d)
   if (!inv.ok) return inv
   const sentences = sentencesOf(md)
-  const urls = inv.claims.flatMap(
-    (c) => sentences.find((s) => s.start <= c.range[0] && c.range[0] < s.end)?.links ?? [],
-  )
+  const urls = inv.claims.flatMap((c) => linksOf(sentences, c))
   const sources = await fetchCached(d.home, d.caseId, urls, d.signal, d.fetch)
   return { ok: true, facts: buildFacts(version, md, inv.claims, readMaterials(d.home, d.caseId), sources) }
 }

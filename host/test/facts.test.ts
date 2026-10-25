@@ -292,6 +292,50 @@ describe('分類と照合（6.3.1 (3)(4)）', () => {
   })
 })
 
+describe('進め方の説明文とまとめの文（6.2.12）', () => {
+  it('文書そのものについての文は棚卸しの指示で外し、まとめの文は入れる', () => {
+    expect(INVENTORY_INSTRUCTION).toContain('文書そのものについての文')
+    expect(INVENTORY_INSTRUCTION).toContain('まとめ直した文も')
+  })
+
+  it('まとめの文は、言い直した出典付きの文の出典を引き継ぐ。新しい事実・印のある文は引き継がない', () => {
+    const md = [
+      `新しい版で検索が 2 倍速くなった（[更新履歴](${URL_A})）。`,
+      `設定の画面に「停止」の項目が加わった（[お知らせ](${URL_B})）。`,
+      'まとめると、検索が 2 倍速くなり、設定の画面に「停止」の項目が加わった。',
+      '検索は 2 倍速くなり、料金も半額になった。',
+      `検索は 2 倍速くなった。${MARK}`,
+    ].join('\n\n')
+    const cs = claimsFrom(md, [
+      { text: '新しい版で検索が 2 倍速くなった', kind: '比較' },
+      { text: '設定の画面に「停止」の項目が加わった', kind: '断定' },
+      { text: '検索が 2 倍速くなり、設定の画面に「停止」の項目が加わった', kind: '断定' },
+      { text: '検索は 2 倍速くなり、料金も半額になった', kind: '比較' },
+      { text: '検索は 2 倍速くなった', kind: '比較' },
+    ])
+    const page = (url: string, p: string): Fetched => ({ ok: true, url, title: 't', paragraphs: [p], fingerprint: 'f' })
+    const f = buildFacts(
+      1,
+      md,
+      cs,
+      [],
+      new Map([
+        [URL_A, page(URL_A, '新しい版では検索が 2 倍速くなりました。')],
+        [URL_B, page(URL_B, '設定の画面に「停止」の項目を加えました。')],
+      ]),
+    )
+    expect(f.file.verdicts.map((v) => [v.claimId, v.kind, v.sourceRef, !!v.excerptFingerprint, v.mark])).toEqual([
+      ['K01', '出典あり', URL_A, true, undefined],
+      ['K02', '出典あり', URL_B, true, undefined],
+      ['K03', '出典あり', URL_B, true, undefined],
+      ['K04', '出典なし', undefined, false, undefined],
+      ['K05', '出典なし', undefined, false, true],
+    ])
+    // 2 つの文をまとめた文は、文に出典が複数あるときと同じく一番当たる出典を相手にし、支持の判定に回る（抜粋がある）
+    expect(f.excerpts.get('K03')).toBe('設定の画面に「停止」の項目を加えました。')
+  })
+})
+
 describe('取り寄せ（6.3.1 (5)）', () => {
   it('手元のアドレスを拒む（v4・v6・射影・NAT64）', () => {
     for (const ip of [
