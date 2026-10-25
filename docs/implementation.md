@@ -2705,6 +2705,7 @@ GitHub #29 は、本物のモデルで依頼を流したオーナーの所感（
 | Slack: `xoxb-` で始まらない値 | Bot User OAuth Token（xoxb- で始まるもの）を貼ってください。User OAuth Token（xoxp-）は取り込みの欄に入れるものです |
 | Slack: `missing_scope` | Slack に通知を送る権限（chat:write）がありません。Slack アプリの設定でボットの権限に chat:write を足し、入れ直してから、出たトークンを貼り直してください |
 | Slack: `invalid_auth` など | Slack がこのトークンを受け付けませんでした。Slack アプリを入れ直し、出た Bot User OAuth Token を貼り直してください |
+| Slack: 送り先の本人が分からない（取り込みのユーザートークンが無い・受け付けられない。GitHub #52 で足した） | Slack で通知する相手が分かりません。上の連携の Slack の欄に User OAuth Token（xoxp- で始まるもの）を貼ってください。そのトークンのあなたに届きます |
 
 **(8) 準備（オーナーと本人）**
 
@@ -2756,7 +2757,19 @@ GitHub #29 は、本物のモデルで依頼を流したオーナーの所感（
 - **`POST /api/devices/presence` は (9) の 2 で足す**。読むのはホストが Web Push を送るかを決めるときだけで、この Issue には送り先が無い。
 - **設定の「お知らせ」の節**: この端末の状態（「この端末に通知します」/「許可されていません」/「この開き方では使えません」）と「この端末に通知する」（押したときだけ許可を求める）、ブラウザで拒んだとき・`http://` の開き方のときの (7) の文、出来事ごとの入り切り。画面を閉じていても届く通知はまだ無いので、(7) の「このブラウザでは、画面を開いているあいだだけ通知します」を常に出す。iPhone の「ホーム画面に追加」の文は、マニフェストを置く (9) の 2 で出す（今は追加しても通知を受け取れないため）。
 
-**(12) 実装の決め事（GitHub #51。(9) の 2）**
+**(12) 実装の決め事（GitHub #52。(9) の 3、Slack の DM）**
+
+(9) の 3 を作るときに決めたこと。設計レビューに 1 回かけ、出た指摘を反映した。
+
+- **ボットトークンは `ApiKeyKind` の `slackBot`**（`api-keys.json`・`0600`・値は二度と出さない。6.6 (2) のユーザートークンと同じ扱い）。`PUT /api/settings/keys/slackBot` は `xoxb-` で始まらなければ `400`。設定の「お知らせ」の節に、API キーの行と同じ形の Slack の行を置く。出来事ごとの入り切りはブラウザと同じ「通知する出来事」を使い、Slack だけの入り切りは置かない。理由: 送り先ごとに入り切りを分けると、設定の欄と `settings.json` が送り先の数だけ増える。Slack を止めたいときはトークンを消せばよい。
+- **送り先は取り込みのユーザートークンの本人**（`auth.test` の `user_id`）。送るたびに確かめる。ユーザートークンが無い・受け付けられないときは送らずに落とし、設定に (7) の「相手が分からない」を出す。理由: ボットトークンの `auth.test` が返すのはボット自身で、本人を知る手段がユーザートークンしかない。
+- **送り手は `host/src/server/slack-dm.ts`**。Slack の呼び出しは取り込みと同じ `createSlack().call` を使う（失敗の分け方・429・入れ直しの途中を共有する）。`chat.postMessage` に `channel=<user_id>`・`unfurl_links=false`・`unfurl_media=false` を渡す。結果の分け方: 届いた → `sent`。429・`5xx`・届かない・Slack の一時的な失敗（`internal_error`・`fatal_error`・`service_unavailable`・`request_timeout`）・トークンを入れ直している途中 → 送り直し（(5) の 1・5・30 分）。トークンを受け付けない・`missing_scope`・その他の拒否 → 落とし、設定に (7) の文を出す（トークンは消さない）。
+- **確かめ**: ボットトークンかユーザートークンを入れた・消したとき、と起動のときに、ボットトークンで `auth.test` を呼ぶ。応答の `x-oauth-scopes` に `chat:write` が無ければ権限が足りない、の文を出す。Slack に届かなければ何も出さない（次に送ったときの結果で決まる）。後から始めた確かめ・送った結果が前の結果を上書きする。状態は `GET /api/connections` の `slackDm.state`（`none` / `unchecked` / `on` / `noUser` / `missingScope` / `rejected`）。
+- **2 分のまとめは送り出しの仕事が持つ**（`createNotices` の `holdMs`。送り先の頭 → ミリ秒）。初めて送る分は、そのうちいちばん古いお知らせから 2 分たつまで `pending` のまま残し、たったら全部を 1 通にする。送り直しの分は待たずに時刻どおり送る。1 分ごとの見回りが拾うので、届くのは最初の知らせから 2〜3 分後。表とマイグレーションは変えない。理由（設計レビュー）: 送り直しの行まで 2 分の窓に合わせると、(5) の送り直しの時刻がずれる。
+- **確認待ちの確かめ直しは、送り先ごとに送る直前に掛ける**（前の送り先を待つあいだ・2 分のあいだに本人が答えた確認待ちは送らない）。
+- **文**: 1 通は (3) の 1 行を改行で並べたもの。題の `& < >` は Slack の書式の記号にならないよう逃がす。`LIBRETTO_ORIGIN` の中に `https://` で始まる起点があれば、各行の後ろに `Notice.path` をその起点で組んだリンク（「開く」）を付ける。無ければリンクを付けず、最後に「libretto の画面を開いてください」を足す。21 行目からは並べず「ほか {n} 件は libretto のお知らせ欄で見られます」の 1 行にする。理由（設計レビュー）: 落ちたホストの送り残しが溜まっても、1 通が Slack の長さの上限に届かない。文は `ui-wording.md` の「Slack の DM に足す文」。
+
+**(13) 実装の決め事（GitHub #51。(9) の 2）**
 
 (9) の 2 を作るときに決めたこと。設計レビューに 1 回かけ、出た指摘を反映した。
 
@@ -3718,7 +3731,7 @@ CREATE TABLE notice_deliveries (
   PRIMARY KEY (notice_seq, target)
 );
 
--- 画面を閉じていても届く通知の登録（6.8 (6)(12)）。端末に 1 つ、endpoint も 1 つの端末にだけ
+-- 画面を閉じていても届く通知の登録（6.8 (6)(13)）。端末に 1 つ、endpoint も 1 つの端末にだけ
 CREATE TABLE push_subscriptions (
   session_id TEXT PRIMARY KEY, endpoint TEXT NOT NULL UNIQUE, p256dh TEXT NOT NULL, auth TEXT NOT NULL, at TEXT NOT NULL
 );
@@ -3776,7 +3789,7 @@ CREATE UNIQUE INDEX conversation_one_per_request ON conversation_messages(reques
 
 **`costs`**: 列は上の定義のとおり（`type: 'hold'|'charge'|'classified'`、`call_id`、`case_id: string|'推測'|'点検'|'会話'`、`role`、`family`、`model`、`yen`、`hold_yen`、`tokens_in` / `tokens_out`、`item_id`）。行の種類ごとに埋める欄・空にする欄と重複の防ぎ方は上の `CHECK` と一意の索引（理由は 9.4 (1)）。集計（どれも 1 本の SQL）: 案件の累計 = `charge` の合計 ＋ 未精算の `hold` の全額。全体の今月 = 同じ集計を全案件＋推測＋点検で（月の境界と、月をまたぐ呼び出しをどの月に数えるかは 9.4 (2)）。推測の 1 日の件数 = `classified` 行（分類した候補 1 件につき 1 行。中で Haiku と Jev を何回呼んでも 1 行）の数（JST の 1 日）。`model` / `family` は内部の記録で、画面には出さない（11.2）。
 
-**データベースのほかにルートに置くファイル**: `settings.json`（5.3 の `Settings`。置き換えで書く唯一のファイル。前の版を `settings.prev.json` に残す。API キーは入れない）、`api-keys.json`（設定の面から入れた API キー。`{ openai?: { value, savedAt }, jev?: { value, savedAt } }`。**オーナーだけが読み書きできる権限**で作る: POSIX は作るときから `0600`、一時ファイルに `0600` で書いて置き換える。素の Windows はユーザーのプロファイルの既定の権限に任せ、8.5 の拒否規則に足す。案件フォルダの外で、作り手のセッションの `denyRead`（8.3）の中にある。`settings.json` に入れないのは、`settings.prev.json` に写って値が 2 か所に残るため）、ペアリングのセッションは `sessions` 表、`pairing.txt`（未使用のペアリング URL。使ったら消す）、`push-keys.json`（Web Push の VAPID の鍵の組。`0600`。6.8 (12)）、`STOP`（緊急停止。中身は時刻）、`isolation.json`（8.3）、`requirements.md`（依存の一覧。オーナー向け）、会話欄のお知らせは `notices` 表、会話欄は `conversation_messages` 表（`thread` = 案件 id か `lobby`）、`logs/`（CLI の生の出力。画面に出ない）、`calls/`（呼び出しの結果のファイル `<callId>.json`。精算したら消す。9.4 (7)）。
+**データベースのほかにルートに置くファイル**: `settings.json`（5.3 の `Settings`。置き換えで書く唯一のファイル。前の版を `settings.prev.json` に残す。API キーは入れない）、`api-keys.json`（設定の面から入れた API キー。`{ openai?: { value, savedAt }, jev?: { value, savedAt } }`。**オーナーだけが読み書きできる権限**で作る: POSIX は作るときから `0600`、一時ファイルに `0600` で書いて置き換える。素の Windows はユーザーのプロファイルの既定の権限に任せ、8.5 の拒否規則に足す。案件フォルダの外で、作り手のセッションの `denyRead`（8.3）の中にある。`settings.json` に入れないのは、`settings.prev.json` に写って値が 2 か所に残るため）、ペアリングのセッションは `sessions` 表、`pairing.txt`（未使用のペアリング URL。使ったら消す）、`push-keys.json`（Web Push の VAPID の鍵の組。`0600`。6.8 (13)）、`STOP`（緊急停止。中身は時刻）、`isolation.json`（8.3）、`requirements.md`（依存の一覧。オーナー向け）、会話欄のお知らせは `notices` 表、会話欄は `conversation_messages` 表（`thread` = 案件 id か `lobby`）、`logs/`（CLI の生の出力。画面に出ない）、`calls/`（呼び出しの結果のファイル `<callId>.json`。精算したら消す。9.4 (7)）。
 
 ### 9.3 案件フォルダ
 

@@ -17,6 +17,7 @@ export function createNotices(d: {
   ledger: Ledger
   hub: Hub
   senders?: Record<string, Sender> // 送り先の頭（push / slack）→ 送り手
+  holdMs?: Record<string, number> // 送り先の頭 → まとめるあいだ（Slack の DM は 2 分）
   now?: () => Date
   log?: (line: string) => void
 }) {
@@ -41,15 +42,20 @@ export function createNotices(d: {
         d.ledger.setDelivery(n.id, target, { status: 'dropped', tries: n.tries })
       else groups.set(target, [...(groups.get(target) ?? []), n])
     }
-    for (const [target, all] of groups) {
-      // 前の送り先を送っている間に本人が答えた確認待ちは、ここでもう送らない
-      const rows = all.filter((n) => {
+    for (const [target, due] of groups) {
+      const head = target.split(':')[0] as string
+      // まとめて送る送り先（Slack の DM の 2 分。6.8 (4)）: 初めて送る分は、いちばん古いものから holdMs たつまで残す。送り直しは時刻どおり
+      const fresh = due.find((n) => n.tries === 0)
+      const hold = d.holdMs?.[head] ?? 0
+      const ready = fresh && now().getTime() - Date.parse(fresh.at) < hold ? due.filter((n) => n.tries > 0) : due
+      // 確かめ直しは送る直前に（前の送り先を待つあいだに本人が答えうる）
+      const rows = ready.filter((n) => {
         if (!stale(n)) return true
         d.ledger.setDelivery(n.id, target, { status: 'dropped', tries: n.tries })
         return false
       })
       if (!rows.length) continue
-      const send = senders[target.split(':')[0] as string]
+      const send = senders[head]
       let r: Awaited<ReturnType<Sender>> = 'gone'
       if (send)
         try {

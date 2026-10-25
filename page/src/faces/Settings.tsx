@@ -76,6 +76,16 @@ const TEXT: Record<Kind, Texts> = {
     saved: 'settings.slack.saved',
     invalid: 'settings.slack.invalid',
   },
+  slackBot: {
+    label: 'settings.slackDm.label',
+    use: 'settings.slackDm.use',
+    unsetNote: 'settings.slackDm.unsetNote',
+    deleteBody: 'settings.slackDm.deleteBody',
+    deleteTitle: 'settings.slackDm.deleteTitle',
+    input: 'settings.slackDm.input',
+    saved: 'settings.slackDm.saved',
+    invalid: 'settings.slackDm.invalid',
+  },
 }
 
 function KeyRow({ status, reload, children }: { status: ApiKeyStatus; reload: () => void; children?: ReactNode }) {
@@ -943,8 +953,38 @@ const DEVICE: Record<DeviceState, [string, WKey]> = {
   unavailable: ['b-alert', 'settings.notices.unavailable'],
 }
 const KINDS = NoticePrefs.keyof().options
+type SlackDm = ConnectionsView['slackDm']['state']
+const DM_NOTE: Partial<Record<SlackDm, [string, WKey]>> = {
+  on: ['muted', 'settings.slackDm.on'],
+  noUser: ['note-warn', 'settings.slackDm.noUser'],
+  missingScope: ['note-warn', 'settings.slackDm.missingScope'],
+  rejected: ['note-alert', 'settings.slackDm.rejected'],
+}
 
-function NoticeSection({ prefs: loaded, reload }: { prefs: NoticePrefs; reload: () => void }) {
+// Slack の DM の行（6.8 (8)(12)）。ボットトークンは API キーと同じく貼り付けて入れる。下に Slack で確かめた結果
+function SlackDmRow({ status, dm, reload }: { status: ApiKeyStatus; dm: SlackDm; reload: () => void }) {
+  const note = DM_NOTE[dm]
+  return (
+    <KeyRow status={status} reload={reload}>
+      {note && <p className={`${note[0]} small`}>{W[note[1]]}</p>}
+      {status.set && <p className="muted small">{W['settings.slackDm.openNote']}</p>}
+    </KeyRow>
+  )
+}
+
+function NoticeSection({
+  prefs: loaded,
+  reload,
+  slackBot,
+  dm,
+  reloadDm,
+}: {
+  prefs: NoticePrefs
+  reload: () => void
+  slackBot?: ApiKeyStatus | undefined
+  dm?: SlackDm | undefined
+  reloadDm: () => void
+}) {
   const [device, setDevice] = useState(deviceState)
   const push = useLoad('/api/devices/push', PushStatus)
   // 画面を閉じていても届くのは、対応しているブラウザで、許可してホストが登録を持っているとき
@@ -1014,6 +1054,7 @@ function NoticeSection({ prefs: loaded, reload }: { prefs: NoticePrefs; reload: 
             </div>
           )}
         </li>
+        {slackBot && dm && <SlackDmRow status={slackBot} dm={dm} reload={reloadDm} />}
       </ul>
       <fieldset className="revise">
         <legend className="strong small">{W['settings.notices.kinds']}</legend>
@@ -1081,7 +1122,18 @@ export function Settings() {
           }}
         />
       )}
-      {notices.data && <NoticeSection prefs={notices.data} reload={notices.reload} />}
+      {notices.data && (
+        <NoticeSection
+          prefs={notices.data}
+          reload={notices.reload}
+          slackBot={keys.data?.slackBot}
+          dm={env.data?.slackDm.state}
+          reloadDm={() => {
+            env.reload()
+            keys.reload()
+          }}
+        />
+      )}
       {voice.data && <VoiceSection samples={voice.data.samples} reload={voice.reload} />}
       {env.data && <EnvSection v={env.data.isolation} tools={env.data.tools} reload={env.reload} />}
     </section>

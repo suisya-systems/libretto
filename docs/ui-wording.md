@@ -143,6 +143,16 @@ libretto の画面に出す言葉の正本。設計書（[`docs/design.md`](./de
 
 `{理由}` は会話欄の `SAY` の文をそのまま使う（例: 「『週報』は、費用の上限に達したので中止しました。新しい依頼として出し直せます」）。0 件の項目は明けの文から省く。
 
+**Slack の DM に足す文（`host/src/server/slack-dm.ts` の `SLACK_DM`。実装設計書 6.8 (3)(12)）**
+
+Slack の DM は、2 分のあいだに出たお知らせの 1 行を改行で並べた 1 通。`open` は各行の後ろのリンクの文字で、Tailscale の HTTPS のアドレスがあるときだけ付ける。無いときはリンクを付けず、最後に `openApp` を 1 行足す。21 行目からは並べず `more` の 1 行にする（`{n}` は並べなかった数）。
+
+| キー | 文 |
+|---|---|
+| `open` | 開く |
+| `openApp` | libretto の画面を開いてください |
+| `more` | ほか {n} 件は libretto のお知らせ欄で見られます |
+
 **話し相手の代わりに会話欄に書く 1 行（`host/src/roles/conversation.ts` の `TALK`。実装設計書 6.2.1 (7)）**
 
 `retry` と `retryWhy` は `failed` の行に付ける選択肢の文と、その 1 行。`moved` は案件の中の会話で直す内容がまとまったが、その間に依頼の状態が変わっていたときの 1 行（実装設計書 6.2.2 (8)）。`candidateMoved` は候補の中の会話（「内容を修正」）で同じことが起きたときの 1 行（実装設計書 6.4 (5)）。
@@ -844,3 +854,23 @@ Slack の行は API キーの行と同じ形（貼り付け・「入れ直す」
 | `settings.notices.kind.started` | 下書きに取りかかった |
 | `settings.notices.saved` | 保存しました。 |
 | `settings.notices.failed` | 保存できませんでした。もう一度お試しください。 |
+
+**設定の面のお知らせの Slack（実装設計書 6.8 (7)(8)(12)）**
+
+お知らせの節の中の Slack の行。API キーの行と同じ形（貼り付け・「入れ直す」・「削除」、保存後は「設定済み（末尾 1a2b）」）で、トークンは画面に二度と出さない。保存すると Slack で確かめ、結果で `on`・`noUser`・`missingScope`・`rejected` のどれかを出す（Slack に届かなかったときは何も出さない）。`chat:write` は Slack アプリの設定画面で探す名前なので、言い換えない。
+
+| キー | 文 |
+|---|---|
+| `settings.slackDm.label` | Slack |
+| `settings.slackDm.use` | Slack の libretto アプリから、あなたにダイレクトメッセージで通知します。通知する出来事は下の選択と同じです。依頼の題が Slack に残ります |
+| `settings.slackDm.unsetNote` | Slack に通知するには、Slack アプリにボットを足して出た Bot User OAuth Token（xoxb- で始まるもの）を貼ってください |
+| `settings.slackDm.input` | Bot User OAuth Token を貼り付け |
+| `settings.slackDm.saved` | 保存しました。 |
+| `settings.slackDm.invalid` | Bot User OAuth Token（xoxb- で始まるもの）を貼ってください。User OAuth Token（xoxp-）は取り込みの欄に入れるものです |
+| `settings.slackDm.deleteTitle` | Slack に通知するトークンを削除しますか |
+| `settings.slackDm.deleteBody` | Slack への通知を止めます。お知らせ欄とこの端末の通知はそのままです。 |
+| `settings.slackDm.on` | Slack に通知します |
+| `settings.slackDm.noUser` | Slack で通知する相手が分かりません。上の連携の Slack の欄に User OAuth Token（xoxp- で始まるもの）を貼ってください。そのトークンのあなたに届きます |
+| `settings.slackDm.missingScope` | Slack に通知を送る権限（chat:write）がありません。Slack アプリの設定でボットの権限に chat:write を足し、入れ直してから、出たトークンを貼り直してください |
+| `settings.slackDm.rejected` | Slack がこのトークンを受け付けませんでした。Slack アプリを入れ直し、出た Bot User OAuth Token を貼り直してください |
+| `settings.slackDm.openNote` | Slack の通知から libretto を開くには、その端末が Tailscale につながっている必要があります |

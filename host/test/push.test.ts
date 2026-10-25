@@ -1,4 +1,4 @@
-// 画面を閉じていても届く通知（docs/implementation.md 6.8 (6)(12)）。偽の配信元（プロセス内の HTTP サーバー）に送り、
+// 画面を閉じていても届く通知（docs/implementation.md 6.8 (6)(13)）。偽の配信元（プロセス内の HTTP サーバー）に送り、
 // 端末の鍵で本文を復号して確かめる。登録が無い（404 / 410）・混んでいる（429）・届かない・外した端末・見ている端末
 import { createDecipheriv, createECDH, hkdfSync, randomBytes } from 'node:crypto'
 import { mkdirSync, mkdtempSync, statSync, writeFileSync } from 'node:fs'
@@ -118,7 +118,7 @@ function stopped(caseId = `c${++k}`) {
 }
 const MIN = 60_000
 
-describe('登録と送る（6.8 (6)(12)）', () => {
+describe('登録と送る（6.8 (6)(13)）', () => {
   it('公開鍵は初めて要るときに作り 0600 で持つ。登録した端末に、暗号化して VAPID で署名して送る', async () => {
     const headers = await pair()
     const s1 = await status(headers)

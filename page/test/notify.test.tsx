@@ -2,7 +2,7 @@
 // ブラウザの通知 B（docs/implementation.md 6.8 (2)(6)(7)）。サービスワーカーの出し方、画面からの渡し方、設定の「お知らせ」の節
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { ConnectionsView, Notice } from '@libretto/shared/api'
+import type { ApiKeyStatus, ConnectionsView, Notice } from '@libretto/shared/api'
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -227,18 +227,23 @@ describe('画面からサービスワーカーへ渡す', () => {
 describe('設定の「お知らせ」の節', () => {
   let prefs: Record<string, boolean>
   let sent: unknown[]
+  let bot: ApiKeyStatus
+  let dm: ConnectionsView['slackDm']['state']
   let host: { subscribed: boolean; unreachable: boolean }
   let puts: unknown[]
   const conn: ConnectionsView = {
     isolation: { level: 'strong', running: false },
     google: { configured: false, state: 'none', label: 'libretto', docs: false, meet: false },
     slack: { configured: false, state: 'none', emoji: 'memo', missingScopes: [] },
+    slackDm: { state: 'none' },
     tools: { soffice: true, pdftoppm: true },
     inference: { classifiedToday: 0, dailyLimit: 300, recall: { hit: 0, total: 0 }, suppressions: [] },
   }
   beforeEach(() => {
     prefs = { your_turn: true, stopped: true, done: true, auto_started: true, candidates: true, started: false }
     sent = []
+    bot = { kind: 'slackBot', set: false }
+    dm = 'none'
     host = { subscribed: false, unreachable: false }
     puts = []
     vi.stubGlobal('fetch', async (path: string, init: RequestInit = {}) => {
@@ -263,9 +268,14 @@ describe('設定の「お知らせ」の節', () => {
             openai: { kind: 'openai', set: false },
             jev: { kind: 'jev', set: false },
             slack: { kind: 'slack', set: false },
+            slackBot: bot,
           }),
         )
-      if (path === '/api/connections') return new Response(JSON.stringify(conn))
+      if (path === '/api/settings/keys/slackBot') {
+        sent.push({ method: init.method, path, body: init.body && JSON.parse(String(init.body)) })
+        return new Response('{}', { status: 400 })
+      }
+      if (path === '/api/connections') return new Response(JSON.stringify({ ...conn, slackDm: { state: dm } }))
       if (path === '/api/settings/voice-samples') return new Response(JSON.stringify({ samples: [] }))
       if (path === '/api/settings/inference')
         return new Response(
@@ -377,5 +387,37 @@ describe('設定の「お知らせ」の節', () => {
     expect(p.box(W['settings.notices.kind.started'])?.checked).toBe(true)
     expect(p.text()).toContain(W['settings.notices.saved'])
     p.done()
+  })
+
+  it('Slack の行: 未設定なら貼るものを、xoxp- を貼れば欄の違いを、確かめた結果を出す（6.8 (7)(8)）', async () => {
+    permission = 'granted'
+    stubBrowser()
+    let p = await render()
+    expect(p.text()).toContain(W['settings.slackDm.unsetNote'])
+    const input = () =>
+      document.querySelector(`input[placeholder="${W['settings.slackDm.input']}"]`) as HTMLInputElement
+    expect(input().type).toBe('password')
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(input(), 'xoxp-user-token')
+      input().dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    await act(async () => input().form?.requestSubmit())
+    expect(sent).toEqual([{ method: 'PUT', path: '/api/settings/keys/slackBot', body: { value: 'xoxp-user-token' } }])
+    expect(p.text()).toContain(W['settings.slackDm.invalid'])
+    p.done()
+
+    bot = { kind: 'slackBot', set: true, last4: 'good', savedAt: '2026-10-25T21:00:00+09:00' }
+    for (const [state, key] of [
+      ['on', 'settings.slackDm.on'],
+      ['noUser', 'settings.slackDm.noUser'],
+      ['missingScope', 'settings.slackDm.missingScope'],
+      ['rejected', 'settings.slackDm.rejected'],
+    ] as const) {
+      dm = state
+      p = await render()
+      expect(p.text()).toContain(W[key])
+      expect(p.text()).toContain(W['settings.slackDm.openNote'])
+      p.done()
+    }
   })
 })

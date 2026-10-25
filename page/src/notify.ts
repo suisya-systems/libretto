@@ -1,4 +1,4 @@
-// ブラウザの通知 B と、画面を閉じていても届く通知 C の登録（docs/implementation.md 6.8 (2)(6)(12)）。
+// ブラウザの通知 B と、画面を閉じていても届く通知 C の登録（docs/implementation.md 6.8 (2)(6)(13)）。
 // B は画面を開いているあいだ、SSE の notice をサービスワーカーに渡して出す。見ているか・同じ知らせが出ているかは
 // サービスワーカーが端末の全部のタブを見て決める（public/sw.js）。C はホストが配信元へ送り、同じ出し方で出る
 import { Notice, PushStatus } from '@libretto/shared/api'

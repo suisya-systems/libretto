@@ -1,4 +1,4 @@
-// 画面を閉じていても届く通知 C（docs/implementation.md 6.8 (2)(6)(12)）。送り先 push:<sessionId> の送り手と、端末ごとの「見ている」。
+// 画面を閉じていても届く通知 C（docs/implementation.md 6.8 (2)(6)(13)）。送り先 push:<sessionId> の送り手と、端末ごとの「見ている」。
 // 暗号化と VAPID の署名は web-push で組み、送るのは fetch（sendNotification は https モジュール固定で、偽の配信元に向けられない）
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'

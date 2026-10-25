@@ -31,6 +31,7 @@ beforeEach(() => {
     isolation: { level: 'strong', running: false },
     google: { configured: false, state: 'none', label: 'libretto', docs: false, meet: false },
     slack: { configured: false, state: 'none', emoji: 'memo', missingScopes: [] },
+    slackDm: { state: 'none' },
     tools: { soffice: true, pdftoppm: true },
     inference: { classifiedToday: 0, dailyLimit: 300, recall: { hit: 0, total: 0 }, suppressions: [] },
   }
@@ -41,7 +42,14 @@ beforeEach(() => {
   voiceStatus = 200
   vi.stubGlobal('fetch', async (path: string, init: RequestInit = {}) => {
     if (path === '/api/settings/keys')
-      return new Response(JSON.stringify({ openai: keys, jev, slack: { kind: 'slack', set: false } }))
+      return new Response(
+        JSON.stringify({
+          openai: keys,
+          jev,
+          slack: { kind: 'slack', set: false },
+          slackBot: { kind: 'slackBot', set: false },
+        }),
+      )
     if (path === '/api/connections') return new Response(JSON.stringify(conn))
     if (path === '/api/settings/voice-samples') {
       if (init.method === 'PUT') {
