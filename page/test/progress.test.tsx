@@ -33,6 +33,7 @@ const base: CaseView = {
     overwrites: false,
     quotesOthers: false,
   },
+  destinationChoices: ['page', 'paste'],
   deliveries: [],
   events: [
     { at, type: 'created', to: '入口待ち' },

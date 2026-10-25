@@ -31,6 +31,7 @@ const view = {
     quotesOthers: false,
   },
   deliveries: [],
+  destinationChoices: ['page', 'paste'],
   events: [],
 }
 const entrance = {

@@ -97,6 +97,7 @@ export function caseView(
   reviews: Pick<CaseView, 'review' | 'formatReview'> = {},
   fetched: { title: string; url: string; gathered?: boolean }[] = [],
   gatherFailed = false,
+  destinationChoices: CaseView['destinationChoices'] = ['page', 'paste'],
 ): CaseView {
   const approvals = ledger.listApprovals(c.caseId).filter((a) => !a.supersededBy)
   const approved = approvals.findLast((a) => a.gate === '入口')
@@ -149,8 +150,10 @@ export function caseView(
       ...(d.link && { link: d.link }),
       ...(d.shareToken && { shareToken: d.shareToken }),
       visibility: d.visibility,
+      ...(d.reason && { reason: d.reason }),
       at: d.at,
     })),
+    destinationChoices,
     events: ledger.listCaseEvents(c.caseId).map((e) => ({
       at: e.at,
       type: e.type,

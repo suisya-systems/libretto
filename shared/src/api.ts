@@ -227,6 +227,7 @@ export const Delivery = z.object({
   link: z.string().optional(),
   shareToken: z.string().optional(),
   visibility: Visibility,
+  reason: z.string().optional(), // 失敗の理由（照合の食い違いを含む。6.5 (8)）
   at: z.string(),
 })
 
@@ -275,6 +276,8 @@ export const CaseView = CaseCard.extend({
   outlineFingerprint: z.string().optional(), // 承認待ち（kind=構成案）のとき。outline.approve に添える（4.6 (4)）
   deliveryPlan: DeliveryPlan,
   deliveries: z.array(Delivery),
+  // 保存先を変える・足すときに選べる種類（gdoc は Google ドキュメントに保存できる連携があるときだけ。6.5 (3)）
+  destinationChoices: z.array(z.enum(['page', 'paste', 'gdoc'])),
   events: z.array(EventRow),
   stopReason: z.string().optional(),
 })
@@ -364,6 +367,7 @@ export const ConnectionsView = z.object({
     email: z.string().optional(),
     label: z.string(),
     labelFound: z.boolean().optional(),
+    docs: z.boolean(), // Google ドキュメントに保存できる権限があるか（無ければ連携し直しを促す。6.5 (2)）
     lastAt: z.string().optional(),
     problem: z.enum(['rate_limited', 'network']).optional(),
   }),

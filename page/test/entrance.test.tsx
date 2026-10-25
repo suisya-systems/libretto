@@ -32,6 +32,7 @@ const base: CaseView = {
     overwrites: false,
     quotesOthers: false,
   },
+  destinationChoices: ['page', 'paste'],
   deliveries: [],
   events: [],
 }

@@ -37,6 +37,26 @@ function stepOf(c: CaseView): Step {
   return (last?.from && AT[last.from]) || 'entrance'
 }
 
+// 中身を確かめられなかった Google ドキュメント（照合に落ちた・確かめられないまま止まった）。本人に消してもらう（6.5 (6)）
+export function Leftovers({ c }: { c: CaseView }) {
+  const left = c.deliveries.filter((d) => d.status === '失敗' && d.target.kind === 'gdoc' && d.link)
+  if (!left.length) return null
+  return (
+    <div className="band band-warn stack" role="note">
+      <p>{W['result.leftover']}</p>
+      <ul className="plain-list">
+        {left.map((d) => (
+          <li key={d.attemptId}>
+            <a href={d.link} target="_blank" rel="noopener noreferrer">
+              {w('result.leftoverOpen', { n: d.version })}
+            </a>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 export function ProgressFace({ c, reload, stopped }: { c: CaseView; reload: () => void; stopped: boolean }) {
   const action = useCaseAction(c.id, reload)
   const [, navigate] = useLocation()
@@ -183,6 +203,7 @@ export function ProgressFace({ c, reload, stopped }: { c: CaseView; reload: () =
         })}
       </ol>
 
+      <Leftovers c={c} />
       <Versions c={c} />
 
       {(c.materials.length > 0 || c.gatherFailed) && (

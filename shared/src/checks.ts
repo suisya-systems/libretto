@@ -76,6 +76,7 @@ export const CodeArgs = {
   canary: z.object({ token: z.string().min(1) }),
   pasteSafe: z.object({}),
   pageRoundTrip: z.object({}),
+  docsRoundTrip: z.object({}),
   claimsInventoried: z.object({}),
   sourcesReachable: z.object({}),
   numbersMatch: z.object({}),

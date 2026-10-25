@@ -7,11 +7,15 @@ import { jst } from '../ledger/ledger.ts'
 import { writeSecret } from '../model/keys.ts'
 
 export const GMAIL_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly'
+// libretto が作ったファイルだけを作る・書き出す・探す（6.5 (1)）。本人のほかのファイルは読めない
+export const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file'
+const SCOPES = [GMAIL_SCOPE, DRIVE_SCOPE]
 export const GOOGLE_ENDPOINTS = {
   auth: 'https://accounts.google.com/o/oauth2/v2/auth',
   token: 'https://oauth2.googleapis.com/token',
   revoke: 'https://oauth2.googleapis.com/revoke',
   gmail: 'https://gmail.googleapis.com',
+  drive: 'https://www.googleapis.com',
 }
 export type GoogleEndpoints = typeof GOOGLE_ENDPOINTS
 export type GoogleConfig = { clientId: string; clientSecret: string }
@@ -126,10 +130,11 @@ export function createGoogle(o: {
   return {
     configured: !!o.config,
     generation: () => generation,
-    status(): { state: 'none' | 'connected' | 'expired'; email?: string } {
+    // docs: Google ドキュメントに保存できる権限があるか（前の連携は Gmail だけ。連携し直すと付く。6.5 (2)）
+    status(): { state: 'none' | 'connected' | 'expired'; email?: string; docs: boolean } {
       const saved = o.config ? load() : undefined
-      if (!saved) return { state: 'none' }
-      return { state: expired ? 'expired' : 'connected', email: saved.email }
+      if (!saved) return { state: 'none', docs: false }
+      return { state: expired ? 'expired' : 'connected', email: saved.email, docs: saved.scopes.includes(DRIVE_SCOPE) }
     },
 
     // POST /api/connections/google/start。origin は Origin の検査を通った要求の起点（戻った後にそこへ返す）
@@ -145,7 +150,7 @@ export function createGoogle(o: {
         client_id: config.clientId,
         redirect_uri: o.redirectUri,
         response_type: 'code',
-        scope: GMAIL_SCOPE,
+        scope: SCOPES.join(' '),
         access_type: 'offline',
         prompt: 'consent',
         include_granted_scopes: 'true',
@@ -238,48 +243,65 @@ export function createGoogle(o: {
     },
 
     // Gmail の GET。401 は 1 回だけ更新して呼び直す（6.4 (3)）
-    async get<T>(path: string, signal: AbortSignal): Promise<{ ok: true; json: T } | GoogleFail> {
-      // 呼んでいる間に解除・連携し直しがあれば、結果を使わず、今の連携のトークンにも触らない（別のメールボックスを読まない）
-      const started = generation
-      const stale = (): GoogleFail | undefined =>
-        started !== generation ? { ok: false, why: 'not_connected' } : undefined
-      for (let attempt = 0; attempt < 2; attempt++) {
-        const t = await token(attempt > 0)
-        const moved = stale()
-        if (moved) return moved
-        if (typeof t !== 'string') return t
-        let res: Response
+    get<T>(path: string, signal: AbortSignal): Promise<{ ok: true; json: T } | GoogleFail> {
+      return call<T>(`${ep.gmail}${path}`, {}, signal, 'json')
+    },
+    // Drive。作成（POST）が届いたか分からないときは network（呼ぶ側が「不明」にする。6.5 (6)）
+    drive<T>(path: string, init: RequestInit, signal: AbortSignal, as: 'json' | 'text' = 'json') {
+      return call<T>(`${ep.drive}${path}`, init, signal, as)
+    },
+  }
+
+  async function call<T>(
+    url: string,
+    init: RequestInit,
+    signal: AbortSignal,
+    as: 'json' | 'text',
+  ): Promise<{ ok: true; json: T } | GoogleFail> {
+    // 呼んでいる間に解除・連携し直しがあれば、結果を使わず、今の連携のトークンにも触らない（別のメールボックスを読まない）
+    const started = generation
+    const stale = (): GoogleFail | undefined =>
+      started !== generation ? { ok: false, why: 'not_connected' } : undefined
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const t = await token(attempt > 0)
+      const moved = stale()
+      if (moved) return moved
+      if (typeof t !== 'string') return t
+      let res: Response
+      try {
+        res = await fetch(url, {
+          ...init,
+          headers: { ...(init.headers as Record<string, string>), authorization: `Bearer ${t}` },
+          signal,
+        })
+      } catch (e) {
+        if (signal.aborted) throw e
+        return { ok: false, why: 'network' }
+      }
+      const moved2 = stale()
+      if (moved2) return moved2
+      if (res.ok) {
+        // 本文の受け取りの途中で切れても、届かなかったとして返す（呼ぶ側の落ち方に乗せる）
+        let json: T
         try {
-          res = await fetch(`${ep.gmail}${path}`, { headers: { authorization: `Bearer ${t}` }, signal })
+          json = (as === 'json' ? await res.json() : await res.text()) as T
         } catch (e) {
           if (signal.aborted) throw e
           return { ok: false, why: 'network' }
         }
-        const moved2 = stale()
-        if (moved2) return moved2
-        if (res.ok) {
-          // 本文の受け取りの途中で切れても、届かなかったとして返す（呼ぶ側の落ち方に乗せる）
-          let json: T
-          try {
-            json = (await res.json()) as T
-          } catch (e) {
-            if (signal.aborted) throw e
-            return { ok: false, why: 'network' }
-          }
-          // 受け取りの間に解除・連携し直しがあれば捨てる
-          return stale() ?? { ok: true, json }
-        }
-        if (res.status === 401) {
-          access = undefined
-          continue
-        }
-        const reason = res.status === 403 ? await res.text().catch(() => '') : ''
-        log(`gmail ${path.split('?')[0]}: ${res.status}`)
-        if (res.status === 429 || /rateLimitExceeded/i.test(reason)) return { ok: false, why: 'rate_limited' }
-        return { ok: false, why: res.status >= 500 ? 'network' : 'rejected' }
+        // 受け取りの間に解除・連携し直しがあれば捨てる
+        return stale() ?? { ok: true, json }
       }
-      expired = true
-      return { ok: false, why: 'auth_expired' }
-    },
+      if (res.status === 401) {
+        access = undefined
+        continue
+      }
+      const reason = res.status === 403 ? await res.text().catch(() => '') : ''
+      log(`google ${new URL(url).pathname}: ${res.status}`)
+      if (res.status === 429 || /rateLimitExceeded/i.test(reason)) return { ok: false, why: 'rate_limited' }
+      return { ok: false, why: res.status >= 500 ? 'network' : 'rejected' }
+    }
+    expired = true
+    return { ok: false, why: 'auth_expired' }
   }
 }

@@ -446,6 +446,7 @@ function LinkSection({ g, reload }: { g: Google; reload: () => void }) {
             <div className="grow">
               <h3 className="key-label">{W['settings.google.label']}</h3>
               <p className="muted small">{W['settings.google.use']}</p>
+              <p className="muted small">{W['settings.google.useDocs']}</p>
             </div>
             <span className={`badge ${badge} key-status`}>{W[label]}</span>
           </div>
@@ -456,6 +457,12 @@ function LinkSection({ g, reload }: { g: Google; reload: () => void }) {
           {g.state === 'expired' && (
             <p className="note-alert small" role="alert">
               {W['settings.google.expiredNote']}
+            </p>
+          )}
+          {/* 前の連携は Gmail だけ。Google ドキュメントには連携し直して許可を足す（6.5 (2)） */}
+          {g.state === 'connected' && !g.docs && (
+            <p className="note-warn small" role="status">
+              {W['settings.google.docsMissing']}
             </p>
           )}
           {g.configured && <p className="muted small">{w('settings.google.signal', { label: g.label })}</p>}
@@ -470,7 +477,7 @@ function LinkSection({ g, reload }: { g: Google; reload: () => void }) {
           )}
           {g.configured && (
             <div className="key-actions">
-              {g.state !== 'connected' && (
+              {(g.state !== 'connected' || !g.docs) && (
                 <>
                   <button
                     type="button"

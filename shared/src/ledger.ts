@@ -228,13 +228,13 @@ export const DecisionRecord = z.object({
 })
 export type DecisionRecord = z.infer<typeof DecisionRecord>
 
-// 会話で聞き取った依頼（6.2.1 (4)）。必須は表 4-1 の 何を・誰が読むか・届け先。保存先は S1 で作れる 2 つだけ
+// 会話で聞き取った依頼（6.2.1 (4)）。必須は表 4-1 の 何を・誰が読むか・届け先。保存先は作れる 3 つ（gdoc は連携しているときだけ。6.5 (3)）
 export const IntakeDraft = z.object({
   title: z.string().trim().min(1).max(40),
   summary: z.string().trim().min(1).max(300),
   docType: DocType,
   audience: z.string().trim().min(1),
-  destinations: z.array(z.enum(['page', 'paste'])).min(1),
+  destinations: z.array(z.enum(['page', 'paste', 'gdoc'])).min(1),
   shape: z.string().optional(),
   deadline: z.string().optional(),
   mustNot: z.array(z.string()).optional(),

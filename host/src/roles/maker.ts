@@ -84,6 +84,14 @@ export function feedbackOf(home: string, ledger: Ledger, c: CaseRecord): string 
   const event = last?.type === 'transition' ? last.event : undefined
   const r = reviewAfter(home, c, event)
   if (r) return ['# 直してほしいこと', '', ...r.failedSummaries.map((s) => `- ${s}`), ''].join('\n')
+  // 読み戻しの不一致（T24b）。判定ではないので往復に数えず、送付の行の理由を返す（6.5 (8)）
+  if (event === 'delivery.mismatch') {
+    const reason = ledger
+      .listDeliveries(c.caseId)
+      .filter((x) => x.status === '失敗')
+      .at(-1)?.reason
+    return ['# 直してほしいこと', '', `- ${reason ?? '保存した文書の本文が元の本文と食い違っています'}`, ''].join('\n')
+  }
   // 「ここを直して」と、「削る」で新しい系列を始めた承認（6.3.1 (9)）
   if (event === 'approval.redo' || event === 'approval.ok') {
     const text = ledger

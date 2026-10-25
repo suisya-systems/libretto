@@ -1,14 +1,17 @@
-// 仕立てと送付（docs/implementation.md 6.2.8 (1)(3)）。送付確認待ち・turn=libretto は仕立て → 形式の判定、
+// 仕立てと送付（docs/implementation.md 6.2.8 (1)(3)・6.5）。送付確認待ち・turn=libretto は仕立て → 形式の判定、
 // 送付中・turn=libretto は今の送付回の attempt を順に送付済にする。仕事の起動と 1 案件 1 本は runner（case/runner.ts）
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { type CaseRecord, VersionManifest } from '@libretto/shared/ledger'
 import { currentSend, transition } from '../case/transition.ts'
+import type { Google } from '../intake/google.ts'
 import type { Ledger } from '../ledger/ledger.ts'
 import { writeAtomic } from '../roles/entrance.ts'
 import { OUTPUT_FILES } from '../roles/judge.ts'
 import { draftNames, filesFingerprint, sha256, versionDir } from '../roles/maker.ts'
 import { isStorageError } from '../server/stop.ts'
+import { docxOf } from './docx.ts'
+import { deliverGdoc } from './gdoc.ts'
 import { pageDocument } from './page.ts'
 import { pasteText } from './paste.ts'
 
@@ -27,10 +30,13 @@ export function tailor(home: string, c: CaseRecord, now: Date): VersionManifest 
   if (bad) throw new Error(`cannot tailor ${bad} for ${c.caseId}`)
   const files = (kinds as Kind[])
     .map((kind) => {
+      const html = () => readFileSync(join(vdir, f.html), 'utf-8')
       const body =
         kind === 'page'
-          ? pageDocument(readFileSync(join(vdir, f.html), 'utf-8'), { title: c.title, n: c.version, at: m.at })
-          : pasteText(readFileSync(join(vdir, f.md), 'utf-8'))
+          ? pageDocument(html(), { title: c.title, n: c.version, at: m.at })
+          : kind === 'gdoc'
+            ? docxOf(html())
+            : pasteText(readFileSync(join(vdir, f.md), 'utf-8'))
       writeAtomic(join(vdir, 'outputs', OUTPUT_FILES[kind]), body)
       return { path: OUTPUT_FILES[kind], sha256: sha256(body), bytes: Buffer.byteLength(body) }
     })
@@ -60,19 +66,21 @@ export function checkedOutput(home: string, c: CaseRecord, kind: string): Buffer
 type Deps = {
   home: string
   ledger: Ledger
+  google: Google
   emit: (caseId: string, r: ReturnType<typeof transition>) => boolean
   log: (line: string) => void
 }
 
-// 送付中の仕事。attempt を 1 つ送付済にしたら返り、runner が続きを起こす（再起動では残りだけ）
-export function deliver(d: Deps, c: CaseRecord): boolean {
-  const pending = [...currentSend(d.ledger, c.caseId).values()].find(
-    (a) => a.status === '送付中' || a.status === '不明',
-  )
+// 送付中の仕事。attempt を 1 つ進めたら返り、runner が続きを起こす（再起動では残りだけ）。
+// 不明の attempt は探し直しの周期（recheck）にだけ見る。送付中の attempt を先に（6.5 (7)）
+export async function deliver(d: Deps, c: CaseRecord, signal: AbortSignal, recheck = false): Promise<boolean> {
+  const all = [...currentSend(d.ledger, c.caseId).values()]
+  const pending = all.find((a) => a.status === '送付中') ?? (recheck ? all.find((a) => a.status === '不明') : undefined)
   if (!pending) return false
   const base = { caseId: c.caseId, by: 'libretto' as const, attemptId: pending.attemptId }
   const kind = pending.target.kind
-  if (!checkedOutput(d.home, c, kind)) {
+  const body = checkedOutput(d.home, c, kind)
+  if (!body) {
     d.log(`deliver ${c.caseId} ${pending.attemptId}: output missing or changed`)
     return d.emit(
       c.caseId,
@@ -83,6 +91,11 @@ export function deliver(d: Deps, c: CaseRecord): boolean {
         eventId: `${c.caseId}:delivery.failed:${pending.attemptId}`,
       }),
     )
+  }
+  if (kind === 'gdoc') {
+    const ev = await deliverGdoc(d, c, pending, body, signal, recheck)
+    if (ev) d.log(`deliver ${c.caseId} ${pending.attemptId}: ${ev.type}`)
+    return ev ? d.emit(c.caseId, transition(d.ledger, ev)) : false
   }
   return d.emit(
     c.caseId,

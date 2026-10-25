@@ -87,9 +87,10 @@ export type HostEvent =
   | (Job & { type: 'format.checked'; n: number; outputFingerprint: string })
   | (Omit<Job, 'by'> & { by: '自動'; type: 'delivery.send'; planFingerprint: string; quotesOthers: boolean })
   | (Attempt & { type: 'delivery.done'; receiptId: string; link?: string; shareToken?: string })
-  | (Attempt & { type: 'delivery.mismatch'; link?: string })
-  | (Attempt & { type: 'delivery.unknown' })
-  | (Attempt & { type: 'delivery.failed'; reason: string })
+  // link は作ったと分かっているファイル（照合に落ちた・確かめられないまま止まったものも本人が消せるように。6.5 (6)）
+  | (Attempt & { type: 'delivery.mismatch'; link?: string; reason?: string })
+  | (Attempt & { type: 'delivery.unknown'; link?: string })
+  | (Attempt & { type: 'delivery.failed'; reason: string; link?: string })
   | (Job & { type: 'fail.system'; reason: string })
   // 送付の仕事が出す道具の失敗は revision でなく attempt で確かめる（送付中は届け先ごとに revision が進む。4.6 (2)）
   | (Attempt & { type: 'fail.system'; reason: string })
@@ -498,12 +499,23 @@ function decide(ledger: Ledger, c: CaseRecord, ev: CaseInput, ctx: Ctx): Plan | 
             turn: 'libretto',
             step: STEP.writing,
             clearOutput: true,
-            after: all(row({ status: '失敗', ...clean({ link: ev.link }) }), supersede('完成稿', '送付')),
+            after: all(
+              row({ status: '失敗', ...clean({ link: ev.link, reason: ev.reason }) }),
+              supersede('完成稿', '送付'),
+            ),
           }
         case 'delivery.unknown':
-          return { to: '送付中', turn: 'libretto', step: STEP.saving, after: row({ status: '不明' }) }
+          return {
+            to: '送付中',
+            turn: 'libretto',
+            step: STEP.saving,
+            after: row({ status: '不明', ...clean({ link: ev.link }) }),
+          }
         default:
-          return stop('送付失敗', all(row({ status: '失敗', reason: ev.reason }), say(SAY.saveFailed)))
+          return stop(
+            '送付失敗',
+            all(row({ status: '失敗', reason: ev.reason, ...clean({ link: ev.link }) }), say(SAY.saveFailed)),
+          )
       }
     }
     case 'delivery.add': // T26b

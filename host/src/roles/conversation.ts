@@ -108,7 +108,7 @@ const INSTRUCTION = `あなたは libretto の「話し相手」です。文書�
 聞き取るのは次の 3 つです。
 - 何を作るか: 記事・メモ・表・スライドのどれか（docType）
 - 誰が読むか（audience）
-- 保存先（destinations）: "page"（本人だけが見られる、履歴付きの Web ページ）と "paste"（ほかのサービスに貼り付ける文章）のどちらか、または両方
+- 保存先（destinations）: 材料「保存先の選択肢」から 1 つ以上
 
 決まり:
 - 本人の言葉から決まらないものだけを、1 回に 1 つ聞く。分量・期限・してはいけないことなどは聞かない。本人が言ったときは intake に入れる。
@@ -142,7 +142,7 @@ const CANDIDATE_INSTRUCTION = `あなたは libretto の「話し相手」です
 
 決まり:
 - 何をどう変えたいかが本人の言葉から決まらないときだけ、1 回に 1 つ聞く。質問には choices を 2〜4 個付け、recommended を true にするのはちょうど 1 つ。why は 1 行（60 字以内）。質問の文は「？」で終える。
-- 変えたいことが決まったら、確かめの質問をせずに proposal を返す。proposal は直した後のカードの全部で、summary は頼まれていそうなことを 1 行（80 字以内）、docType は ${list(IntakeDraft.shape.docType.options)} のどれか 1 つ、destinations は ${list(Dest.options)} から 1 つ以上（"page" は本人だけが見られる、履歴付きの Web ページ、"paste" はほかのサービスに貼り付ける文章）、attachmentsNeeded は「候補」の attachments のうち作るのに中身が要るものの名前をそのまま（要らなければ []）。変えないところは今のカードのままにする。このときの text は、何を直したかと、よければ「進める」を押してほしいことを 1〜2 文で。
+- 変えたいことが決まったら、確かめの質問をせずに proposal を返す。proposal は直した後のカードの全部で、summary は頼まれていそうなことを 1 行（80 字以内）、docType は ${list(IntakeDraft.shape.docType.options)} のどれか 1 つ、destinations は材料「保存先の選択肢」から 1 つ以上、attachmentsNeeded は「候補」の attachments のうち作るのに中身が要るものの名前をそのまま（要らなければ []）。変えないところは今のカードのままにする。このときの text は、何を直したかと、よければ「進める」を押してほしいことを 1〜2 文で。
 - 質問でない返事には「？」を使わない。
 - 前提知識の無い人が読んで分かる、ふだんの日本語で書く。直訳調の言い回し（「することができる」「において」「に関して」「を行う」など）と、行末のコロンを使わない。仕組みや道具の名前は書かない。
 
@@ -160,10 +160,30 @@ function proposalViolations(r: CandidateReply, attachments: readonly string[]): 
   return v
 }
 
-export const TARGET: Record<IntakeDraft['destinations'][number], DeliveryTarget> = {
+// 保存先の選択肢（6.5 (3)）。gdoc は Google ドキュメントに保存できる連携があるときだけ。folderId 'libretto' は libretto フォルダ
+type DestKind = IntakeDraft['destinations'][number]
+export const TARGET: Record<DestKind, DeliveryTarget> = {
   page: { kind: 'page', shared: false },
   paste: { kind: 'paste' },
+  gdoc: { kind: 'gdoc', folderId: 'libretto' },
 }
+export const DEST_NOTE: Record<DestKind, string> = {
+  page: '本人だけが見られる、履歴付きの Web ページ',
+  paste: 'ほかのサービスに貼り付ける文章',
+  gdoc: '本人の Google ドライブの「libretto」フォルダに作る Google ドキュメント（共有はしない）',
+}
+const destKinds = (gdoc: boolean): DestKind[] => (gdoc ? ['page', 'paste', 'gdoc'] : ['page', 'paste'])
+export const destMaterial = (gdoc: boolean) => ({
+  name: '保存先の選択肢',
+  text: destKinds(gdoc)
+    .map((k) => `"${k}": ${DEST_NOTE[k]}`)
+    .join('\n'),
+})
+export const destViolations = (ds: readonly string[] | undefined, gdoc: boolean) =>
+  (ds ?? [])
+    .filter((k) => !(destKinds(gdoc) as string[]).includes(k))
+    .map((k) => `destinations の "${k}" は今は選べません。材料「保存先の選択肢」から選んでください`)
+const isDest = (k: string): k is DestKind => k in TARGET
 
 type Deps = {
   home: string
@@ -183,6 +203,7 @@ type Deps = {
   storage: (written: boolean) => void
   log: (line: string) => void
   newCaseId?: () => string
+  gdocReady?: () => boolean // Google ドキュメントに保存できる連携があるか（6.5 (2)(3)）
 }
 
 export type PostResult =
@@ -192,6 +213,7 @@ export type PostResult =
 export function createConversation(d: Deps) {
   const { ledger } = d
   const newCaseId = d.newCaseId ?? randomUUID
+  const gdoc = d.gdocReady ?? (() => false)
   const busy = new Set<string>()
   let running: Promise<void> = Promise.resolve()
 
@@ -317,7 +339,7 @@ export function createConversation(d: Deps) {
       from: card.from,
       summary: card.summary,
       docType: card.proposal.docType,
-      destinations: card.proposal.destination.flatMap((t) => (t.kind === 'page' || t.kind === 'paste' ? [t.kind] : [])),
+      destinations: card.proposal.destination.flatMap((t) => (isDest(t.kind) ? [t.kind] : [])),
       attachments,
       attachmentsNeeded: card.attachmentsNeeded ?? [],
     }
@@ -330,6 +352,7 @@ export function createConversation(d: Deps) {
       instruction: CANDIDATE_INSTRUCTION,
       materials: [
         { name: '候補', text: JSON.stringify(now) },
+        destMaterial(gdoc()),
         ...(mail ? [{ name: '外部資料（メール）', text: mail }] : []),
         ...talkOf(history, says),
       ],
@@ -339,6 +362,7 @@ export function createConversation(d: Deps) {
         accept: (v) => [
           ...replyViolations(v as CandidateReply),
           ...proposalViolations(v as CandidateReply, attachments),
+          ...destViolations((v as CandidateReply).proposal?.destinations, gdoc()),
         ],
       },
     }
@@ -364,11 +388,15 @@ export function createConversation(d: Deps) {
         ...talk,
         { name: '進行中の依頼', text: JSON.stringify(openCases) },
         { name: '進め方', text: d.mode() },
+        destMaterial(gdoc()),
       ],
       output: {
         kind: 'json',
         schema: ConversationReply,
-        accept: (v) => replyViolations(v as ConversationReply),
+        accept: (v) => [
+          ...replyViolations(v as ConversationReply),
+          ...destViolations((v as ConversationReply).intake?.destinations, gdoc()),
+        ],
       },
     }
   }
@@ -497,6 +525,11 @@ export function createConversation(d: Deps) {
 }
 
 // 読む人向けの描き出し（9.1。正本は intake.json）
+const DEST_LABEL: Record<DestKind, string> = {
+  page: 'Web ページ（自分だけ閲覧・履歴付き）',
+  paste: '貼り付け用の下書き',
+  gdoc: 'Google ドキュメント',
+}
 const renderIntake = (h: IntakeDraft) =>
   [
     `# ${h.title}`,
@@ -505,7 +538,7 @@ const renderIntake = (h: IntakeDraft) =>
     '',
     `- 作るもの: ${h.docType}`,
     `- 読む人: ${h.audience}`,
-    `- 保存先: ${h.destinations.map((k) => (k === 'page' ? 'Web ページ（自分だけ閲覧・履歴付き）' : '貼り付け用の下書き')).join('、')}`,
+    `- 保存先: ${h.destinations.map((k) => DEST_LABEL[k]).join('、')}`,
     ...(h.shape ? [`- 分量・形: ${h.shape}`] : []),
     ...(h.deadline ? [`- 期限: ${h.deadline}`] : []),
     ...(h.mustNot?.length ? [`- してはいけないこと: ${h.mustNot.join('、')}`] : []),

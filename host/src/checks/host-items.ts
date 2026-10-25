@@ -142,6 +142,17 @@ function itemsFor(t: DeliveryTarget): Item[] {
   }
 }
 
+// 保存先ごとの形式の項目（同じものは 1 件）。保存先を変えた・足した後の形式の判定もここから引く（6.5 (8)）
+export function formatItems(destinations: readonly DeliveryTarget[]): Omit<Check, 'id'>[] {
+  return [...new Set(destinations.flatMap(itemsFor))].map((f) => ({
+    ...f,
+    pass: { kind: 'all' as const },
+    phase: '形式' as const,
+    hidden: false,
+    selfReport: '依頼に書いてある' as const,
+  }))
+}
+
 // 下書き役の項目の後ろに、canary 1 件と（出典付きなら事実の 4 項目と）保存先ごとの形式の項目（同じものは 1 件）を足す
 export function withHostItems(
   checks: readonly Check[],
@@ -150,7 +161,6 @@ export function withHostItems(
   sources: Brief['sources'] = '出典なし',
   voice: VoiceItems = { card: false, samples: false },
 ): Check[] {
-  const formats = [...new Set(destinations.flatMap(itemsFor))]
   const added: Omit<Check, 'id'>[] = [
     {
       category: '禁止事項',
@@ -173,13 +183,7 @@ export function withHostItems(
       hidden: false,
       selfReport: '依頼に書いてある' as const,
     })),
-    ...formats.map((f) => ({
-      ...f,
-      pass: { kind: 'all' as const },
-      phase: '形式' as const,
-      hidden: false,
-      selfReport: '依頼に書いてある' as const,
-    })),
+    ...formatItems(destinations),
   ]
   return [...checks, ...added.map((c, i) => ({ ...c, id: `C${String(checks.length + i + 1).padStart(2, '0')}` }))]
 }
