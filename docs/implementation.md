@@ -293,7 +293,7 @@ stateDiagram-v2
 | `GET /api/cases/:id` | 案件の全部（入口・進行・承認・成果の面はこれ 1 本から描く） | — | `CaseView`（5.3）。`revision` と各指紋を含み、承認系の操作はそれを添えて送る（4.1） |
 | `GET /api/cases/:id/drafts/:n` | 版の本文 | `format=md\|html\|paste` | 本文（`text/markdown` / `text/html` / `text/plain`）。`paste` は仕立てた貼り付け用の文で、仕立ての前は `404`（6.2.8 (5)） |
 | `GET /api/cases/:id/diff?from=1&to=2` | 2 版の変更点（段落単位） | — | `{ changes: { kind: 'added'\|'removed'\|'changed', before?, after?, note? }[] }` |
-| `GET /api/cases/:id/files/:n` | 手元のファイル（pptx / xlsx / docx）のダウンロード | — | バイナリ（`Content-Disposition`） |
+| `GET /api/cases/:id/files/:n` | 手元のファイル（pptx / xlsx / docx）のダウンロード。その形式で保存した版だけ（6.8 (4)） | `format=pptx\|xlsx\|docx` | バイナリ（`Content-Disposition`）。保存していない形式・版は `404` |
 | `POST /api/cases/:id/actions` | 本人の操作（4.2 の本人イベント） | `CaseAction`（`type` で判別する union。全部が `eventId` を持つ。5.3・5.3.1） | `{ state, turn, revision, replayed, newCaseId? }`（`newCaseId` は `restart_as_new` のときだけ。5.7 (5)）または `409 { reason: 'stale' \| 'invalid_transition', current: CaseCard }`（画面は「もう進んでいます。読み直します」と出して取り直す）。同じ `eventId` の二度目は 5.3.1 のとおり 1 回目と同じ結果を返す |
 | `POST /api/cases/:id/materials` | 資料を渡す。S1 は貼り付けた文だけ（6.2.4 (3)） | `MaterialsPost { type: 'materials.provided', eventId, expectedRevision, text }`（JSON。`text` は前後の空白を落として 1〜100,000 字）。ファイル・画像を渡す形（`multipart/form-data`）は後の Issue で足す | `/actions` と同じ（`{ state, turn, revision, replayed }` か `409 { reason, current }`）。初めての操作で状態・turn・`expectedRevision` が合うときだけ `work/materials/pasted-NN.md` を書いてから `materials.provided`（T10）を流す |
 | `POST /api/candidates/:id/actions` | 候補カードの操作 | `{ type: 'proceed' } \| { type: 'dismiss', reason } \| { type: 'change', note } \| { type: 'keep' }`（低の「やっぱり残す」） | `{ caseId? }`。`change` は話し相手に `note` を渡して `candidate_cards` の行 の `proposal` を書き換え、`candidate_events` に `proposal_changed` を書く（案件はまだ作らない） |
@@ -1890,7 +1890,7 @@ GitHub #36 は 6.2.9 (7) の 2 回目の確認で残った論点の追加の Iss
 | `compareNumbers(materials, draft)` | 材料の数値が最終版で同じ値か → `{ matched, mismatched: { value, where }[] }` | — |
 | `extractVoice(docs)` | 文体カードの数値（設計書 5.5 の表） → `VoiceCard`。数値は入口で、3 行の描写は T11 で（6.3.2 (3)(8)） | 一部 Sonnet |
 | `pickVoiceSamples(docs)` | 読み比べ用の段落 最大 5 → `checks/voice-samples.md`（6.3.2 (4)） | — |
-| `preflightDeps()` | `soffice` / `pdftoppm` / 各鍵 / `srt`（と Linux の `bwrap` / `socat`）の有無 → `Requirements`（`requirements.md` を機械的に読む） | — |
+| `preflightDeps()` | `soffice` / `pdftoppm` の有無（起動時に 1 回。一覧はコードに持ち、`requirements.md` に載っていることをテストで確かめる。6.8 (5)）。鍵は設定の面、`srt` は 8.9 の自己点検 | — |
 | `prefilter(message)` | 自動送信・本人送信を機械的に除く → `boolean` | — |
 | `classifyCandidate(message)` | 「文書づくりを頼んでいるか」 → `{ confidence: '高'|'中'|'低'|'なし', reason: string }`（Haiku の高 / 中 / 低と Jev の確率を設計書 5.7.3 の規則で合成） | Haiku ＋ Jev |
 | `detectInstructions(text)` | 命令形の行の決定的検出 ＋ Noul「この文章には AI へ特定の判定や動作をさせる命令が含まれている」 → `{ flagged: boolean, lines: number[] }` | Jev |
@@ -2736,6 +2736,78 @@ GitHub #29 は、本物のモデルで依頼を流したオーナーの所感（
 | E | Slack の文面に題を入れるか（D を選んだとき） | **(a) 入れる**（届くのは本人だけが見るアプリの DM） | (b) 題を伏せて「確認待ちが 1 件あります」だけにする（題が他人のメールの件名から来ることがあり、会社の Slack に残るため） |
 
 ---
+
+### 6.8 スプレッドシート・スライド・手元のファイルと見た目の判定の決め事（Issue 26 の着手前の設計レビューで決めたこと）
+
+保存先 `gsheet` / `gslide` / `file`（`pptx`・`xlsx`・`docx`）を、仕立て（T20）から送付（T22〜T26）まで通す。状態機械（4.2）は揃っていて、足すのはホストの仕事と画面。中身は `host/src/deliver/xlsx.ts`（表の取り出し・xlsx の書き出しと読み戻し・照合）・`pptx.ts`（スライドの組み立て・pptx の書き出しと読み戻し）・`render.ts`（LibreOffice と poppler の呼び出し・事前点検）・`gdoc.ts`（Google の 3 種類の作成と照合）・`run.ts`、判定は `checks/judgeable.ts` と `roles/judge.ts`。作らないもの: 構成案ゲート（Issue 27）、`xlsxTotalsMatch`（合計を元データと照合。元データを本人から受け取る形が S1 の貼り付けた文だけなので、表の照合（`sheetsRoundTrip`）で足りる）。
+
+**(1) 中身の形と、表と文書を混ぜない決まり**
+
+- 作り手は今までどおり `draft-NN.md` と `draft-NN.html` を書き、本文の判定は Markdown で行う。保存先からスライドや表の形を作るのはホストで、作り手の HTML から作る（ホストが判定した Markdown から作ると形式の判定が必ず通るため。6.5 (4) と同じ理由）。
+- **スライド**（`gslide`・`pptx`）: 作り手の HTML のブロック（`pageBlocks`）から組む。最初の `h1` が表紙（次の `h2` までの段落は副題）、`h2` ごとに 1 枚（題 = `h2`、本文 = 次の `h2` までの `h3`・段落・箇条書き）。保存先にスライドがあるときだけ、作り手の指示に「## ごとに 1 枚、1 枚の本文は 6 行まで、1 行は 40 字まで」を足す（`SLIDES_RULE`）。
+- **表**（`gsheet`・`xlsx`）: 作り手の HTML の `table` 1 つが 1 シート（`th` / `td`）、表の前の見出しがシート名。セルの字が `=` で始まれば式、数字だけなら数、ほかは字。Markdown には同じ表を `|` 区切りの表で書く。保存先に表があるときだけ、作り手の HTML に使ってよい要素へ `table / tr / th / td` を足し、表の書き方を足す（`TABLES_RULE`）。LibreOffice が無いときは「式は使わず、計算した値を書く」（`TABLES_VALUES_RULE`。設計書 7.2 の「表計算は値だけの表で」）。
+- **表の保存先とほかの保存先は一緒に選べない**: 会話・候補・会議メモの受け入れ規則（`destViolations`）、画面の選択肢（`destinationChoices` は表の依頼なら表だけ、文書の依頼なら表のほかだけ）、状態機械（`delivery.change`・`delivery.add` で混ざる保存先は `invalid_transition`。`mixesTables`）の 3 か所で止める。理由: ページ・ドキュメントは表を拾わず（`pageBlocks` は `table` を通さない）、貼り付け用は表の行を `pasteSafe` で落とすので、表のある本文では形式の判定が必ず落ちる。表をどの届け先でも描けるようにするより、組み合わせを閉じる方が小さい。却下した案: 画面の選択肢だけで止める — 差分レビューで、`delivery.change` が保存先をそのまま受けて混ぜられると分かった（状態機械の境界で止める）。
+
+**(2) ファイルは依存を足さずに書く（`pptxgenjs` / `exceljs` を入れない）**
+
+- `docx.ts` の無圧縮の zip（日時固定）を使い回し、xlsx（workbook・シートごとの worksheet・styles。字は `inlineStr`、式は `<f>` だけで値を書かない）と pptx（presentation・slideMaster 1・slideLayout 1・theme 1・16:9 のスライドごとに題と本文のテキストボックス）を書く。手元の docx は Google ドキュメントと同じ `docxOf`。
+- 成果物は**形式ごとに 1 つ**（`OUTPUT_FILES`: `page.html`・`paste.txt`・`gdoc.docx`・`sheet.xlsx`・`slides.pptx`）。Google の 3 種類は手元のファイルと同じ中身を変換付きで上げる（`outputOf`）。`gdoc.docx` は Issue 21 からの名前のまま。
+- 読み戻しは同じ関数で、仕立てた成果物と Google の書き出しを読む: `xlsxSheets`（`sharedStrings`・`inlineStr`・数・式・エラーのセル `t="e"`）、`pptxText`（スライドの順・図形の順の段落と、リンクの行き先）。
+- 理由: (a) 同じ入力から同じバイト列にならないと、仕立てるたびに `outputs.json` の指紋が変わる（6.2.8 (1)）。`pptxgenjs` / `exceljs` は文書の作成日時を書く。(b) `exceljs` は依存が多く、9.1 のインストールスクリプトの確かめが増える。(c) 使うのは見出し・段落・箇条書き・強調・リンク・表の字と式だけで、数百行で書ける。書いたファイルは openpyxl / python-pptx で開けることを手元で確かめた。PowerPoint・Excel・Google での開き方は窓口が実機で確かめる。
+
+**(3) 形式の判定（T20）**
+
+- 保存先ごとの形式の項目（ホストが足す。7.2）: `gsheet`・`xlsx` → `sheetsRoundTrip`・`xlsxNoFormulaErrors`、`gslide`・`pptx` → `slidesRoundTrip`・`pptxNoBlankPages`・見た目、`docx` → `docsRoundTrip`・見た目。手元の xlsx と docx にも中身の照合を付けた（設計レビュー: 式と見た目だけでは、行や段落が落ちても通る）。
+- 同じ判定は 1 件: 形式の項目は「同じ関数（`code`）か同じ問い（`claude`）」で 1 件にまとめ（`formatChecks`）、その 1 件は該当する成果物を全部見る（見た目は pptx と docx のページを全部）。理由（設計レビュー）: 保存先の種類 → 関数の 1 対 1 の表では、`gsheet` と `xlsx` のように同じ関数を使う保存先を足したときに項目が無くなる。
+- **描き出し**（`render.ts`）: `soffice --headless --norestore -env:UserInstallation=<案件の render/ の中> --convert-to pdf` → `pdftoppm`。呼び出しごとに 120 秒で打ち切る。空白は `pdftoppm -gray -r 24` の PGM で、白（250 以上）でない画素が 0.1% 未満のページ。見た目の判定には `pdftoppm -png -r 80` の画像を渡す。同じ中身は 1 回の判定で 1 回だけ描き出す。描き出しと計算し直しの置き場は案件フォルダの `render/`（版の正本 `versions/NN/` の外。canary の走査に入れない）。
+- `pptxNoBlankPages`: 単位 = ページ、はい = 空白でない。
+- `xlsxNoFormulaErrors`: 単位 = 表全体（1 つ）。式が 0 個なら道具なしで合格。式があれば LibreOffice で xlsx → xlsx に変換して計算し直し、エラーのセルが 0 なら合格。measured は `{ formulas, errors }`。理由（設計レビュー）: 単位を式のセルにすると、式の無い表は単位 0 個で `all` が落ちる（7.5）。
+- `sheetsRoundTrip`（T20 と送付で同じ数え方。`sheetsMatch`）: 本文の Markdown の表と成果物の表を表ごと・セルごとに比べる。字は空白をつめて、数は値で、式は**引用符の中を変えずに**外の空白を外して大文字にして比べる（`formulaKey`。設計レビュー: 空白を全部外すと `="a b"` と `="ab"` が同じになる）。本文に表が無ければ落とす。measured は `{ cells, tables, errors }`（食い違ったセル・数の合わない表・Google が計算したエラーのセル）。
+- `slidesRoundTrip`: `docsRoundTrip` と同じ数え方（`roundTrip`）で、本文の段落とスライドの段落・リンクの行き先を比べる。
+- **見た目**（`claude`・`materials: ['images']`）: `judge()` の中で、描き出したページの画像をファイルの材料（`access: 'read'`、作業場は `render/`）で「判定役・画像」（Sonnet）に 1 回で渡し、ページごとに はい / いいえ と理由を受ける（`JudgeReply` と同じ形。ページの番号は全部書かせる）。問いは「このページの文字や図が、枠からはみ出さず、重ならず、欠けずに収まっている」（設計書 7.1 の はみ出し・重なり・画像の欠け。空白は機械判定）。ページが無い・**40 ページを超える**ときは聞かずに `unable`（「ページが多すぎて見た目を確かめられませんでした（40 ページまで）」）。理由（設計レビュー）: 上限を決めずに一部だけ渡すと、渡さなかったページを見ないまま合格にしてしまう。
+- **道具が無い・失敗した・時間切れ**（`ToolFailure`）: 判定を書かずに `fail.system(道具の失敗)` で停止（T27b。10 章の LibreOffice / poppler の行のまま）。理由（設計レビュー）: `unable` にすると形式の不合格として往復を 1 回使い、承認するとまた同じ判定に戻る。道具の失敗は作り手の責任ではない。
+
+**(4) 送付とダウンロード**
+
+- **手元のファイル**: 送付は記録だけ（`delivery.done`、`receiptId: 'file:<format>:v<N>'`、`link` はダウンロードの口）。`GET /api/cases/:id/files/:n?format=pptx|xlsx|docx` は、その版にその形式の file の届け先で最新の行が送付済の attempt があるときだけ（`fileVersions`）、`versions/NN/outputs/` のファイルを `Content-Disposition: attachment`（題と「第 N 版」の名前）で返す。ほかは `404`。
+- **Google スプレッドシート・スライド**: `gdoc.ts` を種類の表（`KIND`: 変換先の型・上げる中身の型・書き出しの型・照合・本人への文）で引く形にし、作成の前の印・`appProperties.librettoAttempt` での探し直し・3 周期・libretto フォルダ・失敗の写し方は 6.5 (6)(7) のまま。
+  - `gsheet`: `export?mimeType=…spreadsheetml.sheet` の xlsx を `xlsxSheets` で読み、`sheetsMatch`（セルの食い違い 0・表の数が同じ・Google が計算したエラーのセル 0）。
+  - `gslide`: `export?mimeType=…presentationml.presentation` の pptx を `pptxText` で読み、`roundTrip`（段落とリンク）。
+  - Drive の書き出しはバイト列で受ける（`google.drive(..., 'bytes')`。設計レビュー: `json` / `text` で受けると xlsx・pptx が壊れる）。
+  - 設計書 7.1 の「スライド: PDF に書き出して画像にし、手元の描き出しと並べてモデル判定」は v1 では**しない**（(7) の 2）。字と順は書き出しの pptx で照合し、見た目は T20 で手元の描き出しを判定済み。
+- **選べる条件**（`destChoices`）: `gdoc`・`gsheet` = Google ドキュメントに保存できる連携（`docs: true`。`drive.file` で 3 種類とも作れる）。`gslide` = それと LibreOffice・poppler（T20 の見た目の判定に要る）。`pptx`・`xlsx`・`docx` = LibreOffice・poppler。会話・候補・会議メモの材料「保存先の選択肢」にも同じものを渡す。
+- 読み戻しの不一致の文（`feedback.md` と失敗の行の理由）: 表は「保存した表が元の表と食い違っています（食い違ったセル N・数の合わない表 M・エラーのセル K）」、スライドは「保存したスライドの字が元の本文と食い違っています（欠けた段落 N・増えた段落 M）」。
+
+**(5) 事前点検と `requirements.md`**
+
+- 起動時に 1 回、`soffice --version` と `pdftoppm -v` を流し、通ったものだけを覚える（`preflight`。名前は環境変数 `LIBRETTO_SOFFICE` / `LIBRETTO_PDFTOPPM` で変えられる）。入れた後はホストを起こし直す。理由: `soffice --version` は 1 秒ほどかかり、画面を開くたびに流すと遅い。道具を入れるのはまれ。
+- `requirements.md`（リポジトリの直下。オーナー向け）に、Node・Claude Code・隠す道具・LibreOffice と poppler（OS ごとの入れ方と `npm run verify:files` での確かめ方）・連携と鍵を 1 枚にまとめた。
+- 6.3 の表の `preflightDeps()`（`requirements.md` を機械的に読む）は改める: **点検する道具の一覧はコードに持ち、`requirements.md` に全部が載っていることをテストで確かめる**。理由: 実行時に Markdown を読むと、本人が手元の文書を書き換えただけで点検が変わる。鍵と `srt` の点検は今までどおりそれぞれの場所（設定の面・8.9）にある。
+- `ConnectionsView.tools`（`{ soffice, pdftoppm }`）を足し、設定の「動作環境の確認」に行「ファイルを作る道具」を出す。無ければ入れ方と、入れるまでは何が保存先に出ないかを書く。
+- 本物の道具での確かめは `npm run verify:files`（見本の pptx / docx を描き出して空白を数え、xlsx の式を計算し直してエラーを数える。モデルを呼ばず網に出ない）。テストは偽の `soffice` / `pdftoppm` で回す（Windows では偽物の起動口が動かないので、それを使うテストは飛ばす）。
+
+**(6) 画面**
+
+- 送付の面: Google スプレッドシート・スライドの注記（ドライブの libretto フォルダに作る・共有しない）、手元のファイルの注記（ダウンロードして渡す）。成果の面: 「Google スプレッドシートを開く」「Google スライドを開く」「ファイルをダウンロード」。
+- 進行・成果の面の「中身を確かめられなかったファイル」を Google の 3 種類に広げ、文を「ファイル」にした。
+- 保存先の名前は `dest.pptx`「PowerPoint のファイル」・`dest.xlsx`「Excel のファイル」・`dest.docx`「Word のファイル」（`dest.file`「ファイル（{format}）」をやめた。拡張子は非エンジニアに通じない）。
+- 文言は [`ui-wording.md`](./ui-wording.md) に足してから `wording.ts` に入れた。
+
+**(7) オーナーに確かめること（おすすめで実装した。窓口経由で仰ぐ）**
+
+| # | 問い | おすすめ（実装したもの） | 理由 |
+|---|---|---|---|
+| 1 | xlsx / pptx の作り方 | **依存を足さずに自前で書く**（(2)。Issue 本文と設計書 7.2 は `pptxgenjs` / `exceljs`） | 同じ入力から同じバイト列（指紋）。依存の確かめが増えない。docx を自前にしたオーナー判断（6.5 (9) の 1）と揃う |
+| 2 | Google スライドの送付で、書き出しを画像にして手元の描き出しと並べてモデル判定するか | **しない**。書き出しの pptx で字と順を照合する（(4)） | 見た目は T20 で判定済み。送付のたびに画像の判定（Sonnet）の費用がかかる。送付の仕事にモデルを呼ぶ口が無い |
+| 3 | 表の保存先とほかの保存先を一緒に選べるか | **選べない**（(1)） | 表のある本文はページ・ドキュメント・貼り付け用の形式の判定に必ず落ちる |
+| 4 | 見た目の判定に渡すページの上限 | **40 ページ**。超えたら判定できないとして本人に上げる（(3)） | 1 回の呼び出しに渡す画像の数と費用の上限。長い文書は Google ドキュメントかページで |
+| 5 | 道具の事前点検の時期 | **起動時に 1 回**（入れたら起こし直す）（(5)） | 画面を開くたびに流すと遅い |
+
+**(8) テスト**
+
+- `host/test/files.test.ts`: 表（HTML と Markdown の表の取り出し、xlsx の決定性と読み戻し、セルと表の数の食い違い、式の比べ方、`sharedStrings` とエラーのセルの読み方）、スライド（表紙と 1 枚ずつの組み方、pptx の決定性、読み戻しの照合、1 枚欠けたら落ちる）、描き出し（PGM の空白、事前点検、同じ中身は 1 回、道具が無いと `ToolFailure`）、機械判定 3 つ、見た目の判定（ファイルの材料・ページを単位に集計・ページが無い / 多すぎるときは聞かない）、保存先の選択肢と混ぜない決まり、形式の項目が同じ関数で 1 件、作り手への指示、`requirements.md` に道具が載っていること。
+- `host/test/runner.test.ts`: Google スプレッドシートの合格（T24）・セルの食い違い（T24b）・表の依頼にページを足せない、手元の pptx と docx（描き出しと見た目の判定・ダウンロードの口・保存していない形式と版は `404`）、道具が壊れていたら `fail.system(道具の失敗)` で停止。
+- 偽の Google の書き出しは、`text/html` のほかの型では上げた中身をそのまま返す（`exportBytes` で崩れた書き出しを作れる）。偽の `soffice` / `pdftoppm` は `host/test/fakes/office.ts`。
 
 ## 7. 確認項目と判定の型
 
@@ -3786,8 +3858,7 @@ libretto/
     src/facts/              6.3 の関数
     src/checks/             7.2 の受け入れ規則、7.3 の judge()、CodeFn の実装
     src/intake/             poller.ts、gmail.ts、slack.ts、meet.ts、classify.ts（推測）
-    src/deliver/            page.ts、paste.ts、gdrive.ts、files.ts（pptxgenjs / exceljs / docx）、render.ts（soffice / pdftoppm）
-    src/deps/               preflight.ts（requirements.md を読む）
+    src/deliver/            page.ts、paste.ts、gdoc.ts（Google の 3 種類）、docx.ts・xlsx.ts・pptx.ts（依存を足さずに書く。6.8 (2)）、render.ts（soffice / pdftoppm と事前点検。6.8 (3)(5)）
     test/                   11 章。test/scripts/*.json が台本、test/fakes/ が偽サーバー
   page/
     index.html, vite.config.ts

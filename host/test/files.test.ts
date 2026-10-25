@@ -1,7 +1,8 @@
 // 表・スライド・手元のファイルと見た目の判定（docs/implementation.md 6.8）
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { DEST_TARGET, mixesTables } from '@libretto/shared/api'
 import type { Check } from '@libretto/shared/checks'
 import { describe, expect, it } from 'vitest'
@@ -161,6 +162,12 @@ describe('描き出し（6.8 (3)(5)）', () => {
     expect(blankPgm(pgm(255, 5))).toBe(true) // 0.1% 未満のごみ
     expect(blankPgm(pgm(255, 50))).toBe(false)
     expect(() => blankPgm(Buffer.from('nope'))).toThrow(ToolFailure)
+  })
+
+  it('事前点検が確かめる道具は requirements.md に全部載っている（6.8 (5)）', () => {
+    const req = readFileSync(fileURLToPath(new URL('../../requirements.md', import.meta.url)), 'utf-8')
+    for (const t of ['soffice', 'pdftoppm', 'LIBRETTO_SOFFICE', 'LIBRETTO_PDFTOPPM', 'npm run verify:files'])
+      expect(req).toContain(t)
   })
 
   it.skipIf(win)('事前点検: 起こせる道具だけを返す', async () => {
