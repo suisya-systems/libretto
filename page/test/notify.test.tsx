@@ -25,7 +25,7 @@ const notice = (id: number, caseId = 'c1'): Notice => ({
 
 // --- public/sw.js を偽の self で動かす
 type Shown = { title: string; tag: string; body: string; data: { id: number; caseId?: string }; closed?: boolean }
-function worker(windows: { visibilityState: string; focused: boolean; sent?: unknown[] }[] = []) {
+function worker(windows: { visibilityState: string; focused: boolean; url?: string; sent?: unknown[] }[] = []) {
   const handlers: Record<string, (e: unknown) => void> = {}
   const shown: Shown[] = []
   const opened: string[] = []
@@ -38,6 +38,7 @@ function worker(windows: { visibilityState: string; focused: boolean; sent?: unk
       claim: async () => {},
       matchAll: async () =>
         windows.map((w) => ({
+          url: 'http://127.0.0.1:7780/',
           ...w,
           postMessage: (m: unknown) => {
             w.sent = [...(w.sent ?? []), m]
@@ -117,8 +118,14 @@ describe('サービスワーカーの出し方', () => {
 
   it('押すと、開いているタブにその面を開かせる。無ければ新しく開く', async () => {
     const tab = { visibilityState: 'hidden', focused: false, sent: [] as unknown[] }
-    await worker([tab]).click({ path: '/cases/c1/deliver' })
+    // 版のあるページのタブは画面のタブに数えない
+    const page = { visibilityState: 'visible', focused: true, url: 'http://127.0.0.1:7780/cases/c1/page', sent: [] }
+    const sw = worker([page, tab])
+    await sw.click({ path: '/cases/c1/deliver' })
+    expect(page.sent).toEqual([])
     expect(tab.sent).toEqual([{ type: 'open', path: '/cases/c1/deliver' }])
+    await sw.show(notice(1)) // 前に出ているのが版のあるページだけなら通知を出す
+    expect(sw.open()).toHaveLength(1)
     const none = worker()
     await none.click({ path: '/' })
     expect(none.opened).toEqual(['/'])

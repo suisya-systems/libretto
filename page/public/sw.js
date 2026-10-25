@@ -3,7 +3,11 @@
 self.addEventListener('install', () => self.skipWaiting())
 self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()))
 
-const windows = () => self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+// libretto の画面のタブだけ。版のあるページ（/cases/<id>/page。スクリプトの無い成果）は見ているにも、押した先にも数えない
+const windows = () =>
+  self.clients
+    .matchAll({ type: 'window', includeUncontrolled: true })
+    .then((ws) => ws.filter((w) => !/^\/cases\/[^/]+\/page$/.test(new URL(w.url).pathname)))
 
 async function show(n) {
   // この端末のどれかのタブで見ていれば出さない（タブごとでなく端末ごと）
