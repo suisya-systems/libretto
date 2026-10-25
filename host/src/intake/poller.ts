@@ -1,7 +1,7 @@
 // 拾い上げ（docs/implementation.md 4.5・6.4 (3)・6.6 (4)・6.7 (2)・6.9 (1)）。推測（infer.ts）の後に、Gmail のラベルの付いたスレッドと、
 // Slack で本人が :memo: を付けた投稿と、会議メモの本人担当の行動項目を候補にする（T1）。
 // 時刻のカーソルは持たない。同時に 1 本。runs で起こすので、STOP の間は起きず、すべて停止で切れる
-import type { InferenceSettings } from '@libretto/shared/api'
+import type { DestChoice, InferenceSettings } from '@libretto/shared/api'
 import { transition } from '../case/transition.ts'
 import type { Ledger } from '../ledger/ledger.ts'
 import { jst } from '../ledger/ledger.ts'
@@ -43,6 +43,7 @@ type Deps = {
   connectionsChanged: () => void
   log: (line: string) => void
   now?: () => Date
+  destChoices: () => DestChoice[] // 今選べる保存先（6.10 (3)）
 }
 
 export type Poller = ReturnType<typeof createPoller>
@@ -128,7 +129,7 @@ export function createPoller(d: Deps) {
       const r = await readThread(g, id, account, signal)
       if (!r.ok) return failed(r)
       const t = r.thread
-      const deps = { home: d.home, invoke: d.invoke, signal, gdoc: g.status().docs }
+      const deps = { home: d.home, invoke: d.invoke, signal, dests: d.destChoices() }
       const flagged = await flagInstructions(deps, t.subject, t.body)
       if (flagged === 'stopped') return
       const drafted = await draftCard(deps, t)
@@ -197,7 +198,7 @@ export function createPoller(d: Deps) {
       const r = await readPost(s, me, channel, message.ts, message, signal, names)
       if (!r.ok) return slackFailed(r)
       const p = r.post
-      const deps = { home: d.home, invoke: d.invoke, signal, gdoc: d.google.status().docs }
+      const deps = { home: d.home, invoke: d.invoke, signal, dests: d.destChoices() }
       const flagged = await flagInstructions(deps, p.subject, p.body)
       if (flagged === 'stopped') return
       const drafted = await draftCard(deps, { ...p, slack: true })

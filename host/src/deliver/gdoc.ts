@@ -1,18 +1,23 @@
-// Google ドキュメントの届け先（docs/implementation.md 6.5 (6)）。docx を変換付きで作り、書き出して読み戻し照合する。
+// Google ドキュメント・スプレッドシート・スライドの届け先（docs/implementation.md 6.5 (6)・6.10 (4)）。
+// docx / xlsx / pptx を変換付きで作り、書き出して読み戻し照合する。
 // 作成を送る前に印を書き、印のある attempt は二度と作らずに探して確かめる（作成が届いたか分からないまま再起動しても二度作らない）
 import { randomBytes } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { CaseRecord, DeliveryRecord } from '@libretto/shared/ledger'
-import { roundTrip } from '../checks/judgeable.ts'
+import { roundTrip, sheetsMatch } from '../checks/judgeable.ts'
 import type { Google, GoogleFail } from '../intake/google.ts'
 import { caseDir } from '../ledger/db.ts'
 import type { Ledger } from '../ledger/ledger.ts'
 import { writeAtomic } from '../roles/entrance.ts'
 import { draftNames, versionDir } from '../roles/maker.ts'
 import { exportedText } from './docx.ts'
+import { pptxText } from './pptx.ts'
+import { xlsxSheets } from './xlsx.ts'
 
 const DOCX = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+const PPTX = 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
 const CALL_MS = 60_000
 export const UNKNOWN_LIMIT = 3 // 不明の行がこの数になった後の周期でも見つからなければ失敗（4.6 (5)）
 
@@ -25,6 +30,71 @@ export const GDOC_SAY = {
   mismatch: (missing: number, extra: number) =>
     `保存した文書の本文が元の本文と食い違っています（欠けた段落 ${missing}・増えた段落 ${extra}）`,
 } as const
+
+// 種類ごとの違い（6.10 (4)）: 変換先・上げる中身・書き出しの形・照合と食い違いの文
+type Kind = 'gdoc' | 'gsheet' | 'gslide'
+type Check = { ok: true } | { ok: false; reason: string }
+const KIND: Record<
+  Kind,
+  {
+    google: string
+    upload: string
+    export: string
+    as: 'text' | 'bytes'
+    say: { notLinked?: string; notFound?: string }
+    check: (md: string, got: string | Buffer) => Check
+  }
+> = {
+  gdoc: {
+    google: 'application/vnd.google-apps.document',
+    upload: DOCX,
+    export: 'text/html',
+    as: 'text',
+    say: {},
+    check: (md, got) => {
+      const r = roundTrip(md, exportedText(got as string))
+      return r.units[0] ? { ok: true } : { ok: false, reason: GDOC_SAY.mismatch(r.measured.missing, r.measured.extra) }
+    },
+  },
+  gsheet: {
+    google: 'application/vnd.google-apps.spreadsheet',
+    upload: XLSX,
+    export: XLSX,
+    as: 'bytes',
+    say: {
+      notLinked: 'Google スプレッドシートに保存できる連携がありません',
+      notFound: '保存した表が 3 回探しても確かめられませんでした',
+    },
+    check: (md, got) => {
+      const r = sheetsMatch(md, xlsxSheets(got as Buffer))
+      return r.units[0]
+        ? { ok: true }
+        : {
+            ok: false,
+            reason: `保存した表が元の表と食い違っています（食い違ったセル ${r.measured.cells}・数の合わない表 ${r.measured.tables}・エラーのセル ${r.measured.errors}）`,
+          }
+    },
+  },
+  gslide: {
+    google: 'application/vnd.google-apps.presentation',
+    upload: PPTX,
+    export: PPTX,
+    as: 'bytes',
+    say: {
+      notLinked: 'Google スライドに保存できる連携がありません',
+      notFound: '保存したスライドが 3 回探しても確かめられませんでした',
+    },
+    check: (md, got) => {
+      const r = roundTrip(md, pptxText(got as Buffer))
+      return r.units[0]
+        ? { ok: true }
+        : {
+            ok: false,
+            reason: `保存したスライドの字が元の本文と食い違っています（欠けた段落 ${r.measured.missing}・増えた段落 ${r.measured.extra}）`,
+          }
+    },
+  },
+}
 
 type File = { id: string; webViewLink?: string; shared?: boolean }
 type Marker = { fileId?: string; link?: string }
@@ -142,19 +212,20 @@ async function findOrMakeFolder(d: Pick<Deps, 'home' | 'google'>, signal: AbortS
   return id
 }
 
-function upload(g: Google, c: CaseRecord, a: DeliveryRecord, folderId: string, docx: Buffer, signal: AbortSignal) {
+function upload(g: Google, c: CaseRecord, a: DeliveryRecord, folderId: string, body0: Buffer, signal: AbortSignal) {
+  const k = KIND[a.target.kind as Kind]
   const meta = {
     name: `${c.title}（第 ${a.version} 版）`,
-    mimeType: 'application/vnd.google-apps.document',
+    mimeType: k.google,
     parents: [folderId],
     appProperties: { librettoAttempt: a.attemptId },
   }
   const b = `libretto-${randomBytes(12).toString('hex')}`
   const body = Buffer.concat([
     Buffer.from(
-      `--${b}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n--${b}\r\nContent-Type: ${DOCX}\r\n\r\n`,
+      `--${b}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n--${b}\r\nContent-Type: ${k.upload}\r\n\r\n`,
     ),
-    docx,
+    body0,
     Buffer.from(`\r\n--${b}--\r\n`),
   ])
   return within(signal, (s) =>
@@ -166,13 +237,13 @@ function upload(g: Google, c: CaseRecord, a: DeliveryRecord, folderId: string, d
   )
 }
 
-// 送付中の gdoc の attempt 1 つ。recheck は「探し直す」周期（不明の attempt はこのときだけ見る。6.5 (7)）。
+// 送付中の Google の attempt 1 つ（gdoc・gsheet・gslide）。recheck は「探し直す」周期（不明の attempt はこのときだけ見る。6.5 (7)）。
 // 何もしないときは undefined（不明のまま次の周期を待つ）
-export async function deliverGdoc(
+export async function deliverGoogle(
   d: Deps,
   c: CaseRecord,
   a: DeliveryRecord,
-  docx: Buffer,
+  file: Buffer,
   signal: AbortSignal,
   recheck: boolean,
 ): Promise<GdocEvent | undefined> {
@@ -180,6 +251,8 @@ export async function deliverGdoc(
   const id = (type: string) => `${c.caseId}:${type}:${a.attemptId}`
   const path = markerPath(d.home, c.caseId, a.attemptId)
   let marker = readMarker(path)
+  const k = KIND[a.target.kind as Kind]
+  const say = { ...GDOC_SAY, ...k.say }
   const failed = (reason: string, link?: string): GdocEvent => ({
     ...base,
     type: 'delivery.failed',
@@ -190,7 +263,7 @@ export async function deliverGdoc(
   // 見つからない・確かめられない周期。不明の行が UNKNOWN_LIMIT になった後なら失敗（作ったと分かっていればリンクを残す）
   const miss = (): GdocEvent => {
     const k = d.ledger.listDeliveries(c.caseId).filter((x) => x.attemptId === a.attemptId && x.status === '不明').length
-    if (k >= UNKNOWN_LIMIT) return failed(GDOC_SAY.notFound, marker?.link)
+    if (k >= UNKNOWN_LIMIT) return failed(say.notFound, marker?.link)
     return {
       ...base,
       type: 'delivery.unknown',
@@ -204,8 +277,8 @@ export async function deliverGdoc(
     // 印が無ければ作成を送っていない（不明でも、フォルダが用意できなかった周期の後なので作ってよい）。
     // 作っていないことが確かなので、連携が無ければ不明にせず失敗
     const st = d.google.status()
-    if (st.state !== 'connected' || !st.docs) return failed(GDOC_SAY.notLinked)
-    const target = a.target.kind === 'gdoc' ? a.target.folderId : FOLDER_NAME
+    if (st.state !== 'connected' || !st.docs) return failed(say.notLinked)
+    const target = 'folderId' in a.target ? a.target.folderId : FOLDER_NAME
     const folder = target === FOLDER_NAME ? await libFolder(d, signal) : target
     if (typeof folder !== 'string')
       // 断られたら作れない。届かないなどは次の周期にもう一度（フォルダが用意できない周期も数える。6.5 (7)）
@@ -217,7 +290,7 @@ export async function deliverGdoc(
     if (signal.aborted) return undefined
     writeAtomic(path, '{}\n')
     marker = {}
-    const r = await upload(d.google, c, a, folder, docx, signal)
+    const r = await upload(d.google, c, a, folder, file, signal)
     if (!r.ok) {
       // 応答で断られたものは作られていない。届かない・時間切れ・連携の切れ目は作られたか分からない
       if (r.why === 'api_disabled') return failed(GDOC_SAY.driveDisabled)
@@ -235,25 +308,30 @@ export async function deliverGdoc(
 
   const fileId = marker.fileId as string
   const link = marker.link
-  const html = await within(signal, (s) =>
-    d.google.drive<string>(`/drive/v3/files/${encodeURIComponent(fileId)}/export?mimeType=text/html`, {}, s, 'text'),
+  const got = await within(signal, (s) =>
+    d.google.drive<string | Buffer>(
+      `/drive/v3/files/${encodeURIComponent(fileId)}/export?mimeType=${encodeURIComponent(k.export)}`,
+      {},
+      s,
+      k.as,
+    ),
   )
-  if (!html.ok) return miss()
+  if (!got.ok) return miss()
   const md = readFileSync(join(versionDir(d.home, c.caseId, a.version), draftNames(a.version).md), 'utf-8')
-  const r = roundTrip(md, exportedText(html.json))
-  if (r.units[0])
+  const r = k.check(md, got.json)
+  if (r.ok)
     return {
       ...base,
       type: 'delivery.done',
       eventId: id('delivery.done'),
-      receiptId: `gdoc:${fileId}`,
+      receiptId: `${a.target.kind}:${fileId}`,
       ...(link && { link }),
     }
   return {
     ...base,
     type: 'delivery.mismatch',
     eventId: id('delivery.mismatch'),
-    reason: GDOC_SAY.mismatch(r.measured.missing, r.measured.extra),
+    reason: r.reason,
     ...(link && { link }),
   }
 }

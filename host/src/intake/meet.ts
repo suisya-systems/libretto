@@ -1,7 +1,7 @@
 // Meet の会議メモ（docs/implementation.md 6.7）。「Gemini によるメモ」の行動項目の節だけを読み、本人担当の項目を 1 件ずつ候補にする（T1）。
 // 節の外（まとめ・詳細・ほかの出席者の発言）はモデルにも渡さない。本文は保存しない
 import { createHash } from 'node:crypto'
-import { DocType } from '@libretto/shared/api'
+import { DestChoice, DocType } from '@libretto/shared/api'
 import { z } from 'zod'
 import { transition } from '../case/transition.ts'
 import { jst, type Ledger, type MeetNote } from '../ledger/ledger.ts'
@@ -71,7 +71,7 @@ const Pick = z.object({
   mine: z.enum(['本人', '曖昧']),
   summary: z.string().trim().min(1).max(80),
   docType: DocType,
-  destinations: z.array(z.enum(['page', 'paste', 'gdoc'])).min(1),
+  destinations: z.array(DestChoice).min(1),
   why: z.string().trim().min(1).max(80),
 })
 export const MeetDraft = z.object({ items: z.array(Pick) })
@@ -109,7 +109,7 @@ export const MEET_INSTRUCTION = `あなたは libretto の事実係です。会�
 出力は次の形の JSON だけにしてください。
 ${JSON.stringify(MEET_EXAMPLE)}`
 
-export function meetViolations(d: MeetDraft, count: number, gdoc: boolean): string[] {
+export function meetViolations(d: MeetDraft, count: number, dests: readonly DestChoice[]): string[] {
   const v: string[] = []
   const ns = d.items.map((i) => i.n)
   for (const n of ns)
@@ -118,7 +118,7 @@ export function meetViolations(d: MeetDraft, count: number, gdoc: boolean): stri
   for (const i of d.items) {
     if (new Set(i.destinations).size !== i.destinations.length)
       v.push('destinations に同じものを 2 回書かないでください')
-    v.push(...destViolations(i.destinations, gdoc))
+    v.push(...destViolations(i.destinations, dests))
   }
   return v
 }
@@ -174,6 +174,7 @@ type Deps = {
   invoke: (job: Job) => Promise<Outcome>
   candidatesChanged: () => void
   now: () => Date
+  destChoices: () => DestChoice[] // 今選べる保存先（6.10 (3)）
 }
 export type MeetProblem = 'rate_limited' | 'network' | 'api_disabled'
 
@@ -256,14 +257,14 @@ export function createMeet(d: Deps) {
         materials: [
           { name: '会議名', text: meeting },
           { name: '本人', text: JSON.stringify(me) },
-          destMaterial(docs),
+          destMaterial(d.destChoices()),
           { name: '外部資料（会議メモの行動項目）', text: numbered(items) },
         ],
         access: 'none',
         output: {
           kind: 'json',
           schema: withoutNulls(MeetDraft),
-          accept: (x) => meetViolations(x as MeetDraft, items.length, docs),
+          accept: (x) => meetViolations(x as MeetDraft, items.length, d.destChoices()),
         },
         limits: MEET_LIMITS,
         signal,

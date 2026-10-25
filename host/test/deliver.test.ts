@@ -5,7 +5,7 @@ import { renderHtml } from '../src/checks/text.ts'
 import { type DocText, docxOf, docxText, exportedText } from '../src/deliver/docx.ts'
 import { pageBlocks, pageDocument } from '../src/deliver/page.ts'
 import { pasteText } from '../src/deliver/paste.ts'
-import { destViolations } from '../src/roles/conversation.ts'
+import { destChoices, destViolations } from '../src/roles/conversation.ts'
 import { attachment } from '../src/server/app.ts'
 
 const MD = '# 題\n\n前置きの **強調** です。\n\n## 見出し\n\n- 一つ目\n- 二つ目\n\n1. 手順\n2. 次\n'
@@ -116,7 +116,7 @@ describe('Google ドキュメントの docx（6.5 (4)(5)）', () => {
   })
 
   it('保存先の選択肢: gdoc は連携があるときだけ', () => {
-    expect(destViolations(['page', 'gdoc'], false)).toHaveLength(1)
-    expect(destViolations(['page', 'gdoc'], true)).toEqual([])
+    expect(destViolations(['page', 'gdoc'], destChoices({ google: false, files: false }))).toHaveLength(1)
+    expect(destViolations(['page', 'gdoc'], destChoices({ google: true, files: false }))).toEqual([])
   })
 })

@@ -3,7 +3,7 @@
 import { createHash } from 'node:crypto'
 import { existsSync, readdirSync, readFileSync, renameSync, rmSync, statSync } from 'node:fs'
 import { join } from 'node:path'
-import type { Version } from '@libretto/shared/api'
+import { type DeliveryTarget, isTable, type Version } from '@libretto/shared/api'
 import { MARK, Review } from '@libretto/shared/checks'
 import { type CaseRecord, MakerAttempt, VersionManifest } from '@libretto/shared/ledger'
 import type { z } from 'zod'
@@ -41,8 +41,35 @@ export const SOURCES_RULE = `出典と要確認の印（この依頼は出典付
 - materials/ の pasted-01.md などは、本人が貼った資料。そこから取った主張は、資料の言い方と数のまま書く（リンクは要らない）
 - 出典を示せない事実の主張は、その文の終わり（句点の後）に ${MARK} を付ける。出典をこしらえない`
 
-export function makerInstruction(work: string, n: number, feedback: boolean, sources = false, voice = false) {
+// スライドと表にする依頼の形（6.10 (1)）。保存先にあるときだけ足す。tables は式を使えるか（LibreOffice で計算し直せるか）
+export type Shape = { slides?: boolean; tables?: 'formulas' | 'values' }
+export const shapeOf = (destination: readonly DeliveryTarget[], soffice: boolean): Shape => ({
+  ...(destination.some((t) => t.kind === 'gslide' || (t.kind === 'file' && t.format === 'pptx')) && { slides: true }),
+  ...(destination.some(isTable) && { tables: soffice ? 'formulas' : 'values' }),
+})
+export const SLIDES_RULE = `スライドにします:
+- # の題が表紙。## の見出しごとに 1 枚のスライドになり、見出しが題、次の ## までの段落と箇条書きがその本文
+- 1 枚の本文は 6 行まで、1 行は 40 字までを目安に短く。長い説明は枚数を分ける`
+const TABLE_BASE = `表にします:
+- 表は Markdown の表（| で区切り、2 行目に --- | --- の区切りの行）で書き、HTML の版では同じ表を table・tr・th・td で書く。1 つの表が 1 つのシートになり、表の前の見出しがシートの名前
+- 1 行目は列の見出し。数は数字だけで書く（単位や桁区切りは列の見出しに）。セルの中に | は書かない`
+export const TABLES_RULE = `${TABLE_BASE}
+- 計算は式で書いてよい。式のセルは = から始める（例: =SUM(B2:B4)）。Markdown と HTML で同じ式を書く`
+export const TABLES_VALUES_RULE = `${TABLE_BASE}
+- 式は使わず、計算した値を書く`
+
+export function makerInstruction(
+  work: string,
+  n: number,
+  feedback: boolean,
+  sources = false,
+  voice = false,
+  shape: Shape = {},
+) {
   const f = draftNames(n)
+  const tags = ['見出し（h1〜h3）', '段落（p）', '箇条書き（ul / ol / li）']
+  if (shape.tables) tags.push('表（table / tr / th / td）')
+  if (sources) tags.push('出典のリンク（a）')
   return `あなたは libretto の「作り手」です。依頼書に沿って文書を書きます。これはバージョン ${n} です。
 
 作業場: ${work}
@@ -54,9 +81,9 @@ ${feedback ? '- feedback.md: 前のバージョンで直してほしいこと。
 
 書くもの（この順に）:
 1. ${f.md}: 本文を Markdown で。見出しは # で始める
-2. ${f.html}: 同じ本文を HTML で。使うのは見出し（h1〜h3）・段落（p）・箇条書き（ul / ol / li）${sources ? '・出典のリンク（a）' : ''}だけ。script・style・外部の読み込みは入れない
+2. ${f.html}: 同じ本文を HTML で。使うのは${tags.join('・')}だけ。script・style・外部の読み込みは入れない
 3. ${f.done}: 1 と 2 を書き終えてから、done の 1 行だけを書く
-${sources ? `\n${SOURCES_RULE}\n` : ''}
+${sources ? `\n${SOURCES_RULE}\n` : ''}${shape.slides ? `\n${SLIDES_RULE}\n` : ''}${shape.tables ? `\n${shape.tables === 'formulas' ? TABLES_RULE : TABLES_VALUES_RULE}\n` : ''}
 書き終えたら、何を書いたかを 1 行で答えてください。`
 }
 
@@ -220,6 +247,7 @@ type Deps = {
   emit: (caseId: string, r: ReturnType<typeof transition>) => boolean
   onAuthExpired: (caseId: string) => void
   now?: () => Date
+  soffice?: boolean // 表の式を計算し直せるか（6.10 (1)）
 }
 
 export async function make(d: Deps, c: CaseRecord, signal: AbortSignal): Promise<boolean> {
@@ -271,7 +299,14 @@ export async function make(d: Deps, c: CaseRecord, signal: AbortSignal): Promise
     caseId: c.caseId,
     access: 'write',
     workdir: work,
-    instruction: makerInstruction(work, n, !!feedback, set?.brief.sources === '出典付き', !!set?.checks.voice?.card),
+    instruction: makerInstruction(
+      work,
+      n,
+      !!feedback,
+      set?.brief.sources === '出典付き',
+      !!set?.checks.voice?.card,
+      shapeOf(c.destination, !!d.soffice),
+    ),
     materials: [],
     output: { kind: 'files', expect: [f.md, f.html, f.done] },
     limits: MAKER_LIMITS,

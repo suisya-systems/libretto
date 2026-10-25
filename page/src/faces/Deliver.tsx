@@ -1,21 +1,18 @@
 // 送付の面（画面 5。docs/implementation.md 6.2.8 (6)）と成果の面（6.2.8 (7)）。
 // 送付確認待ち・本人の番は「何を・どこへ・誰に見えるか」と保存する / 戻る。完了は保存先ごとの受け取り口
-import type { CaseView, DeliveryTarget } from '@libretto/shared/api'
+import { type CaseView, DEST_TARGET, type DeliveryTarget, destChoiceOf } from '@libretto/shared/api'
 import { useEffect, useState } from 'react'
 import { Link } from 'wouter'
 import { useCaseAction } from '../action.ts'
 import { W, w } from '../wording.ts'
 import { CaseHeader, History, Leftovers, Versions } from './Progress.tsx'
 
-export const destLabel = (t: DeliveryTarget) =>
-  t.kind === 'file' ? w('dest.file', { format: t.format }) : W[`dest.${t.kind}`]
-// 画面から選べる保存先の種類（CaseView.destinationChoices）を保存先に。Google ドキュメントは libretto フォルダ（6.5 (3)）
-export const targetOf = (k: CaseView['destinationChoices'][number]): DeliveryTarget =>
-  k === 'page'
-    ? { kind: 'page', shared: false }
-    : k === 'gdoc'
-      ? { kind: 'gdoc', folderId: 'libretto' }
-      : { kind: 'paste' }
+export const destLabel = (t: DeliveryTarget) => W[`dest.${destChoiceOf(t)}`]
+// 画面から選べる保存先の種類（CaseView.destinationChoices）を保存先に。Google の 3 つは libretto フォルダ（6.5 (3)・6.10 (3)）
+export const targetOf = (k: CaseView['destinationChoices'][number]): DeliveryTarget => DEST_TARGET[k]
+// Google に作るものの注記と、成果の面の「開く」（6.10 (6)）
+const GOOGLE_NOTE = { gdoc: 'deliver.gdocNote', gsheet: 'deliver.gsheetNote', gslide: 'deliver.gslideNote' } as const
+const GOOGLE_OPEN = { gdoc: 'result.openDoc', gsheet: 'result.openSheet', gslide: 'result.openSlides' } as const
 
 const day = (at: string) =>
   new Intl.DateTimeFormat('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(
@@ -144,7 +141,12 @@ export function DeliverFace({ c, reload, stopped }: { c: CaseView; reload: () =>
           <div key={JSON.stringify(t)} className="card pad stack target">
             <h3 className="target-title">{destLabel(t)}</h3>
             {t.kind === 'page' && <p className="muted">{W['deliver.pageNote']}</p>}
-            {t.kind === 'gdoc' && <p className="muted">{w('deliver.gdocNote', { title: c.title, n: c.version })}</p>}
+            {t.kind in GOOGLE_NOTE && (
+              <p className="muted">
+                {w(GOOGLE_NOTE[t.kind as keyof typeof GOOGLE_NOTE], { title: c.title, n: c.version })}
+              </p>
+            )}
+            {t.kind === 'file' && <p className="muted">{W['deliver.fileNote']}</p>}
             {t.kind === 'paste' && (
               <>
                 <p className="muted">{W['deliver.pasteNote']}</p>
@@ -166,7 +168,7 @@ type Copy = 'idle' | 'copied' | 'failed'
 export function ResultFace({ c, reload, stopped }: { c: CaseView; reload: () => void; stopped: boolean }) {
   const action = useCaseAction(c.id, reload)
   // 今の保存先に無い種類だけを「にも保存する」に出す（T26b。6.5 (8)）
-  const more = c.destinationChoices.filter((k) => !c.deliveryPlan.targets.some((t) => t.kind === k))
+  const more = c.destinationChoices.filter((k) => !c.deliveryPlan.targets.some((t) => destChoiceOf(t) === k))
   // 保存した版ごとの受け取り口（送付済の行）。新しい版が上
   const saved = c.deliveries.filter((d) => d.status === '送付済')
   const n = Math.max(0, ...saved.map((d) => d.version))
@@ -241,10 +243,17 @@ export function ResultFace({ c, reload, stopped }: { c: CaseView; reload: () => 
                 <p className="muted small">{W['result.downloadNote']}</p>
               </>
             )}
-            {d.target.kind === 'gdoc' && d.link && (
+            {d.target.kind in GOOGLE_OPEN && d.link && (
               <div className="row-gap">
                 <a className="btn btn-secondary" href={d.link} target="_blank" rel="noopener noreferrer">
-                  {W['result.openDoc']}
+                  {W[GOOGLE_OPEN[d.target.kind as keyof typeof GOOGLE_OPEN]]}
+                </a>
+              </div>
+            )}
+            {d.target.kind === 'file' && d.link && (
+              <div className="row-gap">
+                <a className="btn btn-secondary" href={d.link} download>
+                  {W['result.downloadFile']}
                 </a>
               </div>
             )}

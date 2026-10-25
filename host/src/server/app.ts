@@ -14,6 +14,7 @@ import {
   CaseState,
   type ConnectionsView,
   ConversationPost,
+  type DeliveryTarget,
   DismissLow,
   DraftDiff,
   GoogleClientInput,
@@ -22,6 +23,7 @@ import {
   type IsolationCause,
   MaterialsPost,
   type Mode,
+  mixesTables,
   SuppressionInput,
 } from '@libretto/shared/api'
 import type { Intake } from '@libretto/shared/ledger'
@@ -33,7 +35,8 @@ import { createRunner } from '../case/runner.ts'
 import { transition } from '../case/transition.ts'
 import { type IsolationRecord, readIsolation, writeIsolation } from '../checks/isolation.ts'
 import { diff, renderHtml } from '../checks/text.ts'
-import { pageVersions } from '../deliver/run.ts'
+import type { Tools } from '../deliver/render.ts'
+import { fileVersions, pageVersions } from '../deliver/run.ts'
 import { readGathered } from '../facts/gather.ts'
 import { type Fetch, fetchedSources, materialsDir } from '../facts/inventory.ts'
 import { CLOSED, purge } from '../facts/purge.ts'
@@ -55,7 +58,7 @@ import {
   setKey,
 } from '../model/keys.ts'
 import type { Isolation } from '../model/sandbox.ts'
-import { createConversation } from '../roles/conversation.ts'
+import { createConversation, destChoices, TARGET } from '../roles/conversation.ts'
 import { createEntrance, currentSet, entranceView, writeApproval, writeAtomic } from '../roles/entrance.ts'
 import { currentMarks, OUTPUT_FILES, reviewsOf } from '../roles/judge.ts'
 import { draftNames, pastedCount, pastedName, versionDir, versionsOf } from '../roles/maker.ts'
@@ -93,6 +96,7 @@ export type ServerOptions = {
   gmailLabel?: string // 取り込みの目印（設定の Issue までは既定の libretto）
   slack?: Slack // Slack の連携（6.6 (2)）。無ければ設定の画面で入れたトークンで
   slackEmoji?: string // 取り込みの目印（設定の Issue までは既定の memo）
+  tools?: Tools // 起動時の事前点検で見つけた LibreOffice と poppler（6.10 (5)）
 }
 
 export function createServer(o: ServerOptions) {
@@ -161,11 +165,15 @@ export function createServer(o: ServerOptions) {
     const r = await readThread(google, candidateId.replace(/^gmail:/, ''), account, signal)
     return r.ok ? r.thread.body : undefined
   }
-  // Google ドキュメントに保存できる連携があるか（6.5 (2)）
-  const gdocReady = () => {
+  // 今選べる保存先（6.5 (2)・6.10 (3)）。Google に保存できる連携と、LibreOffice・poppler の有無
+  const tools = o.tools ?? {}
+  const ready = () => {
     const s = google.status()
-    return s.state === 'connected' && s.docs
+    return { google: s.state === 'connected' && s.docs, files: !!tools.soffice && !!tools.pdftoppm }
   }
+  const choices = () => destChoices(ready())
+  // 保存先を変える・足すときの選択肢。表の依頼は表だけ、文書の依頼は表のほかだけ（6.10 (1)）
+  const caseChoices = (now: readonly DeliveryTarget[]) => choices().filter((k) => !mixesTables([...now, TARGET[k]]))
   const candidatesChanged = () => hub.emit('candidates.changed', {})
   const poller = createPoller({
     home,
@@ -181,6 +189,7 @@ export function createServer(o: ServerOptions) {
     connectionsChanged: () => hub.emit('connections.changed', {}),
     log,
     now,
+    destChoices: choices,
   })
 
   const entrance = createEntrance({
@@ -215,6 +224,7 @@ export function createServer(o: ServerOptions) {
     google,
     ...(o.now && { now: o.now }),
     ...(o.fetch && { fetch: o.fetch }),
+    tools,
   })
 
   const conversation = createConversation({
@@ -231,7 +241,7 @@ export function createServer(o: ServerOptions) {
     candidateChanged: () => candidatesChanged(),
     mailOf: reread,
     // 依頼書と仮定だけ。チェック項目は渡さない（6.2.2 (8)）
-    gdocReady,
+    destChoices: choices,
     briefOf: (caseId) => {
       const b = currentSet(home, ledger, caseId)?.brief
       return b && { ...b, decisions: undefined, approvedFingerprint: undefined }
@@ -376,6 +386,7 @@ export function createServer(o: ServerOptions) {
         ...poller.meetView(),
       },
       slack: slackView(),
+      tools: { soffice: !!tools.soffice, pdftoppm: !!tools.pdftoppm },
       inference: {
         classifiedToday: ledger.classifiedCount(now()),
         dailyLimit: inferenceSettings(home).dailyLimit,
@@ -651,7 +662,7 @@ export function createServer(o: ServerOptions) {
         reviewsOf(home, ledger, rec),
         fetchedSources(home, rec.caseId).map((s) => ({ ...s, gathered: gathered.has(s.url) })),
         g?.state === '集められなかった',
-        gdocReady() ? ['page', 'paste', 'gdoc'] : ['page', 'paste'],
+        caseChoices(rec.destination),
       ),
     )
   })
@@ -913,6 +924,27 @@ export function createServer(o: ServerOptions) {
     return r instanceof Response ? r : c.body(null, 204)
   })
 
+  // 手元のファイルのダウンロード（5.2・6.10 (4)）。その形式で保存した（送付済の）版だけ
+  const FILE_TYPES = {
+    pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  } as const
+  app.get('/api/cases/:id/files/:n', (c) => {
+    const rec = ledger.getCase(c.req.param('id'))
+    const format = c.req.query('format') ?? ''
+    const n = Number(c.req.param('n'))
+    if (!rec || !(format in FILE_TYPES) || !fileVersions(ledger, rec.caseId, format).includes(n))
+      return c.json({ reason: 'not_found' }, 404)
+    const f = format as keyof typeof FILE_TYPES
+    return c.body(readFileSync(join(versionDir(home, rec.caseId, n), 'outputs', OUTPUT_FILES[f])), 200, {
+      'content-type': FILE_TYPES[f],
+      'content-disposition': attachment(rec.title, n, f),
+      'x-content-type-options': 'nosniff',
+      'cache-control': 'no-store',
+    })
+  })
+
   app.all('/api/*', (c) => c.json({ reason: 'not_found' }, 404))
 
   // 3. 版のあるページ（Cookie 必須）
@@ -964,11 +996,11 @@ export function createServer(o: ServerOptions) {
 }
 
 // ダウンロードの名前（6.2.8 (4)）。ASCII の名前と、題を百分率符号化した名前
-export function attachment(title: string, n: number) {
+export function attachment(title: string, n: number, ext = 'html') {
   const safe = [...title].map((ch) => ((ch.codePointAt(0) ?? 0) < 0x20 || '\u007f/\\'.includes(ch) ? '_' : ch))
-  const name = `${safe.join('')}-第${n}版.html`
+  const name = `${safe.join('')}-第${n}版.${ext}`
   const encoded = encodeURIComponent(name).replace(/['()*]/g, (ch) => `%${ch.charCodeAt(0).toString(16).toUpperCase()}`)
-  return `attachment; filename="page-v${n}.html"; filename*=UTF-8''${encoded}`
+  return `attachment; filename="${ext === 'html' ? 'page' : 'file'}-v${n}.${ext}"; filename*=UTF-8''${encoded}`
 }
 
 // T7b は入口待ち以外からの entrance.revise（動いている仕事がある）

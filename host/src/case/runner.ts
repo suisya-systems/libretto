@@ -4,6 +4,7 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync 
 import { join } from 'node:path'
 import type { CaseState } from '@libretto/shared/api'
 import type { CaseRecord, VoiceCard } from '@libretto/shared/ledger'
+import type { Tools } from '../deliver/render.ts'
 import { deliver, tailor } from '../deliver/run.ts'
 import { gatherSources } from '../facts/gather.ts'
 import { type Fetch, fetchCached, materialsDir } from '../facts/inventory.ts'
@@ -47,6 +48,7 @@ type Deps = {
   now?: () => Date
   fetch?: Fetch // 出典の取り寄せ（テストは偽物。6.3.1 (5)）
   google: Google // Google ドキュメントの届け先（6.5）
+  tools?: Tools // 描き出しと計算し直しの道具（6.10 (3)(5)）
 }
 
 export type Runner = ReturnType<typeof createRunner>
@@ -157,6 +159,7 @@ export function createRunner(d: Deps) {
     log: d.log,
     ...(d.now && { now: d.now }),
     ...(d.fetch && { fetch: d.fetch }),
+    ...(d.tools && { tools: d.tools }),
   })
 
   // 送付確認待ち → 仕立て → 形式の判定（T20〜T21b。6.2.8 (1)）。版が読めない・作れない保存先は判定できなかった
@@ -185,7 +188,19 @@ export function createRunner(d: Deps) {
   const JOBS: Partial<Record<CaseState, (c: CaseRecord, signal: AbortSignal) => Promise<boolean>>> = {
     材料待ち: assemble,
     下書き中: (c, signal) =>
-      make({ home, ledger, invoke: d.invoke, emit, onAuthExpired, ...(d.now && { now: d.now }) }, c, signal),
+      make(
+        {
+          home,
+          ledger,
+          invoke: d.invoke,
+          emit,
+          onAuthExpired,
+          ...(d.now && { now: d.now }),
+          soffice: !!d.tools?.soffice,
+        },
+        c,
+        signal,
+      ),
     検品中: (c, signal) => judgeBody(judgeDeps(), c, signal),
     送付確認待ち: tailorAndJudge,
     // 送付中 → 今の送付回の attempt を 1 つずつ送付済に（T24。6.2.8 (3)・6.5 (6)(7)）

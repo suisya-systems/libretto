@@ -46,6 +46,25 @@ export const DeliveryTarget = z.discriminatedUnion('kind', [
 ])
 export type DeliveryTarget = z.infer<typeof DeliveryTarget>
 
+// 会話・候補・画面で選ぶ保存先の種類（6.10 (3)）。pptx / xlsx / docx は手元のファイル
+export const DestChoice = z.enum(['page', 'paste', 'gdoc', 'gsheet', 'gslide', 'pptx', 'xlsx', 'docx'])
+export type DestChoice = z.infer<typeof DestChoice>
+// 選んだ種類 → 保存先。Google の 3 つは libretto フォルダ（6.5 (3)）
+export const DEST_TARGET: Record<DestChoice, DeliveryTarget> = {
+  page: { kind: 'page', shared: false },
+  paste: { kind: 'paste' },
+  gdoc: { kind: 'gdoc', folderId: 'libretto' },
+  gsheet: { kind: 'gsheet', folderId: 'libretto' },
+  gslide: { kind: 'gslide', folderId: 'libretto' },
+  pptx: { kind: 'file', format: 'pptx' },
+  xlsx: { kind: 'file', format: 'xlsx' },
+  docx: { kind: 'file', format: 'docx' },
+}
+export const destChoiceOf = (t: DeliveryTarget): DestChoice => (t.kind === 'file' ? t.format : t.kind)
+// 表（gsheet・xlsx）とほかの保存先は混ぜない（6.10 (1)）。ページ・ドキュメント・貼り付け用は表を通さない
+export const isTable = (t: DeliveryTarget) => t.kind === 'gsheet' || (t.kind === 'file' && t.format === 'xlsx')
+export const mixesTables = (ts: readonly DeliveryTarget[]) => ts.some(isTable) && ts.some((t) => !isTable(t))
+
 export const MaterialRef = z.object({
   id: z.string(),
   kind: z.enum(['出典', '声の見本', '元データ', '添付']),
@@ -277,8 +296,8 @@ export const CaseView = CaseCard.extend({
   outlineFingerprint: z.string().optional(), // 承認待ち（kind=構成案）のとき。outline.approve に添える（4.6 (4)）
   deliveryPlan: DeliveryPlan,
   deliveries: z.array(Delivery),
-  // 保存先を変える・足すときに選べる種類（gdoc は Google ドキュメントに保存できる連携があるときだけ。6.5 (3)）
-  destinationChoices: z.array(z.enum(['page', 'paste', 'gdoc'])),
+  // 保存先を変える・足すときに選べる種類（Google は保存できる連携、ファイルは道具があるときだけ。表と文書は混ぜない。6.5 (3)・6.10 (3)）
+  destinationChoices: z.array(DestChoice),
   events: z.array(EventRow),
   stopReason: z.string().optional(),
 })
@@ -388,6 +407,8 @@ export const ConnectionsView = z.object({
     lastAt: z.string().optional(),
     problem: z.enum(['rate_limited', 'network']).optional(),
   }),
+  // ファイルを作る道具（起動時の事前点検。6.10 (5)）。LibreOffice（soffice）と poppler（pdftoppm）
+  tools: z.object({ soffice: z.boolean(), pdftoppm: z.boolean() }),
   // 自動検出（6.9 (6)(8)(10)）。recall は直近 30 日の合図のうち、自動検出が先に見つけていた数
   inference: z.object({
     classifiedToday: z.number().int(),

@@ -3,7 +3,16 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { Answer, AskSuppress, CaseAction, CaseState, DeliveryTarget, Mode, Origin } from '@libretto/shared/api'
+import {
+  type Answer,
+  type AskSuppress,
+  type CaseAction,
+  type CaseState,
+  type DeliveryTarget,
+  type Mode,
+  mixesTables,
+  type Origin,
+} from '@libretto/shared/api'
 import type { Escalate, Mark } from '@libretto/shared/checks'
 import type {
   ApprovalRecord,
@@ -454,7 +463,8 @@ function decide(ledger: Ledger, c: CaseRecord, ev: CaseInput, ctx: Ctx): Plan | 
       if (!is('送付確認待ち') || !mine) return 'invalid_transition'
       return { ...final, after: decision('送付', 'やめる') }
     case 'delivery.change': // T23b
-      if (!is('承認待ち') || c.approvalKind !== '完成稿') return 'invalid_transition'
+      // 表とほかの保存先は混ぜない（6.10 (1)）
+      if (!is('承認待ち') || c.approvalKind !== '完成稿' || mixesTables(ev.targets)) return 'invalid_transition'
       return { ...final, destination: ev.targets, clearOutput: true, after: supersede('完成稿') }
     case 'delivery.done': // T24
     case 'delivery.mismatch': // T24b
@@ -522,7 +532,12 @@ function decide(ledger: Ledger, c: CaseRecord, ev: CaseInput, ctx: Ctx): Plan | 
       }
     }
     case 'delivery.add': // T26b
-      if (!is('完了') || c.destination.some((t) => sameTarget(t, ev.target))) return 'invalid_transition'
+      if (
+        !is('完了') ||
+        c.destination.some((t) => sameTarget(t, ev.target)) ||
+        mixesTables([...c.destination, ev.target])
+      )
+        return 'invalid_transition'
       return {
         to: '送付確認待ち',
         turn: 'libretto',

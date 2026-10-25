@@ -41,6 +41,7 @@ export const CodeFn = z.enum([
   'pageRoundTrip',
   'docsRoundTrip',
   'sheetsRoundTrip',
+  'slidesRoundTrip',
   'canary',
   // 文体カードとの距離（docs/implementation.md 6.3.2 (6)）
   'voiceEndings',
@@ -79,6 +80,10 @@ export const CodeArgs = {
   pasteSafe: z.object({}),
   pageRoundTrip: z.object({}),
   docsRoundTrip: z.object({}),
+  sheetsRoundTrip: z.object({}),
+  slidesRoundTrip: z.object({}),
+  xlsxNoFormulaErrors: z.object({}),
+  pptxNoBlankPages: z.object({}),
   claimsInventoried: z.object({}),
   sourcesReachable: z.object({}),
   numbersMatch: z.object({}),

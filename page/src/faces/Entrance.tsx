@@ -3,6 +3,7 @@ import {
   type Answer,
   type CaseView,
   type DeliveryTarget,
+  destChoiceOf,
   type HostStatus,
   LEAVE_IT,
   type Mode,
@@ -23,10 +24,7 @@ type Entrance = NonNullable<CaseView['entrance']>
 type Picked = string[] | typeof LEAVE_IT
 const yen = (n: number) => n.toLocaleString('ja-JP')
 
-function dest(t: DeliveryTarget) {
-  if (t.kind === 'file') return w('dest.file', { format: t.format })
-  return W[`dest.${t.kind}`]
-}
+const dest = (t: DeliveryTarget) => W[`dest.${destChoiceOf(t)}`]
 
 export function EntranceFace({
   c,

@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { serve } from '@hono/node-server'
 import { transition } from './case/transition.ts'
 import { causeOf, checkIsolation, probeDir } from './checks/isolation.ts'
+import { preflight } from './deliver/render.ts'
 import { purgeClosed } from './facts/purge.ts'
 import { createGoogle } from './intake/google.ts'
 import { POLL_MS } from './intake/poller.ts'
@@ -43,6 +44,14 @@ const claude = resolveClaude()
 const sandboxCheck = await checkSandbox({ home, claude })
 console.error(
   `libretto: isolation ${sandboxCheck.isolation}${sandboxCheck.reason ? ` (${sandboxCheck.reason})` : ''}, claude ${sandboxCheck.claudeVersion ?? 'unknown'}`,
+)
+// ファイルを作る道具の事前点検（6.10 (5)）。起動時に 1 回。入れたらホストを起こし直す
+const tools = await preflight({
+  soffice: process.env.LIBRETTO_SOFFICE ?? 'soffice',
+  pdftoppm: process.env.LIBRETTO_PDFTOPPM ?? 'pdftoppm',
+})
+console.error(
+  `libretto: soffice ${tools.soffice ? 'found' : 'missing'}, pdftoppm ${tools.pdftoppm ? 'found' : 'missing'}`,
 )
 if (sandboxCheck.reason?.startsWith('missing:') || sandboxCheck.reason === 'userns')
   console.error(
@@ -106,6 +115,7 @@ const server = createServer({
   staticDir: fileURLToPath(new URL('../../page/dist', import.meta.url)),
   isolation: sandboxCheck.isolation,
   ...(cause && { cause }),
+  tools,
   probe: (signal) =>
     checkIsolation(
       {

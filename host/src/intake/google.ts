@@ -256,7 +256,8 @@ export function createGoogle(o: {
       return call<T>(`${ep.gmail}${path}`, {}, signal, 'json')
     },
     // Drive。作成（POST）が届いたか分からないときは network（呼ぶ側が「不明」にする。6.5 (6)）
-    drive<T>(path: string, init: RequestInit, signal: AbortSignal, as: 'json' | 'text' = 'json') {
+    // bytes は書き出しの xlsx / pptx（6.10 (4)）
+    drive<T>(path: string, init: RequestInit, signal: AbortSignal, as: 'json' | 'text' | 'bytes' = 'json') {
       return call<T>(`${ep.drive}${path}`, init, signal, as)
     },
   }
@@ -292,7 +293,7 @@ export function createGoogle(o: {
     url: string,
     init: RequestInit,
     signal: AbortSignal,
-    as: 'json' | 'text',
+    as: 'json' | 'text' | 'bytes',
   ): Promise<{ ok: true; json: T } | GoogleFail> {
     // 呼んでいる間に解除・連携し直しがあれば、結果を使わず、今の連携のトークンにも触らない（別のメールボックスを読まない）
     const started = generation
@@ -320,7 +321,9 @@ export function createGoogle(o: {
         // 本文の受け取りの途中で切れても、届かなかったとして返す（呼ぶ側の落ち方に乗せる）
         let json: T
         try {
-          json = (as === 'json' ? await res.json() : await res.text()) as T
+          json = (
+            as === 'json' ? await res.json() : as === 'text' ? await res.text() : Buffer.from(await res.arrayBuffer())
+          ) as T
         } catch (e) {
           if (signal.aborted) throw e
           return { ok: false, why: 'network' }

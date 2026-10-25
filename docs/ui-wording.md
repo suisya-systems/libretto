@@ -270,7 +270,9 @@ libretto の画面に出す言葉の正本。設計書（[`docs/design.md`](./de
 | `dest.gdoc` | Google ドキュメント |
 | `dest.gsheet` | Google スプレッドシート |
 | `dest.gslide` | Google スライド |
-| `dest.file` | ファイル（{format}） |
+| `dest.pptx` | PowerPoint のファイル |
+| `dest.xlsx` | Excel のファイル |
+| `dest.docx` | Word のファイル |
 | `action.moved` | もう進んでいます。読み直します |
 | `entrance.waitLead` | できあがるまで数分かかります。このページを閉じても進みます。 |
 | `entrance.failedLead` | 直してほしいことを書いて出し直すか、この依頼を取り消してください。 |
@@ -543,6 +545,9 @@ libretto の画面に出す言葉の正本。設計書（[`docs/design.md`](./de
 | `deliver.pageNote` | 保存すると、バージョン付きの Web ページで開けます。ほかの人に見せるときは、HTML をダウンロードして渡せます。 |
 | `deliver.pasteNote` | 保存すると、この文をコピーして note などに貼り付けられます。 |
 | `deliver.gdocNote` | 保存すると、あなたの Google ドライブの「libretto」フォルダに「{title}（第 {n} 版）」という Google ドキュメントを作ります。フォルダが無ければ作ります。共有はしません。ほかの人に渡すときは、あなたがドライブで共有してください。 |
+| `deliver.gsheetNote` | 保存すると、あなたの Google ドライブの「libretto」フォルダに「{title}（第 {n} 版）」という Google スプレッドシートを作ります。フォルダが無ければ作ります。共有はしません。ほかの人に渡すときは、あなたがドライブで共有してください。 |
+| `deliver.gslideNote` | 保存すると、あなたの Google ドライブの「libretto」フォルダに「{title}（第 {n} 版）」という Google スライドを作ります。フォルダが無ければ作ります。共有はしません。ほかの人に渡すときは、あなたがドライブで共有してください。 |
+| `deliver.fileNote` | 保存すると、このファイルをダウンロードできます。ほかの人に渡すときは、ダウンロードしたファイルを渡してください。 |
 | `deliver.pasteFailed` | 貼り付け用の文を読み込めませんでした |
 
 **成果の面（完了。実装設計書 6.2.8 (7)）**
@@ -565,7 +570,10 @@ libretto の画面に出す言葉の正本。設計書（[`docs/design.md`](./de
 | `result.pagesHeading` | バージョンごとのページ |
 | `result.pageOf` | バージョン {n} のページ |
 | `result.openDoc` | Google ドキュメントを開く |
-| `result.leftover` | 中身を確かめられなかった Google ドキュメントがドライブに残っています。開いて、ごみ箱に移してください。 |
+| `result.openSheet` | Google スプレッドシートを開く |
+| `result.openSlides` | Google スライドを開く |
+| `result.downloadFile` | ファイルをダウンロード |
+| `result.leftover` | 中身を確かめられなかったファイルが Google ドライブに残っています。開いて、ごみ箱に移してください。 |
 | `result.leftoverOpen` | バージョン {n} のファイルを開く |
 | `result.addHeading` | 別の保存先にも保存する |
 | `result.add` | {dest}にも保存する |
@@ -636,6 +644,11 @@ libretto の画面に出す言葉の正本。設計書（[`docs/design.md`](./de
 | `settings.probe.at` | {at} に確認 |
 | `settings.probe.run` | 今すぐ確認 |
 | `settings.probe.failed` | 確認を始められませんでした。もう一度お試しください。 |
+| `settings.tools.label` | ファイルを作る道具 |
+| `settings.tools.use` | PowerPoint・Excel・Word のファイルと Google スライドを作るとき、できあがりを画像にして見た目を確かめ、表の式を計算し直します。 |
+| `settings.tools.ok` | 入っています |
+| `settings.tools.missing` | 入っていません |
+| `settings.tools.why` | LibreOffice と poppler が要ります。PC で `sudo apt install libreoffice poppler-utils`（Mac は `brew install --cask libreoffice` と `brew install poppler`）を実行してから、libretto を再起動してください。入れるまでは、PowerPoint・Excel・Word のファイルと Google スライドは保存先に出ません。 |
 
 **ホームの依頼の候補（ラベルを付けたメールと、リアクションを付けた Slack の投稿のカード。実装設計書 6.4 (7)・6.6 (7)）**
 

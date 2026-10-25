@@ -21,6 +21,7 @@
     "verify:isolation": "node --experimental-strip-types --no-warnings host/scripts/sandbox-live.ts --model --probe --record",
     "measure": "node --experimental-strip-types --no-warnings host/scripts/measure.ts",
     "verify:fetch": "node --experimental-strip-types --no-warnings host/scripts/fetch-live.ts",
+    "verify:files": "node --experimental-strip-types --no-warnings host/scripts/files-live.ts",
     "dev": "vite page",
     "dev:host": "node --env-file=page/dev.env --experimental-strip-types --no-warnings host/src/index.ts",
     "build": "vite build page"

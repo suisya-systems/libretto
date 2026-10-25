@@ -1,6 +1,6 @@
 // 推測の回（docs/implementation.md 6.9）。Gmail の受信箱と、Slack の本人宛てメンション・選んだチャンネルから、
 // 文書づくりを頼まれていそうなものを可能性と理由付きの候補にする。頼んでいないものは id と判定だけを残す（設計書 10.2）
-import type { InferenceSettings } from '@libretto/shared/api'
+import type { DestChoice, InferenceSettings } from '@libretto/shared/api'
 import { transition } from '../case/transition.ts'
 import { detectInstructions, JEV_HEAD, ruleHit } from '../facts/instructions.ts'
 import { jst, type Ledger } from '../ledger/ledger.ts'
@@ -34,6 +34,7 @@ type Deps = {
   settings: () => InferenceSettings
   candidatesChanged: () => void
   now: () => Date
+  destChoices: () => DestChoice[] // 今選べる保存先（6.10 (3)）
 }
 
 export function createInference(d: Deps) {
@@ -170,7 +171,7 @@ export function createInference(d: Deps) {
       }
 
       // 候補にする: 合図と同じに「AI への指示」の印とカードの要約。Jev に渡すのは件名と最新のメッセージの先頭 600 字
-      const deps = { home: d.home, invoke: d.invoke, signal, gdoc: g.status().docs, caseId: '推測' }
+      const deps = { home: d.home, invoke: d.invoke, signal, dests: d.destChoices(), caseId: '推測' }
       const det = await detectInstructions(`${m.subject}\n${m.latest.slice(0, JEV_HEAD)}`, { ...deps, jev: set.useJev })
       if (!det.ok) return
       const flagged = det.flagged || [m.subject, ...m.body.split(/\r?\n/)].some(ruleHit)

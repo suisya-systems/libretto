@@ -344,7 +344,8 @@ const when = (at: string) => {
 const withCode = (s: string) => s.split(/`([^`]+)`/).map((part, i) => (i % 2 ? <code key={part}>{part}</code> : part))
 
 // 動作環境の確認（8.10 (6)）。結果は裏で届くので、connections.changed で取り直す
-function EnvSection({ v, reload }: { v: Isolation; reload: () => void }) {
+function EnvSection({ v, tools, reload }: { v: Isolation; tools: ConnectionsView['tools']; reload: () => void }) {
+  const toolsOk = tools.soffice && tools.pdftoppm
   const [busy, setBusy] = useState(false)
   const [failed, setFailed] = useState(false)
   const [badge, label] = LEVEL[v.level]
@@ -405,6 +406,19 @@ function EnvSection({ v, reload }: { v: Isolation; reload: () => void }) {
               {W['settings.probe.failed']}
             </p>
           )}
+        </li>
+        {/* ファイルを作る道具（起動時の事前点検。6.10 (5)） */}
+        <li className="key-row">
+          <div className="key-head">
+            <div className="grow">
+              <h3 className="key-label">{W['settings.tools.label']}</h3>
+              <p className="muted small">{W['settings.tools.use']}</p>
+            </div>
+            <span className={`badge ${toolsOk ? 'b-done' : 'b-you'} key-status`}>
+              {W[toolsOk ? 'settings.tools.ok' : 'settings.tools.missing']}
+            </span>
+          </div>
+          {!toolsOk && <p className="note-warn small">{withCode(W['settings.tools.why'])}</p>}
         </li>
       </ul>
     </section>
@@ -960,7 +974,7 @@ export function Settings() {
         />
       )}
       {voice.data && <VoiceSection samples={voice.data.samples} reload={voice.reload} />}
-      {env.data && <EnvSection v={env.data.isolation} reload={env.reload} />}
+      {env.data && <EnvSection v={env.data.isolation} tools={env.data.tools} reload={env.reload} />}
     </section>
   )
 }

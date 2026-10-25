@@ -3,13 +3,16 @@
 import { randomUUID } from 'node:crypto'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type {
-  CaseState,
-  ConversationMessage,
-  ConversationPost,
-  ConversationView,
-  DeliveryTarget,
-  Mode,
+import {
+  type CaseState,
+  type ConversationMessage,
+  type ConversationPost,
+  type ConversationView,
+  DEST_TARGET,
+  DestChoice,
+  destChoiceOf,
+  type Mode,
+  mixesTables,
 } from '@libretto/shared/api'
 import { type CandidateRecord, type Intake, IntakeDraft } from '@libretto/shared/ledger'
 import { z } from 'zod'
@@ -165,30 +168,47 @@ function proposalViolations(r: CandidateReply, attachments: readonly string[]): 
   return v
 }
 
-// 保存先の選択肢（6.5 (3)）。gdoc は Google ドキュメントに保存できる連携があるときだけ。folderId 'libretto' は libretto フォルダ
-type DestKind = IntakeDraft['destinations'][number]
-export const TARGET: Record<DestKind, DeliveryTarget> = {
-  page: { kind: 'page', shared: false },
-  paste: { kind: 'paste' },
-  gdoc: { kind: 'gdoc', folderId: 'libretto' },
-}
+// 保存先の選択肢（6.5 (3)・6.10 (3)）。folderId 'libretto' は libretto フォルダ。pptx / xlsx / docx は手元のファイル
+type DestKind = DestChoice
+export const TARGET = DEST_TARGET
+export const choiceOf = destChoiceOf
 export const DEST_NOTE: Record<DestKind, string> = {
   page: '本人だけが見られる、履歴付きの Web ページ',
   paste: 'ほかのサービスに貼り付ける文章',
   gdoc: '本人の Google ドライブの「libretto」フォルダに作る Google ドキュメント（共有はしない）',
+  gsheet: '本人の Google ドライブの「libretto」フォルダに作る Google スプレッドシート（表。共有はしない）',
+  gslide: '本人の Google ドライブの「libretto」フォルダに作る Google スライド（共有はしない）',
+  pptx: 'ダウンロードして使う PowerPoint のファイル（スライド）',
+  xlsx: 'ダウンロードして使う Excel のファイル（表）',
+  docx: 'ダウンロードして使う Word のファイル',
 }
-const destKinds = (gdoc: boolean): DestKind[] => (gdoc ? ['page', 'paste', 'gdoc'] : ['page', 'paste'])
-export const destMaterial = (gdoc: boolean) => ({
+// 今選べる種類（6.10 (3)）。google = Google に保存できる連携、files = LibreOffice と poppler がある（スライドの見た目の判定に要る）
+export type Ready = { google: boolean; files: boolean }
+const NEEDS: Partial<Record<DestKind, (r: Ready) => boolean>> = {
+  gdoc: (r) => r.google,
+  gsheet: (r) => r.google,
+  gslide: (r) => r.google && r.files,
+  pptx: (r) => r.files,
+  xlsx: (r) => r.files,
+  docx: (r) => r.files,
+}
+export const destChoices = (r: Ready): DestKind[] => DestChoice.options.filter((k) => NEEDS[k]?.(r) ?? true)
+const TABLES: readonly string[] = ['gsheet', 'xlsx']
+export const destMaterial = (choices: readonly DestKind[]) => ({
   name: '保存先の選択肢',
-  text: destKinds(gdoc)
-    .map((k) => `"${k}": ${DEST_NOTE[k]}`)
-    .join('\n'),
+  text: [
+    ...choices.map((k) => `"${k}": ${DEST_NOTE[k]}`),
+    ...(choices.some((k) => TABLES.includes(k)) ? ['表（gsheet・xlsx）は、ほかの保存先と一緒には選べません'] : []),
+  ].join('\n'),
 })
-export const destViolations = (ds: readonly string[] | undefined, gdoc: boolean) =>
-  (ds ?? [])
-    .filter((k) => !(destKinds(gdoc) as string[]).includes(k))
-    .map((k) => `destinations の "${k}" は今は選べません。材料「保存先の選択肢」から選んでください`)
-const isDest = (k: string): k is DestKind => k in TARGET
+export const destViolations = (ds: readonly string[] | undefined, choices: readonly DestKind[]) => [
+  ...(ds ?? [])
+    .filter((k) => !(choices as string[]).includes(k))
+    .map((k) => `destinations の "${k}" は今は選べません。材料「保存先の選択肢」から選んでください`),
+  ...(mixesTables((ds ?? []).flatMap((k) => (k in TARGET ? [TARGET[k as DestKind]] : [])))
+    ? ['destinations の表（gsheet・xlsx）は、ほかの保存先と一緒には選べません']
+    : []),
+]
 
 type Deps = {
   home: string
@@ -208,7 +228,7 @@ type Deps = {
   storage: (written: boolean) => void
   log: (line: string) => void
   newCaseId?: () => string
-  gdocReady?: () => boolean // Google ドキュメントに保存できる連携があるか（6.5 (2)(3)）
+  destChoices?: () => DestChoice[] // 今選べる保存先（Google の連携と道具の有無。6.5 (2)(3)・6.10 (3)）
 }
 
 export type PostResult =
@@ -218,7 +238,7 @@ export type PostResult =
 export function createConversation(d: Deps) {
   const { ledger } = d
   const newCaseId = d.newCaseId ?? randomUUID
-  const gdoc = d.gdocReady ?? (() => false)
+  const dests = d.destChoices ?? (() => destChoices({ google: false, files: false }))
   const busy = new Set<string>()
   let running: Promise<void> = Promise.resolve()
 
@@ -345,7 +365,7 @@ export function createConversation(d: Deps) {
       from: card.from,
       summary: card.summary,
       docType: card.proposal.docType,
-      destinations: card.proposal.destination.flatMap((t) => (isDest(t.kind) ? [t.kind] : [])),
+      destinations: card.proposal.destination.map(choiceOf),
       attachments,
       attachmentsNeeded: card.attachmentsNeeded ?? [],
     }
@@ -358,7 +378,7 @@ export function createConversation(d: Deps) {
       instruction: CANDIDATE_INSTRUCTION,
       materials: [
         { name: '候補', text: JSON.stringify(now) },
-        destMaterial(gdoc()),
+        destMaterial(dests()),
         ...(mail ? [{ name: MAIL_FRAME[source], text: mail }] : []),
         ...talkOf(history, says),
       ],
@@ -368,7 +388,7 @@ export function createConversation(d: Deps) {
         accept: (v) => [
           ...replyViolations(v as CandidateReply),
           ...proposalViolations(v as CandidateReply, attachments),
-          ...destViolations((v as CandidateReply).proposal?.destinations, gdoc()),
+          ...destViolations((v as CandidateReply).proposal?.destinations, dests()),
         ],
       },
     }
@@ -394,14 +414,14 @@ export function createConversation(d: Deps) {
         ...talk,
         { name: '進行中の依頼', text: JSON.stringify(openCases) },
         { name: '進め方', text: d.mode() },
-        destMaterial(gdoc()),
+        destMaterial(dests()),
       ],
       output: {
         kind: 'json',
         schema: ConversationReply,
         accept: (v) => [
           ...replyViolations(v as ConversationReply),
-          ...destViolations((v as ConversationReply).intake?.destinations, gdoc()),
+          ...destViolations((v as ConversationReply).intake?.destinations, dests()),
         ],
       },
     }
@@ -535,6 +555,11 @@ const DEST_LABEL: Record<DestKind, string> = {
   page: 'Web ページ（自分だけ閲覧・履歴付き）',
   paste: '貼り付け用の下書き',
   gdoc: 'Google ドキュメント',
+  gsheet: 'Google スプレッドシート',
+  gslide: 'Google スライド',
+  pptx: 'PowerPoint のファイル',
+  xlsx: 'Excel のファイル',
+  docx: 'Word のファイル',
 }
 const renderIntake = (h: IntakeDraft) =>
   [

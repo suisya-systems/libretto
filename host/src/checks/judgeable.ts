@@ -6,6 +6,8 @@ import type { FactsFile, VoiceNumbers } from '@libretto/shared/ledger'
 import type { z } from 'zod'
 import type { DocText } from '../deliver/docx.ts'
 import { safeHref } from '../deliver/page.ts'
+import type { Renderer } from '../deliver/render.ts'
+import { compareTables, mdTables, type Sheets, xlsxSheets } from '../deliver/xlsx.ts'
 import { markerCheck } from '../facts/markers.ts'
 import { endingShares, FIRST_PERSON, firstPersonOf, median, otherFirstPerson } from '../facts/voice.ts'
 import {
@@ -33,6 +35,10 @@ export type FnInput = {
   page?: string
   paste?: string
   gdoc?: DocText // 仕立てた docx か、Google の書き出しの段落とリンク（6.5 (5)）
+  sheets?: Sheets // 仕立てた xlsx か、Google の書き出しの xlsx の表（6.10 (3)(4)）
+  slides?: DocText // 仕立てた pptx か、Google の書き出しの pptx の段落とリンク（6.10 (3)(4)）
+  files?: { xlsx?: Buffer; pptx?: Buffer; docx?: Buffer } // 仕立てた成果物（描き出しと計算し直しの材料）
+  render?: Renderer // 描き出しと計算し直し（6.10 (3)）。道具が無い・失敗は ToolFailure
   facts?: FactsFile
   brief?: string
   voice?: VoiceNumbers
@@ -500,6 +506,68 @@ export const FNS: Partial<Record<CodeFn, Fn<unknown>>> = {
     host: true,
     run: (_, { md, gdoc }) => roundTrip(md, need(gdoc, 'gdoc')),
   }),
+  // 表の照合（6.10 (3)）。本文の Markdown の表と成果物の表を、表ごと・セルごとに比べる。本文に表が無ければ落とす
+  sheetsRoundTrip: fn({
+    args: CodeArgs.sheetsRoundTrip,
+    example: {},
+    unit: '表の成果物',
+    yes: '本文の表がすべて、同じ順で、セルの値と式までそのまま表に入っている',
+    pass: ['all'],
+    phase: '形式',
+    host: true,
+    run: (_, { md, sheets }) => sheetsMatch(md, need(sheets, 'sheets')),
+  }),
+  slidesRoundTrip: fn({
+    args: CodeArgs.slidesRoundTrip,
+    example: {},
+    unit: 'スライドの成果物',
+    yes: '本文の見出し・段落・箇条書きの項目が、順番と数までそのままスライドに出ていて、出典のリンクの行き先も本文と同じ',
+    pass: ['all'],
+    phase: '形式',
+    host: true,
+    run: (_, { md, slides }) => roundTrip(md, need(slides, 'slides')),
+  }),
+  // 式が無ければ道具は要らない。式があれば LibreOffice で計算し直してエラーのセルを数える（6.10 (3)）
+  xlsxNoFormulaErrors: fn({
+    args: CodeArgs.xlsxNoFormulaErrors,
+    example: {},
+    unit: '表の成果物',
+    yes: '表の式がすべて、エラーでない計算結果を返す',
+    pass: ['all'],
+    phase: '形式',
+    host: true,
+    run: async (_, { files, render }) => {
+      const xlsx = need(files?.xlsx, 'xlsx')
+      const formulas = xlsxSheets(xlsx).formulas
+      if (!formulas) return { units: [true], measured: { formulas, errors: 0 } }
+      const errors = xlsxSheets(await need(render, 'render').recalc(xlsx)).errors
+      return { units: [errors === 0], measured: { formulas, errors, gap: errors } }
+    },
+  }),
+  pptxNoBlankPages: fn({
+    args: CodeArgs.pptxNoBlankPages,
+    example: {},
+    unit: 'スライドを画像にしたページ',
+    yes: 'ページに字や図がある',
+    pass: ['all'],
+    phase: '形式',
+    host: true,
+    run: async (_, { files, render }) => {
+      const pages = await need(render, 'render').pages(need(files?.pptx, 'pptx'), 'pptx')
+      return { units: pages.map((p) => !p.blank), measured: { pages: pages.length } }
+    },
+  }),
+}
+
+// 表の照合（T20 と送付で同じ数え方。6.10 (3)(4)）。errors は Google の書き出しが計算したエラーのセル
+export function sheetsMatch(md: string, s: Sheets) {
+  const want = mdTables(md)
+  const r = compareTables(want, s.tables)
+  const none = want.length ? 0 : 1
+  return {
+    units: [r.cells === 0 && r.tables === 0 && !none && s.errors === 0],
+    measured: { cells: r.cells, tables: r.tables + none, errors: s.errors },
+  }
 }
 
 // 本文と成果物の段落を並べ、欠けた・増えた段落と、リンクの行き先の食い違い（同じ順で同じ行き先か）を数える

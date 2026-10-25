@@ -31,6 +31,7 @@ beforeEach(() => {
     isolation: { level: 'strong', running: false },
     google: { configured: false, state: 'none', label: 'libretto', docs: false, meet: false },
     slack: { configured: false, state: 'none', emoji: 'memo', missingScopes: [] },
+    tools: { soffice: true, pdftoppm: true },
     inference: { classifiedToday: 0, dailyLimit: 300, recall: { hit: 0, total: 0 }, suppressions: [] },
   }
   infer = { gmailDays: 7, slackChannels: [], dailyLimit: 300, showLow: true, useJev: true }
