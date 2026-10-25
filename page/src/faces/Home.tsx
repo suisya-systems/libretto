@@ -104,8 +104,8 @@ export function Home({ stopped = false }: { stopped?: boolean }) {
           {v.notices.length ? (
             <ul className="card notices">
               {v.notices.map((n) => (
-                <li key={`${n.at}-${n.text}`}>
-                  <time className="muted small">{n.at.slice(11, 16)}</time> {n.text}
+                <li key={n.id}>
+                  <time className="muted small">{n.at.slice(11, 16)}</time> <Link href={n.path}>{n.text}</Link>
                 </li>
               ))}
             </ul>

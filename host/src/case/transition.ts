@@ -11,6 +11,7 @@ import {
   type DeliveryTarget,
   type Mode,
   mixesTables,
+  type NoticeKind,
   type Origin,
 } from '@libretto/shared/api'
 import type { Escalate, Mark } from '@libretto/shared/checks'
@@ -27,6 +28,7 @@ import {
   type Ledger,
   type NewCandidate,
   type NewCase,
+  type NewNotice,
   type TransitionInput,
 } from '../ledger/ledger.ts'
 import type { CostCapNotice } from '../model/invoke.ts'
@@ -65,7 +67,34 @@ export const SAY = {
   isolationLeaked: 'ライターにチェック項目が見えたおそれがあるので中止しました',
 } as const
 
+// お知らせの 1 行（6.8 (3)。ui-wording.md の「お知らせの 1 行」）。{題} は依頼の題、{n} は数、{理由} は会話欄の SAY
+export const NOTICE = {
+  entrance: '『{題}』の依頼内容がまとまりました。確認して承認してください',
+  entranceFailed: '『{題}』の依頼書とチェック項目を整えられませんでした。直して出し直すか取り消せます',
+  materials: '『{題}』で資料を待っています。貼り付けると続きを進めます',
+  outline: '『{題}』の構成案ができました。確認してください',
+  final: '『{題}』の最終版ができました。確認して承認してください',
+  finalMarks: '『{題}』の最終版ができました。要確認が {n} 件あります。確認して承認してください',
+  confirmSave: '『{題}』を保存する前の確認です。保存先と公開範囲を確かめてください',
+  stopped: '『{題}』は、{理由}。新しい依頼として出し直せます',
+  stoppedPlain: '『{題}』を中止しました。新しい依頼として出し直せます',
+  done: '『{題}』を保存しました。開いて確かめられます',
+  autoStarted: '『{題}』を自動で開始しました。止めたいときは取り消せます',
+  candidates: '依頼の候補が {n} 件届きました。進めるか見送るかを選べます',
+  started: '『{題}』の下書きを書き始めました',
+} as const
+const fill = (t: string, v: Record<string, string | number>) =>
+  t.replace(/\{(題|n|理由)\}/g, (_, k: string) => String(v[k]))
+
 const LIMIT_SAY = { 往復上限: SAY.roundLimit, 直らない: SAY.stuck, 判定できない: SAY.unjudgeable } as const
+// 停止の理由 → 会話欄に書いた 1 行（decide の say と同じ対応）
+const stopSay = (ev: CaseInput['type'], reason: string | undefined): string | undefined => {
+  if (reason && reason in LIMIT_SAY) return LIMIT_SAY[reason as keyof typeof LIMIT_SAY]
+  if (ev === 'delivery.failed') return SAY.saveFailed
+  if (ev === 'cost.cap') return SAY.costCap
+  if (ev === 'fail.system') return reason === '隔離の失敗' ? SAY.isolationLeaked : SAY.toolFailed
+  return undefined
+}
 
 // 非終端で、仕事が動きうる状態（T27・T29・T30）。T27b・T28 はこれに送付中を足す
 const ACTIVE: readonly CaseState[] = ['入口待ち', '材料待ち', '下書き中', '検品中', '承認待ち', '送付確認待ち']
@@ -215,11 +244,14 @@ function caseEvent(ledger: Ledger, ev: CaseInput, ctx: Ctx): Result {
     return { ok: false, reason: plan, case: c }
   }
   const { clearOutput, after, newCaseId, ...t } = plan
-  ledger.appendTransition(
+  const next = ledger.appendTransition(
     { ...t, eventId: ev.eventId, caseId: c.caseId, from: c.state, event: ev.type, by: ev.by },
     { clearOutput: clearOutput ?? false },
   )
   after?.()
+  // お知らせは遷移と同じトランザクションで（6.8 (5)）
+  const n = noticeFor(ev, c, next, ctx)
+  if (n) ledger.appendNotice({ ...n, eventId: `${ev.eventId}#notice`, caseId: c.caseId, revision: next.revision })
   return { ok: true, replayed: false, case: ledger.getCase(c.caseId) as CaseRecord, ...(newCaseId && { newCaseId }) }
 }
 
@@ -617,6 +649,72 @@ function decide(ledger: Ledger, c: CaseRecord, ev: CaseInput, ctx: Ctx): Plan | 
   }
 }
 
+// --- お知らせ（6.8 (1)）。1 遷移に 1 つ、上の行が先に当たる。本人の操作はお知らせ欄にだけ残す
+
+const YOUR_TURN: readonly CaseInput['type'][] = [
+  'entrance.drafted', // T6（auto=false）
+  'entrance.failed', // T6b
+  'entrance.approve', // T8（資料が要る）
+  'outline.done', // T13
+  'review.pass', // T15
+  'review.fail', // T17（確認しながら）
+  'format.checked', // T20
+  'format.failed', // T21b（確認しながら）
+  'delivery.decline', // T23
+  'delivery.change', // T23b
+]
+
+export function noticeFor(
+  ev: CaseInput,
+  before: CaseRecord,
+  after: CaseRecord,
+  ctx: Ctx = {},
+): Omit<NewNotice, 'eventId' | 'caseId' | 'revision'> | undefined {
+  const 題 = after.title
+  const at = (kind: NoticeKind, text: string, path = `/cases/${after.caseId}`) => ({
+    kind,
+    text,
+    path,
+    outside: ev.by !== '本人',
+  })
+  if (after.state === '停止' && before.state !== '停止' && ev.type !== 'stop.case') {
+    const 理由 = stopSay(ev.type, after.stopReason)
+    return at('stopped', 理由 ? fill(NOTICE.stopped, { 題, 理由 }) : fill(NOTICE.stoppedPlain, { 題 }))
+  }
+  if (after.state === '完了' && before.state !== '完了') return at('done', fill(NOTICE.done, { 題 }))
+  if (after.turn === '本人' && YOUR_TURN.includes(ev.type)) {
+    const n = ctx.marks?.length ?? 0
+    switch (after.state) {
+      case '入口待ち':
+        return at('your_turn', fill(ev.type === 'entrance.failed' ? NOTICE.entranceFailed : NOTICE.entrance, { 題 }))
+      case '材料待ち':
+        return at('your_turn', fill(NOTICE.materials, { 題 }))
+      case '承認待ち':
+        if (after.approvalKind === '構成案') return at('your_turn', fill(NOTICE.outline, { 題 }))
+        return at('your_turn', n ? fill(NOTICE.finalMarks, { 題, n }) : fill(NOTICE.final, { 題 }))
+      case '送付確認待ち':
+        return at('your_turn', fill(NOTICE.confirmSave, { 題 }), `/cases/${after.caseId}/deliver`)
+    }
+  }
+  if (ev.type === 'materials.ready') return at('started', fill(NOTICE.started, { 題 }))
+  return undefined
+}
+
+// 拾い上げの回の終わりの 1 通（6.8 (4)）。前の知らせより後に出た候補を数え、0 件なら書かない
+export function noticeCandidates(ledger: Ledger) {
+  ledger.transaction(() => {
+    const { upTo, count } = ledger.newCandidates()
+    if (count)
+      ledger.appendNotice({
+        eventId: `candidates:${upTo}`,
+        kind: 'candidates',
+        text: fill(NOTICE.candidates, { n: count }),
+        path: '/',
+        outside: true,
+      })
+  })
+}
+
 const clean = <T extends Record<string, unknown>>(o: T) =>
   Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as {
     [K in keyof T]?: Exclude<T[K], undefined>
@@ -728,7 +826,18 @@ function candidate(ledger: Ledger, ev: CandidateInput): Result {
     { type: status, candidateId: cand.candidateId, caseId: ev.caseId },
     { status, caseId: ev.caseId },
   )
-  if (auto) ledger.appendConversation(ev.caseId, SAY.autoStarted)
+  if (auto) {
+    ledger.appendConversation(ev.caseId, SAY.autoStarted)
+    ledger.appendNotice({
+      eventId: `${cand.candidateId}:${ev.type}#notice`,
+      caseId: ev.caseId,
+      kind: 'auto_started',
+      text: fill(NOTICE.autoStarted, { 題: created.title }),
+      path: `/cases/${ev.caseId}`,
+      outside: true,
+      revision: created.revision,
+    })
+  }
   return { ok: true, replayed: false, case: created }
 }
 

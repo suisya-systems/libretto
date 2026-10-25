@@ -2,7 +2,7 @@
 // Slack で本人が :memo: を付けた投稿と、会議メモの本人担当の行動項目を候補にする（T1）。
 // 時刻のカーソルは持たない。同時に 1 本。runs で起こすので、STOP の間は起きず、すべて停止で切れる
 import type { DestChoice, InferenceSettings } from '@libretto/shared/api'
-import { transition } from '../case/transition.ts'
+import { noticeCandidates, transition } from '../case/transition.ts'
 import type { Ledger } from '../ledger/ledger.ts'
 import { jst } from '../ledger/ledger.ts'
 import type { Job, Outcome } from '../model/invoke.ts'
@@ -273,6 +273,13 @@ export function createPoller(d: Deps) {
         if (!ac.signal.aborted) d.log(`intake: ${e instanceof Error ? e.stack : String(e)}`)
       })
       .finally(() => {
+        // 回の終わりに候補の知らせを 1 通。止めた回は書かず、次の回が数える（6.8 (4)）
+        if (!ac.signal.aborted)
+          try {
+            noticeCandidates(d.ledger)
+          } catch (e) {
+            d.log(`intake notice: ${e instanceof Error ? e.message : String(e)}`)
+          }
         d.runs.close(RUN_KEY, ac)
         running = undefined
         d.connectionsChanged()

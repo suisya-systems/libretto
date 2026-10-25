@@ -814,15 +814,19 @@ export function judgeBody(d: Deps, c: CaseRecord, signal: AbortSignal): Promise<
       },
     },
     (r) =>
-      transition(d.ledger, {
-        caseId: c.caseId,
-        expectedRevision: c.revision,
-        by: 'libretto',
-        type: r.pass ? 'review.pass' : 'review.fail',
-        n: c.version,
-        ...(r.escalate && { escalate: r.escalate.why }),
-        eventId: `${c.caseId}:review.${r.pass ? 'pass' : 'fail'}:v${c.version}:a`,
-      }),
+      transition(
+        d.ledger,
+        {
+          caseId: c.caseId,
+          expectedRevision: c.revision,
+          by: 'libretto',
+          type: r.pass ? 'review.pass' : 'review.fail',
+          n: c.version,
+          ...(r.escalate && { escalate: r.escalate.why }),
+          eventId: `${c.caseId}:review.${r.pass ? 'pass' : 'fail'}:v${c.version}:a`,
+        },
+        { marks: r.marks }, // 最終版のお知らせの要確認の数（6.8 (3)）
+      ),
   )
 }
 
@@ -919,16 +923,20 @@ export function judgeFormat(d: Deps, c: CaseRecord, signal: AbortSignal): Promis
       },
     },
     (r) =>
-      transition(d.ledger, {
-        caseId: c.caseId,
-        expectedRevision: c.revision,
-        by: 'libretto',
-        n: c.version,
-        ...(r.pass
-          ? { type: 'format.checked' as const, outputFingerprint: fingerprint }
-          : { type: 'format.failed' as const, ...(r.escalate && { escalate: r.escalate.why }) }),
-        eventId: `${c.caseId}:format.${r.pass ? 'checked' : 'failed'}:v${c.version}:f${k}`,
-      }),
+      transition(
+        d.ledger,
+        {
+          caseId: c.caseId,
+          expectedRevision: c.revision,
+          by: 'libretto',
+          n: c.version,
+          ...(r.pass
+            ? { type: 'format.checked' as const, outputFingerprint: fingerprint }
+            : { type: 'format.failed' as const, ...(r.escalate && { escalate: r.escalate.why }) }),
+          eventId: `${c.caseId}:format.${r.pass ? 'checked' : 'failed'}:v${c.version}:f${k}`,
+        },
+        { marks: currentMarks(d.home, c) },
+      ),
   )
 }
 

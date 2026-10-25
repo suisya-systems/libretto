@@ -609,6 +609,29 @@ export const W = {
   'settings.infer.restore': '戻す',
   'settings.infer.restoreLabel': '{label} を戻す',
   'settings.infer.lastAt': '{at} に自動検出',
+  'settings.noticesHeading': 'お知らせ',
+  'settings.notices.use':
+    '依頼が確認待ちになったときや、依頼の候補が届いたときに、お知らせ欄に残し、この端末のブラウザにも通知します。',
+  'settings.notices.openOnly': 'このブラウザでは、画面を開いているあいだだけ通知します',
+  'settings.notices.device': 'この端末',
+  'settings.notices.on': 'この端末に通知します',
+  'settings.notices.off': '許可されていません',
+  'settings.notices.unavailable': 'この開き方では使えません',
+  'settings.notices.enable': 'この端末に通知する',
+  'settings.notices.denied':
+    'このブラウザでは libretto の通知が許可されていません。ブラウザのサイトの設定で通知を「許可」にしてから、もう一度押してください',
+  'settings.notices.insecure':
+    'この開き方では通知を使えません。https:// で始まるアドレス（Tailscale の HTTPS）で開き直してください',
+  'settings.notices.kinds': '通知する出来事',
+  'settings.notices.kindsNote': '切っても、お知らせ欄には残ります。',
+  'settings.notices.kind.your_turn': '確認待ちになった',
+  'settings.notices.kind.stopped': '中止した',
+  'settings.notices.kind.done': '完了した',
+  'settings.notices.kind.auto_started': '自動で開始した',
+  'settings.notices.kind.candidates': '依頼の候補が届いた',
+  'settings.notices.kind.started': '下書きに取りかかった',
+  'settings.notices.saved': '保存しました。',
+  'settings.notices.failed': '保存できませんでした。もう一度お試しください。',
 } as const
 
 export type WKey = keyof typeof W

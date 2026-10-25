@@ -148,6 +148,8 @@ let ticks = 0
 const timer = setInterval(() => {
   ticks += 1
   server.stop.tick(ticks % 15 === 0).catch((e) => console.error(e))
+  // お知らせの送り直しと、起動の前に落ちたホストの送り残し（6.8 (5)）。1 分ごと
+  if (ticks % 30 === 1) void server.notices.flush()
 }, 2_000)
 
 // 拾い上げは 15 分ごと（4.5）。止めている間は poller が起きない。同じ周期で送付の「不明」を探し直す（6.5 (7)）
